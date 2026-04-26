@@ -28,6 +28,7 @@ import {
   monthKey,
   yearKey,
 } from '../lib/binderTree';
+import { useFavicon } from '../hooks/useFavicon';
 import './Sanctuary.css';
 
 type Mode = 'single' | 'dual';
@@ -43,6 +44,7 @@ const ENTRY_TYPES: Array<{ value: EntryType; label: string }> = [
 ];
 
 export default function Sanctuary() {
+  useFavicon('/icons/papers3.png', 'Sanctuary · Wardrobe');
   const [searchParams] = useSearchParams();
   const deepLinkDate = searchParams.get('date');
   const deepLinkId = searchParams.get('id');

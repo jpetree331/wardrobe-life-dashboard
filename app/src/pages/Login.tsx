@@ -1,8 +1,10 @@
 import { FormEvent, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { signInWithMagicLink, useAuth } from '../hooks/useAuth';
+import { useFavicon } from '../hooks/useFavicon';
 
 export default function Login() {
+  useFavicon('/icons/wardrobe1.png', 'Wardrobe');
   const { session, loading } = useAuth();
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');

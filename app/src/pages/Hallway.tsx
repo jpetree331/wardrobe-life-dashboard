@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useFavicon } from '../hooks/useFavicon';
 import './Hallway.css';
 
 /** Per-room metadata: which spheres exist, where they go, and what's beneath them. */
@@ -24,6 +25,7 @@ const PROX_RADIUS = 280;
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
 export default function Hallway() {
+  useFavicon('/icons/wardrobe1.png', 'Wardrobe');
   const navigate = useNavigate();
   const stageRef = useRef<HTMLDivElement>(null);
   const sphereRefs = useRef<Record<string, HTMLAnchorElement | null>>({});

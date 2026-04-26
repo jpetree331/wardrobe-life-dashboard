@@ -10,6 +10,7 @@ import {
   type TimelineRow,
 } from '../lib/entries';
 import { parseFile } from '../lib/timelineImport';
+import { useFavicon } from '../hooks/useFavicon';
 import './Timeline.css';
 
 type YearTab = number | 'all';
@@ -20,6 +21,7 @@ type ImportPlan = {
 };
 
 export default function Timeline() {
+  useFavicon('/icons/notebook1.png', 'Timeline · Wardrobe');
   const navigate = useNavigate();
   const [activeYear, setActiveYear] = useState<YearTab>('all');
   const [rows, setRows] = useState<TimelineRow[]>([]);
