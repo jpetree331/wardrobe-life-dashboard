@@ -71,16 +71,38 @@
   color: var(--bg);
 }
 
-/* Body grid */
+/* Body grid. Binder column width is user-resizable via the splitter — the
+   --sa-binder-width custom property is set inline by Sanctuary.tsx and
+   persisted to localStorage. The splitter occupies its own 4px column. */
 .sa-grid {
   display: grid;
-  grid-template-columns: 280px 1fr 280px;
+  grid-template-columns: var(--sa-binder-width, 280px) 4px 1fr 280px;
   min-height: 0;
 }
 .sa-grid.dual {
-  grid-template-columns: 280px 1fr 1fr;
+  grid-template-columns: var(--sa-binder-width, 280px) 4px 1fr 1fr;
 }
 .sa-grid.dual .sa-inspector { display: none; }
+
+/* The drag handle. A thin vertical strip; widens slightly on hover so it's
+   easier to grab. */
+.sa-binder-splitter {
+  background: var(--line);
+  cursor: col-resize;
+  transition: background 150ms ease;
+  position: relative;
+}
+.sa-binder-splitter:hover {
+  background: var(--accent);
+}
+.sa-binder-splitter::after {
+  /* invisible 8px hit area centred on the visible 4px line, so the user
+     doesn't need pixel-perfect aim */
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  left: -2px; right: -2px;
+}
 
 .sa-panel {
   background: var(--panel);
@@ -113,6 +135,61 @@
 
 /* Binder */
 .sa-binder { overflow-y: auto; flex: 1; padding: 8px 0 16px; }
+
+/* Year > month folder tree. Scrivener-ish chevron + label + count. */
+.sa-binder-tree { padding: 4px 0; }
+.sa-binder-year { padding: 0; }
+.sa-binder-month { padding: 0; }
+.sa-binder-folder {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  padding: 6px 14px 6px 14px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  transition: background 150ms ease, color 150ms ease;
+}
+.sa-binder-folder:hover {
+  background: color-mix(in oklab, var(--bg-3) 35%, transparent);
+  color: var(--ink);
+}
+.sa-binder-folder.month {
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  padding-left: 30px;
+  color: var(--ink-soft);
+}
+.sa-binder-folder .chev {
+  width: 10px;
+  font-size: 10px;
+  color: var(--ink-faint);
+  text-align: center;
+  flex-shrink: 0;
+}
+.sa-binder-folder .label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sa-binder-folder .count {
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 11px;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+}
+/* When inside a folder, entry items get a touch more left padding so the
+   hierarchy reads visually. */
+.sa-binder-month .sa-entries { padding-left: 14px; }
+.sa-binder-month .sa-entries li { padding-left: 32px; }
+
 .sa-entries {
   list-style: none;
   margin: 6px 0 0;
@@ -126,6 +203,10 @@
   cursor: pointer;
   border-left: 2px solid transparent;
   line-height: 1.35;
+  /* Long titles wrap to a second line rather than getting truncated.
+     Words break at hyphens; URLs break anywhere as a last resort. */
+  word-break: break-word;
+  overflow-wrap: anywhere;
   transition: background 180ms ease, color 180ms ease, border-color 180ms ease;
 }
 .sa-entries li .date {

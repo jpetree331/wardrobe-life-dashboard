@@ -22,6 +22,12 @@ import {
   parseSanctuaryFile,
   type ParsedSanctuaryEntry,
 } from '../lib/sanctuaryImport';
+import {
+  buildBinderTree,
+  expansionKeysForEntry,
+  monthKey,
+  yearKey,
+} from '../lib/binderTree';
 import './Sanctuary.css';
 
 type Mode = 'single' | 'dual';
@@ -60,8 +66,35 @@ export default function Sanctuary() {
   const [scLoading, setScLoading] = useState(false);
   const [scError, setScError] = useState<string | null>(null);
 
-  const [sel, setSel] = useState<{ top: number; left: number } | null>(null);
+  const [sel, setSel] = useState<{
+    top: number;
+    left: number;
+    inHighlight: boolean;
+  } | null>(null);
   const scriptureBodyRef = useRef<HTMLDivElement | null>(null);
+
+  // Resizable binder column. Persisted to localStorage so the width
+  // survives reloads. Clamped to [180, 600] in the drag handler.
+  const [binderWidth, setBinderWidth] = useState<number>(() => {
+    const saved =
+      typeof window !== 'undefined' ? window.localStorage.getItem('sa-binder-width') : null;
+    const n = saved ? Number(saved) : NaN;
+    return Number.isFinite(n) && n >= 180 && n <= 600 ? n : 280;
+  });
+
+  // Year / month folder expansion in the binder. Set of keys ("2024" or
+  // "2024-04"). Persisted to localStorage; auto-includes the active entry's
+  // year and month on first load so the user lands on something visible.
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const saved = window.localStorage.getItem('sa-binder-expanded');
+      if (saved) return new Set(JSON.parse(saved));
+    } catch {
+      /* ignore corrupt JSON */
+    }
+    return new Set();
+  });
 
   const pageRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
@@ -115,6 +148,65 @@ export default function Sanctuary() {
         : 'Sanctuary · no entry selected',
     );
   }, [entries, activeId]);
+
+  // Persist binder width
+  useEffect(() => {
+    window.localStorage.setItem('sa-binder-width', String(binderWidth));
+  }, [binderWidth]);
+
+  // Persist expanded folders
+  useEffect(() => {
+    window.localStorage.setItem('sa-binder-expanded', JSON.stringify([...expanded]));
+  }, [expanded]);
+
+  // Auto-expand the active entry's year + month on first activation, so the
+  // user lands on a visible row instead of staring at a fully-collapsed tree.
+  // Does not collapse anything the user has already opened.
+  const lastAutoExpandedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    if (lastAutoExpandedFor.current === active.id) return;
+    lastAutoExpandedFor.current = active.id;
+    const keys = expansionKeysForEntry(active);
+    if (keys.length === 0) return;
+    setExpanded((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const k of keys) if (!next.has(k)) { next.add(k); changed = true; }
+      return changed ? next : prev;
+    });
+  }, [active]);
+
+  function toggleFolder(key: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  // Splitter drag handler. Listens on the document so the drag continues
+  // even if the cursor leaves the splitter element.
+  function startBinderResize(e: React.MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = binderWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.max(180, Math.min(600, startW + (ev.clientX - startX)));
+      setBinderWidth(next);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
 
   // Auto-fill the scripture pane's reference ONLY when the user switches to a
   // different entry — not on every save round-trip. Otherwise typing into the
@@ -495,7 +587,11 @@ export default function Sanctuary() {
         return;
       }
       const r = range.getBoundingClientRect();
-      setSel({ top: r.top - 38, left: r.left + r.width / 2 - 70 });
+      setSel({
+        top: r.top - 38,
+        left: r.left + r.width / 2 - 70,
+        inHighlight: ancestorMatches(range.commonAncestorContainer, 'sa-sc-highlight'),
+      });
     }
     document.addEventListener('selectionchange', update);
     document.addEventListener('mouseup', update);
@@ -505,12 +601,12 @@ export default function Sanctuary() {
     };
   }, []);
 
-  function handleScriptureSelAction(action: 'highlight' | 'copy') {
+  function handleScriptureSelAction(action: 'highlight' | 'copy' | 'unhighlight') {
     const s = window.getSelection();
     if (!s || s.isCollapsed) return;
     if (action === 'copy') {
       navigator.clipboard?.writeText(s.toString());
-    } else {
+    } else if (action === 'highlight') {
       const range = s.getRangeAt(0);
       const span = document.createElement('span');
       span.className = 'sa-sc-highlight';
@@ -519,6 +615,15 @@ export default function Sanctuary() {
         range.insertNode(span);
       } catch {
         /* ignore */
+      }
+    } else if (action === 'unhighlight') {
+      // Walk up from the selection to find the .sa-sc-highlight ancestor;
+      // unwrap it (replace the span with its children).
+      const range = s.getRangeAt(0);
+      const host = findAncestor(range.commonAncestorContainer, 'sa-sc-highlight');
+      if (host && host.parentNode) {
+        while (host.firstChild) host.parentNode.insertBefore(host.firstChild, host);
+        host.parentNode.removeChild(host);
       }
     }
     s.removeAllRanges();
@@ -537,6 +642,14 @@ export default function Sanctuary() {
         e.entry_date.includes(q),
     );
   }, [entries, search]);
+
+  // Tree view of the binder. Only built when no search is active — when the
+  // user is searching, we collapse to a flat hit list (matches across years
+  // shouldn't be hidden behind closed folders).
+  const tree = useMemo(
+    () => (search.trim() ? null : buildBinderTree(visibleEntries)),
+    [visibleEntries, search],
+  );
 
   const wordCount = useMemo(() => {
     if (!active?.body) return 0;
@@ -602,9 +715,12 @@ export default function Sanctuary() {
         </div>
       </header>
 
-      <div className={`sa-grid${mode === 'dual' ? ' dual' : ''}`}>
+      <div
+        className={`sa-grid${mode === 'dual' ? ' dual' : ''}`}
+        style={{ ['--sa-binder-width' as any]: `${binderWidth}px` }}
+      >
         {/* Binder */}
-        <aside className="sa-panel" aria-label="Binder">
+        <aside className="sa-panel sa-binder-panel" aria-label="Binder">
           <div className="sa-panel-head">
             <h2>Binder</h2>
             <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
@@ -638,7 +754,63 @@ export default function Sanctuary() {
                     : 'No matches for that search.'}
                 </div>
               </div>
+            ) : tree ? (
+              // Tree view (no search): year folders → month folders → entries.
+              <div className="sa-binder-tree">
+                {tree.map((yg) => {
+                  const yKey = yearKey(yg.year);
+                  const yOpen = expanded.has(yKey);
+                  return (
+                    <div key={yg.year} className="sa-binder-year">
+                      <button
+                        className="sa-binder-folder"
+                        aria-expanded={yOpen}
+                        onClick={() => toggleFolder(yKey)}
+                      >
+                        <span className="chev">{yOpen ? '▾' : '▸'}</span>
+                        <span className="label">{yg.year}</span>
+                        <span className="count">{yg.count}</span>
+                      </button>
+                      {yOpen &&
+                        yg.months.map((mg) => {
+                          const mKey = monthKey(yg.year, mg.month);
+                          const mOpen = expanded.has(mKey);
+                          return (
+                            <div key={mg.month} className="sa-binder-month">
+                              <button
+                                className="sa-binder-folder month"
+                                aria-expanded={mOpen}
+                                onClick={() => toggleFolder(mKey)}
+                              >
+                                <span className="chev">{mOpen ? '▾' : '▸'}</span>
+                                <span className="label">{mg.monthLabel}</span>
+                                <span className="count">{mg.count}</span>
+                              </button>
+                              {mOpen && (
+                                <ul className="sa-entries">
+                                  {mg.entries.map((e) => (
+                                    <li
+                                      key={e.id}
+                                      className={e.id === activeId ? 'active' : ''}
+                                      onClick={() => setActiveId(e.id)}
+                                    >
+                                      <span className="date">{e.entry_date}.</span>
+                                      {e.title || (
+                                        <em style={{ color: 'var(--ink-faint)' }}>untitled</em>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
+              // Search mode: flatten so cross-folder hits aren't hidden.
               <ul className="sa-entries">
                 {visibleEntries.map((e) => (
                   <li
@@ -662,6 +834,16 @@ export default function Sanctuary() {
             />
           </div>
         </aside>
+        <div
+          className="sa-binder-splitter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize binder"
+          onMouseDown={startBinderResize}
+          onDoubleClick={() => setBinderWidth(280)}
+          title="Drag to resize · double-click to reset"
+        />
+
 
         {/* Editor */}
         <section className="sa-editor-wrap">
@@ -865,7 +1047,13 @@ export default function Sanctuary() {
                 {scLoading && <div className="sa-sc-loading">Fetching…</div>}
                 {scError && <div className="sa-sc-error">{scError}</div>}
                 {scResult && (
-                  <>
+                  // The `key` here forces a full unmount-and-remount of the
+                  // verses block whenever the user moves to a different
+                  // reference or translation. Without it, in-DOM highlights
+                  // applied via the selection toolbar would carry over to
+                  // the new chapter and visually attach to text the user
+                  // never selected.
+                  <div key={`${scResult.reference}::${scResult.translation}`}>
                     <h2>{scResult.reference}</h2>
                     <p>
                       {scResult.verses.map((v, i) => (
@@ -876,7 +1064,7 @@ export default function Sanctuary() {
                       ))}
                     </p>
                     <div className="sa-sc-source">Source: {scResult.source}</div>
-                  </>
+                  </div>
                 )}
                 {!scResult && !scLoading && !scError && (
                   <div style={{ fontStyle: 'italic', color: 'var(--ink-faint)' }}>
@@ -932,10 +1120,25 @@ export default function Sanctuary() {
 
       {sel && (
         <div className="sa-sel-toolbar" style={{ top: sel.top, left: sel.left }}>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => handleScriptureSelAction('highlight')}>
-            Highlight
-          </button>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => handleScriptureSelAction('copy')}>
+          {sel.inHighlight ? (
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleScriptureSelAction('unhighlight')}
+            >
+              Remove highlight
+            </button>
+          ) : (
+            <button
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleScriptureSelAction('highlight')}
+            >
+              Highlight
+            </button>
+          )}
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => handleScriptureSelAction('copy')}
+          >
             Copy
           </button>
         </div>
@@ -1175,6 +1378,23 @@ function ImportPreviewDialog({
       </div>
     </div>
   );
+}
+
+/** Walk parent chain from a node looking for an Element with the given class. */
+function findAncestor(node: Node | null, className: string): HTMLElement | null {
+  let n: Node | null = node;
+  while (n) {
+    if (n.nodeType === Node.ELEMENT_NODE) {
+      const el = n as HTMLElement;
+      if (el.classList.contains(className)) return el;
+    }
+    n = n.parentNode;
+  }
+  return null;
+}
+
+function ancestorMatches(node: Node | null, className: string): boolean {
+  return findAncestor(node, className) !== null;
 }
 
 function entryTypeLabel(t: EntryType): string {
