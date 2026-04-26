@@ -30,3 +30,16 @@ Thumbs.db
 
 # Pre-extracted handoff archives — the unpacked folders are committed instead
 *.zip
+
+# ── Personal data — never commit ───────────────────────────────────────
+# The dry-run import scripts read from these locations; the data itself
+# lives only on the local machine. If you want to commit a small
+# *anonymised* sample for tests, place it under docs/sample/.
+docs/Reckoning of Years.xlsx
+docs/Prayer Journal*.md
+docs/1 Export*
+docs/2022/
+docs/2023/
+docs/2024/
+docs/2025/
+docs/2026/

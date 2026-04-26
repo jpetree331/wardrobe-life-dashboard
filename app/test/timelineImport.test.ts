@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   coerceDate,
+  normalizeArrayRow,
   normalizeDate,
   normalizeRow,
+  parseLooseDate,
   parsePlainText,
   pickField,
 } from '../src/lib/timelineImport';
@@ -164,5 +166,132 @@ describe('parsePlainText', () => {
 
   it('returns empty array for empty input', () => {
     expect(parsePlainText('')).toEqual([]);
+  });
+});
+
+describe('parseLooseDate (Reckoning of Years variants)', () => {
+  it('parses canonical YYYY-MM-DD and YYYY.MM.DD identically', () => {
+    expect(parseLooseDate('2024-04-19')?.date).toBe('2024-04-19');
+    expect(parseLooseDate('2026.04.02')?.date).toBe('2026-04-02');
+  });
+
+  it('parses MM/DD/YYYY US format', () => {
+    expect(parseLooseDate('4/19/2024')?.date).toBe('2024-04-19');
+    expect(parseLooseDate('12/31/2024')?.date).toBe('2024-12-31');
+  });
+
+  it('parses D-Mon with year from sheet name', () => {
+    expect(parseLooseDate('1-Apr', '2013')?.date).toBe('2013-04-01');
+    expect(parseLooseDate('12-Jun', '2015')?.date).toBe('2015-06-12');
+    expect(parseLooseDate('17-Jan', '2017')?.date).toBe('2017-01-17');
+  });
+
+  it('parses Mon-D with year from sheet name (the 2024 sheet form)', () => {
+    expect(parseLooseDate('Mar-14', '2024')?.date).toBe('2024-03-14');
+    expect(parseLooseDate('Apr-9', '2024')?.date).toBe('2024-04-09');
+  });
+
+  it('parses D-D-Mon ranges, picking the FIRST day', () => {
+    const r = parseLooseDate('14-17-June', '2015');
+    expect(r?.date).toBe('2015-06-14');
+    expect(r?.rangeEnd).toBe('2015-06-17');
+  });
+
+  it('parses month-only as the 1st of the month', () => {
+    expect(parseLooseDate('Jan', '2024')?.date).toBe('2024-01-01');
+    expect(parseLooseDate('February', '2024')?.date).toBe('2024-02-01');
+  });
+
+  it('handles full month names interchangeably', () => {
+    expect(parseLooseDate('1-April', '2013')?.date).toBe('2013-04-01');
+    expect(parseLooseDate('14-17-June', '2015')?.date).toBe('2015-06-14');
+  });
+
+  it('returns null with no fallback year when the year is needed', () => {
+    expect(parseLooseDate('1-Apr')).toBeNull();
+    expect(parseLooseDate('Jan')).toBeNull();
+    expect(parseLooseDate('Mar-14', null)).toBeNull();
+  });
+
+  it('returns null for non-date strings', () => {
+    expect(parseLooseDate('Date', '2017')).toBeNull();
+    expect(parseLooseDate('Day', '2017')).toBeNull();
+    expect(parseLooseDate('', '2017')).toBeNull();
+    expect(parseLooseDate('   ', '2017')).toBeNull();
+    expect(parseLooseDate('Tuesday', '2017')).toBeNull(); // not a month
+    expect(parseLooseDate('Pgs', '2017')).toBeNull();
+  });
+
+  it('returns null for unparseable bare numbers', () => {
+    // Don't accept "2017" as Apr 2017 by accident; leave it to context.
+    expect(parseLooseDate('2017')).toBeNull();
+    expect(parseLooseDate('167', '2017')).toBeNull();
+  });
+
+  it('handles em/en dashes in addition to hyphen-minus', () => {
+    expect(parseLooseDate('14–17–June', '2015')?.date).toBe('2015-06-14');
+    expect(parseLooseDate('1—Apr', '2013')?.date).toBe('2013-04-01');
+  });
+});
+
+describe('normalizeArrayRow (header-less / messy row layouts)', () => {
+  it('finds date in any column position', () => {
+    expect(
+      normalizeArrayRow(['', '1-Apr', '', 'GA state science and engineering fair'], '2013'),
+    ).toEqual({
+      entry_date: '2013-04-01',
+      summary: 'GA state science and engineering fair',
+      tags: [],
+    });
+  });
+
+  it('picks the LAST sufficiently long cell as the summary', () => {
+    // Day-of-week and pages should NOT win over the actual entry text.
+    const row = ['1-Apr', 'F', '167', 'GA state science and engineering fair'];
+    expect(normalizeArrayRow(row, '2013')?.summary).toBe(
+      'GA state science and engineering fair',
+    );
+  });
+
+  it('skips header rows whose first cell is the year', () => {
+    expect(normalizeArrayRow(['2017', '', '', ''], '2017')).toBeNull();
+  });
+
+  it('skips column-name header rows', () => {
+    expect(normalizeArrayRow(['Date', 'Day', 'Pgs', ''], '2017')).toBeNull();
+  });
+
+  it('skips fully empty rows', () => {
+    expect(normalizeArrayRow(['', '', '', ''], '2017')).toBeNull();
+    expect(normalizeArrayRow([], '2017')).toBeNull();
+  });
+
+  it('skips rows that have a date but no substantial summary', () => {
+    // "Tu" is too short to be a summary — and there's nothing else.
+    expect(normalizeArrayRow(['1-Apr', 'Tu', '', ''], '2013')).toBeNull();
+  });
+
+  it('handles month-only rows from the 2024 sheet (maps to 1st)', () => {
+    const row = ['Jan', '', '', 'Found out that I passed Teach Gwinnett.'];
+    expect(normalizeArrayRow(row, '2024')).toEqual({
+      entry_date: '2024-01-01',
+      summary: 'Found out that I passed Teach Gwinnett.',
+      tags: [],
+    });
+  });
+
+  it('handles Mon-D rows from the 2024 sheet', () => {
+    const row = ['Mar-14', 'Th', '', 'Pi Day; signed my contract.'];
+    expect(normalizeArrayRow(row, '2024')?.entry_date).toBe('2024-03-14');
+  });
+
+  it('handles D-D-Mon range rows (takes first day)', () => {
+    const row = ['14-17-June', 'Su - W', '-', 'second episode'];
+    // "second episode" is exactly 14 chars — over the 10-char floor.
+    expect(normalizeArrayRow(row, '2015')).toEqual({
+      entry_date: '2015-06-14',
+      summary: 'second episode',
+      tags: [],
+    });
   });
 });
