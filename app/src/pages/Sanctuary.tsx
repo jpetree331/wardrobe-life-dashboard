@@ -44,7 +44,7 @@ const ENTRY_TYPES: Array<{ value: EntryType; label: string }> = [
 ];
 
 export default function Sanctuary() {
-  useFavicon('/icons/papers3.png', 'Sanctuary · Wardrobe');
+  useFavicon('/icons/jcross2.png', 'Sanctuary · Wardrobe');
   const [searchParams] = useSearchParams();
   const deepLinkDate = searchParams.get('date');
   const deepLinkId = searchParams.get('id');

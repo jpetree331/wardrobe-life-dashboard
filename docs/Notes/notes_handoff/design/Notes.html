@@ -1,0 +1,1766 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400;1,500&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #efe7d6;
+    --bg-2: #e4d8bf;
+    --bg-3: #d8caa8;
+    --canvas: #efe7d6;
+    --canvas-grid: #2b241914;
+    --page: #faf5e8;
+    --ink: #2b2419;
+    --ink-soft: #5a4f3c;
+    --ink-faint: #8a7d63;
+    --line: #2b241933;
+    --line-strong: #2b241955;
+    --accent: #7a6a3a;
+    --accent-strong: #9c8240;
+    --red: #8a2a1a;
+
+    /* card colors — muted, parchment-friendly */
+    --c-paper: #faf5e8;
+    --c-saffron: #f3e3b8;
+    --c-rose:    #f0d6cb;
+    --c-sage:    #d8e2ce;
+    --c-sky:     #d2dde6;
+    --c-violet:  #ddd3e3;
+    --c-clay:    #e7d6c4;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: 'EB Garamond', Georgia, serif;
+    -webkit-font-smoothing: antialiased;
+    height: 100vh;
+    display: grid; grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+  }
+
+  /* -------- Ribbon (top) -------- */
+  .ribbon {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 22px;
+    background: var(--bg-2); border-bottom: 1px solid var(--line);
+    z-index: 10;
+  }
+  .ribbon .left { display: flex; align-items: center; gap: 18px; min-width: 0; flex: 1; }
+  .ribbon .back {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    color: var(--ink-soft); text-decoration: none; font-size: 14px;
+    border-bottom: 1px solid transparent; padding-bottom: 2px;
+    flex-shrink: 0;
+  }
+  .ribbon .back:hover { color: var(--ink); border-bottom-color: var(--line-strong); }
+  .ribbon .place {
+    font-family: 'Cormorant Garamond', serif; font-weight: 400;
+    font-size: 16px; letter-spacing: 0.32em; text-transform: uppercase;
+    color: var(--ink-soft); flex-shrink: 0;
+  }
+  .breadcrumbs {
+    display: flex; align-items: center; gap: 8px; min-width: 0; overflow-x: auto;
+    font-family: 'Cormorant Garamond', serif; font-size: 16px;
+    color: var(--ink-soft); letter-spacing: 0.04em;
+  }
+  .breadcrumbs .crumb {
+    background: transparent; border: 0; cursor: pointer;
+    font: inherit; color: var(--ink-soft); padding: 4px 6px;
+    border-bottom: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .breadcrumbs .crumb:hover { color: var(--ink); border-bottom-color: var(--line-strong); }
+  .breadcrumbs .crumb.current { color: var(--ink); font-weight: 500; cursor: default; }
+  .breadcrumbs .sep { color: var(--ink-faint); font-style: italic; }
+
+  .ribbon .right { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
+  .btn-quiet {
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    background: transparent; border: 1px solid var(--line-strong);
+    color: var(--ink-soft); padding: 5px 12px; cursor: pointer;
+    border-radius: 2px; letter-spacing: 0.04em;
+  }
+  .btn-quiet:hover { color: var(--ink); border-color: var(--ink-soft); }
+  .btn-quiet[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .zoom-readout {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    font-size: 12px; color: var(--ink-faint);
+    min-width: 44px; text-align: center;
+  }
+
+  /* -------- Main split: toolbar + canvas -------- */
+  .main {
+    display: grid; grid-template-columns: 64px 1fr;
+    min-height: 0; min-width: 0;
+    position: relative;
+  }
+
+  /* -------- Left toolbar (card types) -------- */
+  .tools {
+    background: var(--bg-2);
+    border-right: 1px solid var(--line);
+    padding: 14px 6px;
+    display: flex; flex-direction: column; gap: 4px;
+    overflow-y: auto;
+  }
+  .tool {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 4px; padding: 8px 4px; border-radius: 4px;
+    color: var(--ink-soft); cursor: grab;
+    background: transparent; border: 0;
+    font-family: 'EB Garamond', serif; font-size: 10px;
+    letter-spacing: 0.06em;
+    user-select: none;
+    transition: background 150ms ease, color 150ms ease;
+  }
+  .tool:hover { background: var(--bg-3); color: var(--ink); }
+  .tool:active { cursor: grabbing; }
+  .tool .ic {
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-soft);
+  }
+  .tool:hover .ic { color: var(--ink); }
+  .tool.active { background: var(--bg-3); color: var(--ink); }
+
+  .tools .divider {
+    height: 1px; background: var(--line); margin: 6px 8px;
+  }
+
+  /* -------- Canvas -------- */
+  .canvas-wrap {
+    position: relative; overflow: hidden;
+    background:
+      linear-gradient(to right, var(--canvas-grid) 1px, transparent 1px) 0 0/40px 40px,
+      linear-gradient(to bottom, var(--canvas-grid) 1px, transparent 1px) 0 0/40px 40px,
+      var(--canvas);
+    cursor: grab;
+  }
+  .canvas-wrap.panning { cursor: grabbing; }
+  .canvas-wrap.adding { cursor: copy; }
+  .canvas {
+    position: absolute; left: 0; top: 0;
+    width: 12000px; height: 8000px;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+
+  /* -------- Cards (common) -------- */
+  .card {
+    position: absolute;
+    background: var(--c-paper);
+    border: 1px solid var(--line);
+    box-shadow: 0 8px 24px -14px rgba(43,36,25,0.25), 0 1px 0 rgba(255,255,255,0.4) inset;
+    border-radius: 3px;
+    transition: box-shadow 200ms ease, border-color 200ms ease, transform 200ms ease;
+    user-select: none;
+  }
+  .card:hover {
+    border-color: var(--line-strong);
+    box-shadow: 0 14px 36px -16px rgba(43,36,25,0.35);
+    z-index: 2;
+  }
+  .card.selected {
+    border-color: var(--accent-strong);
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 40%, transparent),
+                0 14px 36px -16px rgba(43,36,25,0.35);
+    z-index: 3;
+  }
+  .card .drag-handle {
+    position: absolute; left: 0; right: 0; top: 0; height: 14px;
+    cursor: move;
+  }
+  .card .resize-se {
+    position: absolute; right: 0; bottom: 0; width: 14px; height: 14px;
+    cursor: nwse-resize;
+    opacity: 0; transition: opacity 200ms ease;
+  }
+  .card:hover .resize-se { opacity: 0.8; }
+  .card .resize-se::after {
+    content: ""; position: absolute; right: 3px; bottom: 3px;
+    width: 8px; height: 8px;
+    border-right: 2px solid var(--ink-faint);
+    border-bottom: 2px solid var(--ink-faint);
+  }
+
+  /* card type pill */
+  .card .typetag {
+    position: absolute; top: -10px; left: 8px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 1px 8px;
+    opacity: 0; transition: opacity 200ms ease;
+    pointer-events: none;
+  }
+  .card:hover .typetag, .card.selected .typetag { opacity: 1; }
+
+  /* -------- Note card -------- */
+  .card.note { padding: 14px 16px; min-width: 200px; min-height: 100px; }
+  .card.note .body {
+    font-family: 'EB Garamond', serif; font-size: 14px;
+    color: var(--ink); line-height: 1.5;
+    outline: none;
+    overflow: hidden;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+  }
+  .card.note .body[contenteditable]:empty::before {
+    content: attr(data-placeholder);
+    color: var(--ink-faint); font-style: italic;
+  }
+  .card.note .body h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 500; font-size: 19px;
+    margin: 0 0 6px; letter-spacing: 0.01em;
+  }
+  .card.note .body h2 {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 500; font-size: 16px;
+    margin: 8px 0 4px;
+  }
+  .card.note .body p { margin: 0 0 8px; }
+  .card.note .body ul, .card.note .body ol { padding-left: 22px; margin: 0 0 8px; }
+  .card.note .body li { margin: 2px 0; }
+  .card.note .body blockquote {
+    margin: 6px 0; padding-left: 10px;
+    border-left: 2px solid var(--accent); color: var(--ink-soft); font-style: italic;
+  }
+  .card.note .body code {
+    font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+    background: color-mix(in oklab, var(--ink) 8%, transparent);
+    padding: 1px 4px; border-radius: 2px;
+  }
+  .card.note .body pre {
+    font-family: 'JetBrains Mono', monospace; font-size: 12.5px;
+    background: color-mix(in oklab, var(--ink) 8%, transparent);
+    padding: 8px 10px; border-radius: 3px; overflow-x: auto; margin: 6px 0;
+  }
+  .card.note .body a { color: var(--accent-strong); }
+
+  /* convert prompt */
+  .card .convert-prompt {
+    margin-top: 10px; padding: 8px 10px;
+    background: color-mix(in oklab, var(--accent) 14%, transparent);
+    border: 1px dashed var(--accent);
+    font-family: 'EB Garamond', serif; font-style: italic;
+    font-size: 12px; color: var(--ink-soft);
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  }
+  .card .convert-prompt button {
+    background: var(--accent); color: var(--bg);
+    border: 0; padding: 4px 10px; cursor: pointer;
+    font-family: 'EB Garamond', serif; font-size: 12px;
+    letter-spacing: 0.04em; border-radius: 2px;
+  }
+  .card .convert-prompt button.ghost {
+    background: transparent; color: var(--ink-soft);
+    border: 1px solid var(--line);
+  }
+
+  /* -------- Todo card -------- */
+  .card.todo { padding: 14px 14px 12px; min-width: 220px; min-height: 100px; }
+  .card.todo .todo-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--ink-soft); margin: 0 0 8px;
+    outline: none;
+  }
+  .card.todo ol {
+    list-style: none; padding: 0; margin: 0;
+    counter-reset: todo;
+  }
+  .card.todo li {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 3px 0;
+    font-size: 14px; line-height: 1.45;
+  }
+  .card.todo li input[type="checkbox"] {
+    appearance: none;
+    width: 14px; height: 14px;
+    border: 1px solid var(--line-strong); border-radius: 2px;
+    background: var(--bg);
+    cursor: pointer; flex-shrink: 0;
+    margin-top: 4px;
+    position: relative;
+  }
+  .card.todo li input[type="checkbox"]:checked {
+    background: var(--ink); border-color: var(--ink);
+  }
+  .card.todo li input[type="checkbox"]:checked::after {
+    content: "✓"; color: var(--bg);
+    position: absolute; left: 1px; top: -2px;
+    font-size: 11px;
+  }
+  .card.todo li .text {
+    flex: 1; outline: none; word-break: break-word;
+  }
+  .card.todo li.done .text { color: var(--ink-faint); text-decoration: line-through; }
+  .card.todo li .x {
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--ink-faint); font-family: serif; font-size: 14px;
+    padding: 0 2px; opacity: 0; transition: opacity 150ms ease;
+  }
+  .card.todo li:hover .x { opacity: 0.8; }
+  .card.todo li .x:hover { color: var(--red); opacity: 1; }
+  .card.todo .add {
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--ink-faint); font-style: italic; font-size: 12px;
+    padding: 4px 0; margin-top: 4px;
+    font-family: 'EB Garamond', serif;
+  }
+  .card.todo .add:hover { color: var(--ink); }
+
+  /* -------- Heading card -------- */
+  .card.heading {
+    background: transparent; border: 0; box-shadow: none;
+    padding: 6px 4px;
+    min-width: 180px;
+  }
+  .card.heading:hover, .card.heading.selected { box-shadow: none; }
+  .card.heading .body {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 500;
+    font-size: 28px;
+    color: var(--ink);
+    letter-spacing: 0.02em;
+    outline: none;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 4px;
+  }
+  .card.heading.selected .body { border-bottom-color: var(--accent); }
+
+  /* -------- Link card -------- */
+  .card.link { padding: 12px 14px; min-width: 220px; }
+  .card.link .url {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--accent-strong);
+    word-break: break-all;
+    text-decoration: none;
+  }
+  .card.link .url:hover { text-decoration: underline; }
+  .card.link .title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 16px; color: var(--ink);
+    margin-bottom: 4px; outline: none;
+  }
+
+  /* -------- Document card (collapsed icon) -------- */
+  .card.doc {
+    padding: 0; min-width: 140px; min-height: 90px;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .card.doc.icon-mode {
+    width: 140px; height: 110px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px;
+    text-align: center;
+  }
+  .card.doc.icon-mode .doc-glyph {
+    width: 40px; height: 50px;
+    border: 1.5px solid var(--ink-soft);
+    background: var(--page);
+    position: relative;
+    box-shadow: 4px 4px 0 -1px var(--bg-3);
+  }
+  .card.doc.icon-mode .doc-glyph::before {
+    content: ""; position: absolute; left: 6px; right: 6px; top: 8px;
+    height: 1px; background: var(--ink-faint);
+    box-shadow: 0 4px 0 var(--ink-faint), 0 8px 0 var(--ink-faint), 0 12px 0 var(--ink-faint), 0 16px 0 var(--ink-faint), 0 20px 0 var(--ink-faint);
+  }
+  .card.doc.icon-mode .doc-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 14px; color: var(--ink);
+    padding: 0 8px;
+    line-height: 1.2;
+  }
+  .card.doc.preview-mode {
+    padding: 14px 16px; min-width: 240px;
+  }
+  .card.doc.preview-mode .doc-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 18px; color: var(--ink); margin-bottom: 6px;
+    border-bottom: 1px solid var(--line); padding-bottom: 4px;
+  }
+  .card.doc.preview-mode .doc-preview {
+    font-family: 'EB Garamond', serif;
+    font-size: 13px; color: var(--ink-soft);
+    line-height: 1.5;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    -webkit-box-orient: vertical;
+  }
+  .card.doc .doc-mode-toggle {
+    position: absolute; top: 4px; right: 4px;
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--ink-faint); font-family: 'EB Garamond', serif;
+    font-style: italic; font-size: 11px;
+    padding: 2px 6px;
+    opacity: 0; transition: opacity 150ms ease;
+  }
+  .card.doc:hover .doc-mode-toggle { opacity: 1; }
+  .card.doc .doc-mode-toggle:hover { color: var(--ink); }
+
+  /* -------- Board card (entry to nested board) -------- */
+  .card.board {
+    padding: 0; cursor: pointer;
+    width: 130px; height: 130px;
+    background: transparent; border: 0; box-shadow: none;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+  }
+  .card.board:hover, .card.board.selected { box-shadow: none; border: 0; }
+  .card.board .board-tile {
+    width: 86px; height: 86px;
+    background: var(--c-sky);
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(43,36,25,0.4);
+    box-shadow: 0 8px 22px -10px rgba(43,36,25,0.3);
+    transition: transform 200ms ease, box-shadow 200ms ease;
+  }
+  .card.board:hover .board-tile { transform: translateY(-2px); box-shadow: 0 14px 30px -12px rgba(43,36,25,0.4); }
+  .card.board.selected .board-tile { outline: 2px solid var(--accent); outline-offset: 4px; }
+  .card.board .board-tile svg { width: 42px; height: 42px; opacity: 0.55; }
+  .card.board .board-label {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 14px; color: var(--ink); text-align: center;
+    line-height: 1.15;
+    outline: none; min-width: 100px;
+  }
+  .card.board .board-meta {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    font-size: 11px; color: var(--ink-faint);
+  }
+
+  /* -------- Floating context menu (right-click on card) -------- */
+  .ctx {
+    position: fixed; z-index: 100;
+    background: var(--bg); border: 1px solid var(--line-strong);
+    box-shadow: 0 14px 30px -10px rgba(43,36,25,0.35);
+    padding: 6px;
+    min-width: 180px;
+    display: none;
+    font-family: 'EB Garamond', serif;
+  }
+  .ctx.visible { display: block; }
+  .ctx .item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 10px; font-size: 13.5px; color: var(--ink);
+    cursor: pointer; border-radius: 2px;
+  }
+  .ctx .item:hover { background: var(--bg-3); }
+  .ctx .item .key {
+    margin-left: auto; color: var(--ink-faint); font-style: italic; font-size: 12px;
+  }
+  .ctx .sep { height: 1px; background: var(--line); margin: 4px 6px; }
+  .ctx .swatches {
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    gap: 4px; padding: 6px 8px;
+  }
+  .ctx .sw {
+    width: 18px; height: 18px; border-radius: 50%;
+    border: 1px solid var(--line-strong); cursor: pointer;
+  }
+  .ctx .sw:hover { transform: scale(1.1); }
+  .ctx .label {
+    padding: 4px 10px; font-family: 'Cormorant Garamond', serif;
+    font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* -------- Format toolbar (appears above selected note) -------- */
+  .fmt-toolbar {
+    position: fixed; z-index: 90;
+    background: var(--ink); color: var(--bg);
+    padding: 4px;
+    display: none; gap: 2px;
+    border-radius: 4px;
+    box-shadow: 0 12px 30px -10px rgba(0,0,0,0.45);
+  }
+  .fmt-toolbar.visible { display: inline-flex; }
+  .fmt-toolbar button {
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--bg);
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    padding: 5px 9px; border-radius: 2px; min-width: 28px;
+  }
+  .fmt-toolbar button:hover { background: rgba(255,255,255,0.12); }
+  .fmt-toolbar button[aria-pressed="true"] { background: rgba(var(--bg-2,228 216 191),0.2); background: rgba(255,255,255,0.18); }
+  .fmt-toolbar .b { font-weight: 700; }
+  .fmt-toolbar .i { font-style: italic; }
+  .fmt-toolbar .u { text-decoration: underline; }
+  .fmt-toolbar .sep { width: 1px; background: rgba(255,255,255,0.2); margin: 2px 2px; }
+
+  /* -------- Document overlay (full-page editor) -------- */
+  .doc-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(43,36,25,0.4);
+    backdrop-filter: blur(4px);
+    display: none; align-items: flex-start; justify-content: center;
+    padding: 40px 0;
+    overflow-y: auto;
+  }
+  .doc-overlay.visible { display: flex; }
+  .doc-page {
+    width: 760px; max-width: calc(100vw - 80px);
+    background: var(--page);
+    border: 1px solid var(--line);
+    box-shadow: 0 30px 90px -30px rgba(43,36,25,0.6);
+    padding: 56px 64px 80px;
+    min-height: 70vh;
+  }
+  .doc-page .doc-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 18px;
+  }
+  .doc-page .doc-head h2 {
+    margin: 0;
+    font-family: 'Cormorant Garamond', serif; font-weight: 400;
+    font-size: 11px; letter-spacing: 0.32em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .doc-page .doc-head button {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--ink-soft); font-size: 13px;
+  }
+  .doc-page .doc-head button:hover { color: var(--ink); }
+  .doc-page .doc-tlbl {
+    display: flex; gap: 10px;
+    margin-bottom: 14px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .doc-page .doc-tlbl button {
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--ink-soft); font-family: 'EB Garamond', serif;
+    font-size: 13.5px; padding: 4px 8px; border-radius: 2px; min-width: 28px;
+  }
+  .doc-page .doc-tlbl button:hover { background: var(--bg-3); color: var(--ink); }
+  .doc-page .doc-tlbl button[aria-pressed="true"] { background: var(--bg-3); color: var(--ink); }
+  .doc-page .doc-tlbl .b { font-weight: 700; }
+  .doc-page .doc-tlbl .i { font-style: italic; }
+  .doc-page .doc-tlbl .u { text-decoration: underline; }
+  .doc-page .doc-tlbl .sep { width: 1px; background: var(--line); margin: 2px 4px; }
+  .doc-page-title {
+    font-family: 'Cormorant Garamond', serif; font-weight: 500;
+    font-size: 36px; color: var(--ink);
+    border: 0; outline: none; background: transparent;
+    width: 100%;
+    padding: 0; margin: 0 0 16px;
+    letter-spacing: 0.01em;
+  }
+  .doc-body {
+    font-family: 'EB Garamond', serif; font-size: 17px;
+    line-height: 1.7; color: var(--ink);
+    outline: none; min-height: 50vh;
+  }
+  .doc-body[contenteditable]:empty::before {
+    content: 'Begin writing…';
+    color: var(--ink-faint); font-style: italic;
+  }
+  .doc-body h1, .doc-body h2 {
+    font-family: 'Cormorant Garamond', serif; font-weight: 500;
+    color: var(--ink);
+  }
+  .doc-body h1 { font-size: 28px; margin: 24px 0 10px; }
+  .doc-body h2 { font-size: 22px; margin: 18px 0 8px; }
+  .doc-body p { margin: 0 0 14px; }
+  .doc-body blockquote { margin: 14px 0; padding-left: 14px; border-left: 2px solid var(--accent); color: var(--ink-soft); font-style: italic; }
+  .doc-body code { font-family: 'JetBrains Mono', monospace; font-size: 0.92em; background: color-mix(in oklab, var(--ink) 8%, transparent); padding: 1px 4px; border-radius: 2px; }
+  .doc-body pre { font-family: 'JetBrains Mono', monospace; font-size: 0.9em; background: color-mix(in oklab, var(--ink) 8%, transparent); padding: 12px 14px; border-radius: 3px; overflow-x: auto; margin: 14px 0; }
+  .doc-body ul, .doc-body ol { padding-left: 28px; margin: 0 0 14px; }
+  .doc-body a { color: var(--accent-strong); }
+
+  /* -------- Trash drawer -------- */
+  .trash {
+    position: fixed; right: 0; top: 49px; bottom: 28px;
+    width: 360px; background: var(--bg-2);
+    border-left: 1px solid var(--line-strong);
+    box-shadow: -16px 0 40px -24px rgba(43,36,25,0.35);
+    z-index: 50;
+    transform: translateX(100%);
+    transition: transform 280ms ease;
+    display: flex; flex-direction: column;
+  }
+  .trash.open { transform: translateX(0); }
+  .trash .head {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-3);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .trash h3 {
+    margin: 0; font-family: 'Cormorant Garamond', serif;
+    font-weight: 400; font-size: 13px;
+    letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .trash .body { flex: 1; overflow-y: auto; padding: 8px 0; }
+  .trash .row {
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--line);
+    display: flex; gap: 10px; align-items: flex-start;
+  }
+  .trash .row:hover { background: var(--bg); }
+  .trash .row .info {
+    flex: 1; min-width: 0;
+  }
+  .trash .row .meta {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .trash .row .preview {
+    font-family: 'EB Garamond', serif;
+    font-size: 13.5px; color: var(--ink);
+    line-height: 1.45;
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    margin-top: 2px;
+  }
+  .trash .row .actions { display: flex; flex-direction: column; gap: 4px; }
+  .trash .row .actions button {
+    background: transparent; border: 1px solid var(--line);
+    color: var(--ink-soft); font-family: 'EB Garamond', serif;
+    font-size: 11.5px; padding: 3px 8px; cursor: pointer;
+    letter-spacing: 0.04em; border-radius: 2px;
+  }
+  .trash .row .actions button:hover { color: var(--ink); border-color: var(--ink-soft); }
+  .trash .empty {
+    padding: 40px 20px; text-align: center;
+    font-family: 'EB Garamond', serif; font-style: italic;
+    color: var(--ink-faint);
+  }
+
+  /* -------- Footer -------- */
+  .status {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 22px;
+    background: var(--bg-2); border-top: 1px solid var(--line);
+    font-family: 'EB Garamond', serif; font-style: italic;
+    font-size: 12px; color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+
+  /* drag preview from toolbar */
+  .drag-ghost {
+    position: fixed; z-index: 300; pointer-events: none;
+    background: var(--c-paper);
+    border: 1px solid var(--line-strong);
+    padding: 12px 14px;
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    font-style: italic; color: var(--ink-soft);
+    box-shadow: 0 14px 30px -10px rgba(43,36,25,0.35);
+    opacity: 0.9;
+  }
+
+  @keyframes fade { from { opacity: 0.01; } to { opacity: 1; } }
+  .ribbon, .main, .status { animation: fade 700ms ease-out; }
+
+  /* hide scrollbars on canvas */
+  .canvas-wrap::-webkit-scrollbar { display: none; }
+
+  /* SVG icons share these */
+  svg.ic-svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+
+  <header class="ribbon">
+    <div class="left">
+      <a class="back" href="Hallway Wireframes.html">← hallway</a>
+      <div class="place">Notes</div>
+      <nav class="breadcrumbs" id="breadcrumbs" aria-label="Boards"></nav>
+    </div>
+    <div class="right">
+      <button class="btn-quiet" id="zoom-out" title="Zoom out">−</button>
+      <span class="zoom-readout" id="zoom-readout">100%</span>
+      <button class="btn-quiet" id="zoom-in" title="Zoom in">+</button>
+      <button class="btn-quiet" id="zoom-fit" title="Fit to view">fit</button>
+      <button class="btn-quiet" id="trash-btn" title="Trash">Trash</button>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <!-- left toolbar -->
+    <aside class="tools" aria-label="Card types">
+      <button class="tool" data-type="note" draggable="true">
+        <span class="ic"><svg class="ic-svg" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5"/><line x1="7" y1="9" x2="17" y2="9"/><line x1="7" y1="13" x2="14" y2="13"/></svg></span>
+        Note
+      </button>
+      <button class="tool" data-type="todo" draggable="true">
+        <span class="ic"><svg class="ic-svg" viewBox="0 0 24 24"><rect x="4" y="5" width="5" height="5" rx="0.6"/><path d="M5 7.4l1.4 1.4L8.4 6.6"/><line x1="11" y1="7.5" x2="20" y2="7.5"/><rect x="4" y="13" width="5" height="5" rx="0.6"/><line x1="11" y1="15.5" x2="20" y2="15.5"/></svg></span>
+        To-do
+      </button>
+      <button class="tool" data-type="link" draggable="true">
+        <span class="ic"><svg class="ic-svg" viewBox="0 0 24 24"><path d="M9 14l6-6"/><path d="M11 7.5l1.5-1.5a3.5 3.5 0 014.95 4.95L16 12.5"/><path d="M13 16.5L11.5 18a3.5 3.5 0 01-4.95-4.95L8 11.5"/></svg></span>
+        Link
+      </button>
+      <button class="tool" data-type="heading" draggable="true">
+        <span class="ic"><svg class="ic-svg" viewBox="0 0 24 24"><path d="M6 6v12"/><path d="M14 6v12"/><line x1="6" y1="12" x2="14" y2="12"/><path d="M18 6v12" stroke-opacity="0"/></svg></span>
+        Heading
+      </button>
+      <div class="divider"></div>
+      <button class="tool" data-type="board" draggable="true">
+        <span class="ic"><svg class="ic-svg" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg></span>
+        Board
+      </button>
+      <button class="tool" data-type="document" draggable="true">
+        <span class="ic"><svg class="ic-svg" viewBox="0 0 24 24"><path d="M6 4h8l4 4v12H6z"/><path d="M14 4v4h4"/><line x1="8.5" y1="12" x2="15.5" y2="12"/><line x1="8.5" y1="15" x2="15.5" y2="15"/><line x1="8.5" y1="18" x2="13" y2="18"/></svg></span>
+        Document
+      </button>
+    </aside>
+
+    <!-- canvas -->
+    <section class="canvas-wrap" id="canvas-wrap">
+      <div class="canvas" id="canvas"></div>
+    </section>
+
+    <!-- Floating format toolbar -->
+    <div class="fmt-toolbar" id="fmt-toolbar" role="toolbar" aria-label="Format">
+      <button class="b" data-cmd="bold" title="Bold ⌘B">B</button>
+      <button class="i" data-cmd="italic" title="Italic ⌘I">I</button>
+      <button class="u" data-cmd="underline" title="Underline ⌘U">U</button>
+      <span class="sep"></span>
+      <button data-cmd="h1" title="Heading">H1</button>
+      <button data-cmd="h2" title="Subheading">H2</button>
+      <span class="sep"></span>
+      <button data-cmd="ul" title="Bullet list">•</button>
+      <button data-cmd="ol" title="Numbered list">1.</button>
+      <button data-cmd="blockquote" title="Quote">❝</button>
+      <button data-cmd="code" title="Code">‹›</button>
+      <span class="sep"></span>
+      <button data-cmd="link" title="Link">🔗</button>
+    </div>
+
+    <!-- Context menu -->
+    <div class="ctx" id="ctx">
+      <div class="label">Color</div>
+      <div class="swatches" id="ctx-swatches"></div>
+      <div class="sep"></div>
+      <div class="item" data-act="duplicate">Duplicate <span class="key">⌘D</span></div>
+      <div class="item" data-act="bring-front">Bring to front</div>
+      <div class="item" data-act="open-doc" data-only="document">Open document</div>
+      <div class="item" data-act="enter-board" data-only="board">Open board</div>
+      <div class="item" data-act="convert-doc" data-only="note">Convert to Document</div>
+      <div class="sep"></div>
+      <div class="item" data-act="delete" style="color: var(--red)">Delete <span class="key">⌫</span></div>
+    </div>
+
+  </main>
+
+  <footer class="status">
+    <div id="status-left">Drag a card type onto the canvas. Scroll to pan, ⌘+scroll to zoom.</div>
+    <div id="status-right"></div>
+  </footer>
+
+  <!-- Document overlay -->
+  <div class="doc-overlay" id="doc-overlay">
+    <div class="doc-page" id="doc-page">
+      <div class="doc-head">
+        <h2>Document</h2>
+        <button id="doc-close">close</button>
+      </div>
+      <div class="doc-tlbl" role="toolbar" aria-label="Document format">
+        <button class="b" data-doc-cmd="bold">B</button>
+        <button class="i" data-doc-cmd="italic">I</button>
+        <button class="u" data-doc-cmd="underline">U</button>
+        <span class="sep"></span>
+        <button data-doc-cmd="h1">H1</button>
+        <button data-doc-cmd="h2">H2</button>
+        <span class="sep"></span>
+        <button data-doc-cmd="ul">•</button>
+        <button data-doc-cmd="ol">1.</button>
+        <button data-doc-cmd="blockquote">❝</button>
+        <button data-doc-cmd="code">‹›</button>
+        <span class="sep"></span>
+        <button data-doc-cmd="link">🔗</button>
+      </div>
+      <input class="doc-page-title" id="doc-title" placeholder="Untitled document" />
+      <div class="doc-body" id="doc-body" contenteditable="true" data-placeholder="Begin writing…"></div>
+    </div>
+  </div>
+
+  <!-- Trash drawer -->
+  <aside class="trash" id="trash">
+    <div class="head">
+      <h3>Trash</h3>
+      <button class="btn-quiet" id="trash-close">close</button>
+    </div>
+    <div class="body" id="trash-body"></div>
+  </aside>
+
+<script>
+  // ============================================================
+  // STATE
+  // ============================================================
+  // Boards form a tree. Each board has children: cards + sub-boards.
+  // Cards are keyed by id. Each card has { type, x, y, w, h, color, ... }.
+
+  const ROOT_ID = 'root';
+  let nextId = 1;
+  const id = () => 'c' + (nextId++);
+
+  // The whole world: a flat dict of boards keyed by id, each containing cardIds.
+  // Cards are also stored in a flat dict so we can move them between boards (not used yet).
+  const state = {
+    boards: {
+      [ROOT_ID]: { id: ROOT_ID, name: 'Home', parent: null, cardIds: [] },
+    },
+    cards: {},
+    trash: [], // { id, type, snapshot }
+    currentBoardId: ROOT_ID,
+    selectedId: null,
+  };
+
+  // Seed with a lived-in starter board.
+  function seed() {
+    // Top-level Boards (Milanote-style tiles)
+    addBoard({ name: 'Novel — Lily Falls', x: 120, y: 80,  color: 'var(--c-sky)', icon: 'book' });
+    addBoard({ name: 'IEP / Testing',     x: 280, y: 80,  color: 'var(--c-rose)', icon: 'shield' });
+    addBoard({ name: 'Lesson Plans',      x: 440, y: 80,  color: 'var(--c-sage)', icon: 'apple' });
+    addBoard({ name: 'WoW / Hobbies',     x: 600, y: 80,  color: 'var(--c-violet)', icon: 'star' });
+
+    // Heading
+    addCard({ type: 'heading', x: 120, y: 240, w: 320, h: 50, body: 'Quick capture' });
+
+    // To-do card (the "main list")
+    addCard({
+      type: 'todo', x: 120, y: 310, w: 280, h: 280, color: 'var(--c-paper)',
+      title: '2/20/2026, February',
+      todos: [
+        { text: 'Finish amendments.', done: false },
+        { text: 'Send amendments via Adobe Sign.', done: false },
+        { text: 'Finish transition plan training.', done: true },
+        { text: 'Huneycutt LPs', done: false },
+        { text: "Make Lesson Plan for Monday.", done: false },
+        { text: "Grade Isaiah's papers.", done: false },
+        { text: 'Clean house.', done: true },
+        { text: 'Do laundry.', done: true },
+        { text: 'Do dishes.', done: false },
+      ],
+    });
+
+    // Note (will trigger conversion prompt if it grows)
+    addCard({
+      type: 'note', x: 430, y: 310, w: 280, h: 220, color: 'var(--c-saffron)',
+      body: '<h2>Sermon notes — Sunday</h2><p>The shepherd <em>knows his sheep by name.</em> Not by number; not by wool color. By <strong>name</strong>.</p><p>Bring this back to Lily — naming things rightly is the beginning of love.</p>',
+    });
+
+    // Link
+    addCard({
+      type: 'link', x: 740, y: 310, w: 240, h: 90, color: 'var(--c-paper)',
+      title: 'Annie Dillard — Holy the Firm',
+      url: 'https://example.org/holy-the-firm',
+    });
+
+    // Document (collapsed icon)
+    addCard({
+      type: 'document', x: 740, y: 430, w: 140, h: 110, color: 'var(--c-paper)',
+      title: "Lily's birthday letter",
+      docMode: 'icon',
+      docBody: '<p>For my dearest Lily, on her third birthday —</p><p>You arrived with the morning star still in the window…</p>',
+    });
+
+    addCard({
+      type: 'document', x: 900, y: 430, w: 240, h: 200, color: 'var(--c-paper)',
+      title: 'Easter homily — outline',
+      docMode: 'preview',
+      docBody: '<p>Open with Emmaus. The disciples did not recognize Him until the breaking of bread.</p><p>Three movements: <strong>walking</strong>, <strong>listening</strong>, <strong>seeing</strong>.</p><p>Close on the fire that burned in their hearts.</p>',
+    });
+
+    // A second small to-do
+    addCard({
+      type: 'todo', x: 120, y: 620, w: 240, h: 200, color: 'var(--c-paper)',
+      title: 'Personal',
+      todos: [
+        { text: 'Call Mom — Sunday', done: false },
+        { text: 'Pick up books from library', done: false },
+        { text: 'Order new prayer cards', done: false },
+      ],
+    });
+
+    // Heading row 2
+    addCard({ type: 'heading', x: 430, y: 580, w: 240, h: 50, body: 'For the novel' });
+    addCard({
+      type: 'note', x: 430, y: 640, w: 280, h: 180, color: 'var(--c-clay)',
+      body: '<p>The bell that rings only when no one is listening. Try it as the opening image — the bronze on the shelf, the silence that follows.</p>',
+    });
+  }
+
+  function addBoard({ name, x, y, color, icon, parent = state.currentBoardId }) {
+    const bid = id();
+    state.boards[bid] = { id: bid, name, parent, cardIds: [] };
+    const card = {
+      id: bid,
+      type: 'board',
+      x, y, w: 130, h: 130,
+      color: color || 'var(--c-sky)',
+      name,
+      icon,
+      isBoard: true,
+    };
+    state.cards[bid] = card;
+    state.boards[parent].cardIds.push(bid);
+    return bid;
+  }
+
+  function addCard(props) {
+    const cid = id();
+    const card = Object.assign({ id: cid, color: 'var(--c-paper)' }, props);
+    state.cards[cid] = card;
+    state.boards[state.currentBoardId].cardIds.push(cid);
+    return cid;
+  }
+
+  // ============================================================
+  // RENDERING
+  // ============================================================
+  const canvas = document.getElementById('canvas');
+  const wrap = document.getElementById('canvas-wrap');
+  const breadcrumbsEl = document.getElementById('breadcrumbs');
+  const statusRight = document.getElementById('status-right');
+
+  // pan/zoom
+  let view = { x: 0, y: 0, k: 1 };
+  function applyTransform() {
+    canvas.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`;
+    document.getElementById('zoom-readout').textContent = Math.round(view.k * 100) + '%';
+  }
+
+  function renderBoard() {
+    canvas.innerHTML = '';
+    const board = state.boards[state.currentBoardId];
+    board.cardIds.forEach(cid => {
+      const card = state.cards[cid];
+      const el = renderCard(card);
+      canvas.appendChild(el);
+    });
+    renderBreadcrumbs();
+    statusRight.textContent = `${board.cardIds.length} item${board.cardIds.length === 1 ? '' : 's'} on “${board.name}”`;
+  }
+
+  function renderBreadcrumbs() {
+    breadcrumbsEl.innerHTML = '';
+    const chain = [];
+    let cur = state.boards[state.currentBoardId];
+    while (cur) {
+      chain.unshift(cur);
+      cur = cur.parent ? state.boards[cur.parent] : null;
+    }
+    chain.forEach((b, i) => {
+      const last = i === chain.length - 1;
+      const btn = document.createElement('button');
+      btn.className = 'crumb' + (last ? ' current' : '');
+      btn.textContent = b.name;
+      if (!last) btn.onclick = () => navigateTo(b.id);
+      breadcrumbsEl.appendChild(btn);
+      if (!last) {
+        const sep = document.createElement('span');
+        sep.className = 'sep';
+        sep.textContent = '›';
+        breadcrumbsEl.appendChild(sep);
+      }
+    });
+  }
+
+  function navigateTo(boardId) {
+    state.currentBoardId = boardId;
+    state.selectedId = null;
+    renderBoard();
+  }
+
+  // ----- per-card renderers -----
+  function renderCard(card) {
+    if (card.type === 'note')      return renderNote(card);
+    if (card.type === 'todo')      return renderTodo(card);
+    if (card.type === 'heading')   return renderHeading(card);
+    if (card.type === 'link')      return renderLink(card);
+    if (card.type === 'document')  return renderDoc(card);
+    if (card.type === 'board')     return renderBoardTile(card);
+    const div = document.createElement('div'); div.textContent = '?'; return div;
+  }
+
+  function baseCard(card, classes) {
+    const el = document.createElement('div');
+    el.className = 'card ' + classes;
+    el.dataset.id = card.id;
+    el.style.left = card.x + 'px';
+    el.style.top  = card.y + 'px';
+    if (card.w) el.style.width = card.w + 'px';
+    if (card.h && card.type !== 'heading' && card.type !== 'board') el.style.height = card.h + 'px';
+    if (card.color && card.type !== 'heading' && card.type !== 'board') el.style.background = card.color;
+    if (state.selectedId === card.id) el.classList.add('selected');
+    el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      // ignore drags that begin in editable / interactive content
+      if (e.target.closest('[contenteditable]') || e.target.closest('input') || e.target.closest('button') || e.target.closest('a')) return;
+      startCardDrag(card.id, e);
+    });
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      selectCard(card.id);
+      openContextMenu(e.clientX, e.clientY, card);
+    });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[contenteditable]') || e.target.closest('input')) return;
+      selectCard(card.id);
+    });
+    // type tag
+    const tag = document.createElement('div');
+    tag.className = 'typetag';
+    tag.textContent = card.type === 'document' ? 'Doc' : card.type;
+    el.appendChild(tag);
+    return el;
+  }
+
+  function renderNote(card) {
+    const el = baseCard(card, 'note');
+    const drag = document.createElement('div'); drag.className = 'drag-handle'; el.appendChild(drag);
+    const body = document.createElement('div');
+    body.className = 'body';
+    body.contentEditable = 'true';
+    body.dataset.placeholder = 'Note';
+    body.innerHTML = card.body || '';
+    body.addEventListener('input', () => {
+      card.body = body.innerHTML;
+      maybeOfferConvert(card, el);
+    });
+    body.addEventListener('keydown', (e) => handleMarkdownShortcuts(e, body));
+    body.addEventListener('mouseup', positionFmtToolbar);
+    body.addEventListener('keyup', positionFmtToolbar);
+    body.addEventListener('blur', () => setTimeout(hideFmtToolbar, 200));
+    el.appendChild(body);
+    if (shouldOfferConvert(card) && !card.dismissedConvert) {
+      el.appendChild(buildConvertPrompt(card));
+    }
+    addResizeHandle(el, card);
+    return el;
+  }
+
+  function shouldOfferConvert(card) {
+    const txt = (card.body || '').replace(/<[^>]+>/g, '').trim();
+    return txt.length > 320;
+  }
+  function maybeOfferConvert(card, el) {
+    if (shouldOfferConvert(card) && !card.dismissedConvert && !el.querySelector('.convert-prompt')) {
+      el.appendChild(buildConvertPrompt(card));
+    }
+  }
+  function buildConvertPrompt(card) {
+    const p = document.createElement('div');
+    p.className = 'convert-prompt';
+    p.contentEditable = 'false';
+    const span = document.createElement('span');
+    span.textContent = 'This note has grown — convert it into a Document?';
+    const actions = document.createElement('div'); actions.style.display = 'flex'; actions.style.gap = '6px';
+    const yes = document.createElement('button'); yes.textContent = 'Convert';
+    const no  = document.createElement('button'); no.textContent = 'Keep as note'; no.className = 'ghost';
+    yes.onclick = (e) => { e.stopPropagation(); convertNoteToDoc(card.id); };
+    no.onclick  = (e) => { e.stopPropagation(); card.dismissedConvert = true; renderBoard(); };
+    actions.appendChild(yes); actions.appendChild(no);
+    p.appendChild(span); p.appendChild(actions);
+    return p;
+  }
+  function convertNoteToDoc(cid) {
+    const card = state.cards[cid];
+    card.type = 'document';
+    card.docBody = card.body || '';
+    card.title = card.title || extractTitle(card.docBody) || 'Untitled document';
+    card.docMode = 'preview';
+    card.body = undefined;
+    delete card.dismissedConvert;
+    // resize to a reasonable default for a preview-mode doc
+    card.w = Math.max(card.w || 240, 240);
+    card.h = Math.max(card.h || 200, 200);
+    renderBoard();
+  }
+  function extractTitle(html) {
+    const t = html.match(/<h1[^>]*>([^<]+)<\/h1>/i) || html.match(/<h2[^>]*>([^<]+)<\/h2>/i);
+    if (t) return t[1].trim();
+    const p = html.replace(/<[^>]+>/g,' ').trim();
+    return p.split(/[.\n]/)[0].slice(0, 48);
+  }
+
+  function renderTodo(card) {
+    const el = baseCard(card, 'todo');
+    const drag = document.createElement('div'); drag.className = 'drag-handle'; el.appendChild(drag);
+
+    const title = document.createElement('div');
+    title.className = 'todo-title';
+    title.contentEditable = 'true';
+    title.textContent = card.title || 'To do';
+    title.addEventListener('input', () => card.title = title.textContent);
+    el.appendChild(title);
+
+    const ol = document.createElement('ol');
+    function renderItems() {
+      ol.innerHTML = '';
+      (card.todos || []).forEach((t, idx) => {
+        const li = document.createElement('li');
+        if (t.done) li.classList.add('done');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.checked = !!t.done;
+        cb.addEventListener('change', () => { t.done = cb.checked; li.classList.toggle('done', t.done); });
+
+        const span = document.createElement('span');
+        span.className = 'text';
+        span.contentEditable = 'true';
+        span.textContent = t.text;
+        span.addEventListener('input', () => t.text = span.textContent);
+        span.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            card.todos.splice(idx + 1, 0, { text: '', done: false });
+            renderItems();
+            ol.querySelectorAll('.text')[idx + 1]?.focus();
+          }
+          if (e.key === 'Backspace' && span.textContent === '' && card.todos.length > 1) {
+            e.preventDefault();
+            const removed = card.todos.splice(idx, 1)[0];
+            // Track in trash as a single item (so user can restore the line)
+            state.trash.push({ id: id(), type: 'todo-item', cardId: card.id, snapshot: removed, deletedAt: Date.now() });
+            renderItems();
+            ol.querySelectorAll('.text')[Math.max(0, idx - 1)]?.focus();
+            renderTrash();
+          }
+        });
+
+        const x = document.createElement('button');
+        x.className = 'x'; x.innerHTML = '×';
+        x.onclick = () => {
+          const removed = card.todos.splice(idx, 1)[0];
+          state.trash.push({ id: id(), type: 'todo-item', cardId: card.id, snapshot: removed, deletedAt: Date.now() });
+          renderItems(); renderTrash();
+        };
+
+        li.appendChild(cb); li.appendChild(span); li.appendChild(x);
+        ol.appendChild(li);
+      });
+    }
+    renderItems();
+    el.appendChild(ol);
+
+    const add = document.createElement('button');
+    add.className = 'add'; add.textContent = '+ add item';
+    add.onclick = () => {
+      card.todos = card.todos || [];
+      card.todos.push({ text: '', done: false });
+      renderItems();
+      const items = ol.querySelectorAll('.text');
+      items[items.length - 1]?.focus();
+    };
+    el.appendChild(add);
+
+    addResizeHandle(el, card);
+    return el;
+  }
+
+  function renderHeading(card) {
+    const el = baseCard(card, 'heading');
+    const body = document.createElement('div');
+    body.className = 'body';
+    body.contentEditable = 'true';
+    body.textContent = card.body || 'Heading';
+    body.addEventListener('input', () => card.body = body.textContent);
+    body.addEventListener('mousedown', (e) => e.stopPropagation()); // allow text edit
+    el.appendChild(body);
+    return el;
+  }
+
+  function renderLink(card) {
+    const el = baseCard(card, 'link');
+    const drag = document.createElement('div'); drag.className = 'drag-handle'; el.appendChild(drag);
+    const t = document.createElement('div');
+    t.className = 'title'; t.contentEditable = 'true';
+    t.textContent = card.title || 'Untitled link';
+    t.addEventListener('input', () => card.title = t.textContent);
+    el.appendChild(t);
+
+    const a = document.createElement('a');
+    a.className = 'url'; a.href = card.url || '#'; a.target = '_blank';
+    a.textContent = card.url || 'https://';
+    el.appendChild(a);
+    return el;
+  }
+
+  function renderDoc(card) {
+    const el = baseCard(card, 'doc ' + (card.docMode === 'preview' ? 'preview-mode' : 'icon-mode'));
+    if (card.docMode === 'icon') {
+      const g = document.createElement('div'); g.className = 'doc-glyph'; el.appendChild(g);
+      const t = document.createElement('div'); t.className = 'doc-title'; t.textContent = card.title || 'Untitled document'; el.appendChild(t);
+    } else {
+      const t = document.createElement('div'); t.className = 'doc-title'; t.textContent = card.title || 'Untitled document'; el.appendChild(t);
+      const p = document.createElement('div'); p.className = 'doc-preview'; p.innerHTML = card.docBody || ''; el.appendChild(p);
+    }
+    const toggle = document.createElement('button');
+    toggle.className = 'doc-mode-toggle';
+    toggle.textContent = card.docMode === 'icon' ? 'preview' : 'icon';
+    toggle.onclick = (e) => {
+      e.stopPropagation();
+      card.docMode = card.docMode === 'icon' ? 'preview' : 'icon';
+      if (card.docMode === 'preview') { card.w = Math.max(card.w, 240); card.h = Math.max(card.h, 180); }
+      else { card.w = 140; card.h = 110; }
+      renderBoard();
+    };
+    el.appendChild(toggle);
+
+    el.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      openDocument(card.id);
+    });
+    addResizeHandle(el, card);
+    return el;
+  }
+
+  const boardIcons = {
+    book:   '<path d="M6 6h10a3 3 0 013 3v11a2 2 0 00-2-2H6V6z"/><path d="M6 6a3 3 0 00-3 3v11a2 2 0 012-2h1V6z" stroke-opacity="0"/><line x1="9" y1="10" x2="15" y2="10"/><line x1="9" y1="13" x2="14" y2="13"/>',
+    shield: '<path d="M12 4l7 2v6c0 4-3 7-7 8-4-1-7-4-7-8V6l7-2z"/><path d="M9.5 12l1.8 1.8L14.5 10"/>',
+    apple:  '<path d="M12 8c-1-3-4-3-5-1s0 5 2 6c-2 1-3 5-1 7s4 1 5-1c1 2 3 3 5 1s1-6-1-7c2-1 3-4 2-6s-4-2-7 1z"/><path d="M12 8c0-1 1-3 2-3"/>',
+    star:   '<path d="M12 4l2.4 5 5.6.6-4 3.8 1 5.6-5-2.6-5 2.6 1-5.6-4-3.8 5.6-.6z"/>',
+    grid:   '<rect x="4" y="4" width="7" height="7"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
+  };
+  function renderBoardTile(card) {
+    const el = baseCard(card, 'board');
+    const tile = document.createElement('div'); tile.className = 'board-tile';
+    if (card.color) tile.style.background = card.color;
+    tile.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${boardIcons[card.icon || 'grid']}</svg>`;
+    el.appendChild(tile);
+    const lbl = document.createElement('div');
+    lbl.className = 'board-label'; lbl.contentEditable = 'true';
+    lbl.textContent = card.name || 'Board';
+    lbl.addEventListener('input', () => {
+      card.name = lbl.textContent;
+      const b = state.boards[card.id]; if (b) b.name = card.name;
+      renderBreadcrumbs();
+    });
+    lbl.addEventListener('mousedown', (e) => e.stopPropagation());
+    el.appendChild(lbl);
+    const meta = document.createElement('div'); meta.className = 'board-meta';
+    const b = state.boards[card.id];
+    const n = b ? b.cardIds.length : 0;
+    meta.textContent = n + ' card' + (n === 1 ? '' : 's');
+    el.appendChild(meta);
+    el.addEventListener('dblclick', (e) => { e.preventDefault(); navigateTo(card.id); });
+    return el;
+  }
+
+  // ----- Resize handle -----
+  function addResizeHandle(el, card) {
+    const r = document.createElement('div');
+    r.className = 'resize-se';
+    r.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      startResize(card.id, e);
+    });
+    el.appendChild(r);
+  }
+
+  // ============================================================
+  // Selection / focus
+  // ============================================================
+  function selectCard(cid) {
+    state.selectedId = cid;
+    document.querySelectorAll('.card').forEach(c => c.classList.toggle('selected', c.dataset.id === cid));
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (document.getElementById('doc-overlay').classList.contains('visible')) return closeDocument();
+      if (document.getElementById('trash').classList.contains('open')) return closeTrash();
+      hideContextMenu();
+      hideFmtToolbar();
+      state.selectedId = null;
+      document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+    }
+    if ((e.key === 'Backspace' || e.key === 'Delete') && state.selectedId && !isTextEditing()) {
+      e.preventDefault();
+      deleteCard(state.selectedId);
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd' && state.selectedId && !isTextEditing()) {
+      e.preventDefault();
+      duplicateCard(state.selectedId);
+    }
+  });
+  function isTextEditing() {
+    const a = document.activeElement;
+    return a && (a.isContentEditable || a.tagName === 'INPUT' || a.tagName === 'TEXTAREA');
+  }
+
+  // ============================================================
+  // Card drag (move) + Resize
+  // ============================================================
+  function clientToCanvas(cx, cy) {
+    const r = wrap.getBoundingClientRect();
+    return {
+      x: (cx - r.left - view.x) / view.k,
+      y: (cy - r.top  - view.y) / view.k,
+    };
+  }
+  function startCardDrag(cid, e) {
+    e.preventDefault();
+    selectCard(cid);
+    const card = state.cards[cid];
+    const start = clientToCanvas(e.clientX, e.clientY);
+    const ox = start.x - card.x, oy = start.y - card.y;
+    const el = canvas.querySelector(`.card[data-id="${cid}"]`);
+    function move(ev) {
+      const p = clientToCanvas(ev.clientX, ev.clientY);
+      card.x = Math.round(p.x - ox);
+      card.y = Math.round(p.y - oy);
+      el.style.left = card.x + 'px'; el.style.top = card.y + 'px';
+    }
+    function up() {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    }
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+  function startResize(cid, e) {
+    const card = state.cards[cid];
+    const start = clientToCanvas(e.clientX, e.clientY);
+    const sw = card.w || 240, sh = card.h || 180;
+    const el = canvas.querySelector(`.card[data-id="${cid}"]`);
+    function move(ev) {
+      const p = clientToCanvas(ev.clientX, ev.clientY);
+      card.w = Math.max(140, Math.round(sw + (p.x - start.x)));
+      card.h = Math.max( 80, Math.round(sh + (p.y - start.y)));
+      el.style.width = card.w + 'px';
+      if (card.type !== 'heading' && card.type !== 'board') el.style.height = card.h + 'px';
+    }
+    function up() {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    }
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+
+  // ============================================================
+  // Pan / zoom
+  // ============================================================
+  let panState = null;
+  wrap.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.card')) return;
+    if (e.button === 1 || e.button === 0) {
+      panState = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+      wrap.classList.add('panning');
+      // also clear selection
+      state.selectedId = null;
+      document.querySelectorAll('.card.selected').forEach(c => c.classList.remove('selected'));
+      hideContextMenu(); hideFmtToolbar();
+    }
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!panState) return;
+    view.x = panState.vx + (e.clientX - panState.x);
+    view.y = panState.vy + (e.clientY - panState.y);
+    applyTransform();
+  });
+  window.addEventListener('mouseup', () => { panState = null; wrap.classList.remove('panning'); });
+
+  wrap.addEventListener('wheel', (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const r = wrap.getBoundingClientRect();
+      const cx = e.clientX - r.left, cy = e.clientY - r.top;
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      const newK = Math.min(2.5, Math.max(0.2, view.k * factor));
+      // zoom around cursor
+      view.x = cx - ((cx - view.x) * (newK / view.k));
+      view.y = cy - ((cy - view.y) * (newK / view.k));
+      view.k = newK;
+      applyTransform();
+    } else {
+      // pan via wheel
+      view.x -= e.deltaX;
+      view.y -= e.deltaY;
+      applyTransform();
+    }
+  }, { passive: false });
+
+  document.getElementById('zoom-in').onclick  = () => { view.k = Math.min(2.5, view.k * 1.15); applyTransform(); };
+  document.getElementById('zoom-out').onclick = () => { view.k = Math.max(0.2, view.k / 1.15); applyTransform(); };
+  document.getElementById('zoom-fit').onclick = () => { view = { x: 60, y: 40, k: 1 }; applyTransform(); };
+
+  // ============================================================
+  // Drag from toolbar -> canvas
+  // ============================================================
+  let toolDrag = null;
+  document.querySelectorAll('.tool').forEach(btn => {
+    btn.addEventListener('dragstart', (e) => {
+      const type = btn.dataset.type;
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/x-card-type', type);
+      // suppress the browser ghost
+      const ghost = document.createElement('div'); ghost.style.opacity = '0';
+      e.dataTransfer.setDragImage(ghost, 0, 0);
+      toolDrag = type;
+      wrap.classList.add('adding');
+    });
+    btn.addEventListener('dragend', () => { toolDrag = null; wrap.classList.remove('adding'); });
+    // click-to-add (alternative): drops near center of view
+    btn.addEventListener('click', () => {
+      const r = wrap.getBoundingClientRect();
+      const p = clientToCanvas(r.left + r.width/2, r.top + r.height/2);
+      createCard(btn.dataset.type, Math.round(p.x - 100), Math.round(p.y - 60));
+    });
+  });
+  wrap.addEventListener('dragover', (e) => { if (toolDrag) e.preventDefault(); });
+  wrap.addEventListener('drop', (e) => {
+    if (!toolDrag) return;
+    e.preventDefault();
+    const p = clientToCanvas(e.clientX, e.clientY);
+    createCard(toolDrag, Math.round(p.x - 100), Math.round(p.y - 30));
+    wrap.classList.remove('adding');
+    toolDrag = null;
+  });
+
+  function createCard(type, x, y) {
+    const defaults = {
+      note: { type: 'note', x, y, w: 240, h: 140, body: '' },
+      todo: { type: 'todo', x, y, w: 240, h: 180, title: 'To do', todos: [{ text: '', done: false }] },
+      heading: { type: 'heading', x, y, w: 260, body: 'Heading' },
+      link: { type: 'link', x, y, w: 240, h: 90, title: 'Untitled link', url: 'https://' },
+      document: { type: 'document', x, y, w: 140, h: 110, title: 'Untitled document', docMode: 'icon', docBody: '' },
+      board: null, // handled below
+    };
+    if (type === 'board') {
+      const colors = ['var(--c-sky)','var(--c-rose)','var(--c-sage)','var(--c-violet)','var(--c-saffron)','var(--c-clay)'];
+      const icons = ['grid','book','star','apple','shield'];
+      addBoard({ name: 'New board', x, y, color: colors[Math.floor(Math.random()*colors.length)], icon: icons[Math.floor(Math.random()*icons.length)] });
+    } else {
+      addCard(defaults[type]);
+    }
+    renderBoard();
+  }
+
+  // ============================================================
+  // Format toolbar (note in-canvas)
+  // ============================================================
+  const fmtToolbar = document.getElementById('fmt-toolbar');
+  function positionFmtToolbar() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) { hideFmtToolbar(); return; }
+    const range = sel.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) { hideFmtToolbar(); return; }
+    fmtToolbar.classList.add('visible');
+    const tw = fmtToolbar.offsetWidth;
+    fmtToolbar.style.left = Math.max(8, rect.left + rect.width / 2 - tw / 2) + 'px';
+    fmtToolbar.style.top  = Math.max(8, rect.top - 42) + 'px';
+  }
+  function hideFmtToolbar() { fmtToolbar.classList.remove('visible'); }
+  fmtToolbar.querySelectorAll('button').forEach(b => {
+    b.addEventListener('mousedown', (e) => e.preventDefault());
+    b.addEventListener('click', () => execFormat(b.dataset.cmd));
+  });
+  function execFormat(cmd) {
+    if (cmd === 'h1') document.execCommand('formatBlock', false, '<H1>');
+    else if (cmd === 'h2') document.execCommand('formatBlock', false, '<H2>');
+    else if (cmd === 'ul') document.execCommand('insertUnorderedList');
+    else if (cmd === 'ol') document.execCommand('insertOrderedList');
+    else if (cmd === 'blockquote') document.execCommand('formatBlock', false, '<BLOCKQUOTE>');
+    else if (cmd === 'code') wrapInline('code');
+    else if (cmd === 'link') {
+      const url = prompt('Link URL', 'https://');
+      if (url) document.execCommand('createLink', false, url);
+    }
+    else document.execCommand(cmd);
+    positionFmtToolbar();
+  }
+  function wrapInline(tag) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const node = document.createElement(tag);
+    node.textContent = range.toString();
+    range.deleteContents();
+    range.insertNode(node);
+  }
+
+  // Markdown shortcuts inside notes/docs
+  function handleMarkdownShortcuts(e, root) {
+    if (e.key !== ' ') return;
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    const block = getBlock(range.startContainer, root);
+    if (!block) return;
+    const text = block.textContent.replace(/\u200b/g,'');
+    // only fire when caret at end
+    if (range.startContainer !== block && !block.contains(range.startContainer)) return;
+
+    const fire = (tag) => {
+      e.preventDefault();
+      block.textContent = '';
+      document.execCommand('formatBlock', false, '<' + tag + '>');
+    };
+    if (text === '#')   return fire('H1');
+    if (text === '##')  return fire('H2');
+    if (text === '-' || text === '*') {
+      e.preventDefault();
+      block.textContent = '';
+      document.execCommand('insertUnorderedList');
+      return;
+    }
+    if (text === '1.') {
+      e.preventDefault();
+      block.textContent = '';
+      document.execCommand('insertOrderedList');
+      return;
+    }
+    if (text === '>') {
+      e.preventDefault();
+      block.textContent = '';
+      document.execCommand('formatBlock', false, '<BLOCKQUOTE>');
+      return;
+    }
+    if (text === '```') {
+      e.preventDefault();
+      block.textContent = '';
+      document.execCommand('formatBlock', false, '<PRE>');
+      return;
+    }
+  }
+  function getBlock(node, root) {
+    let n = node.nodeType === 3 ? node.parentNode : node;
+    while (n && n !== root) {
+      if (['P','H1','H2','LI','BLOCKQUOTE','PRE','DIV'].includes(n.tagName)) return n;
+      n = n.parentNode;
+    }
+    return null;
+  }
+
+  // ============================================================
+  // Context menu (color, duplicate, delete, etc)
+  // ============================================================
+  const ctx = document.getElementById('ctx');
+  const swatches = document.getElementById('ctx-swatches');
+  const SWATCH_COLORS = [
+    { name: 'Paper',   v: 'var(--c-paper)' },
+    { name: 'Saffron', v: 'var(--c-saffron)' },
+    { name: 'Rose',    v: 'var(--c-rose)' },
+    { name: 'Sage',    v: 'var(--c-sage)' },
+    { name: 'Sky',     v: 'var(--c-sky)' },
+    { name: 'Violet',  v: 'var(--c-violet)' },
+    { name: 'Clay',    v: 'var(--c-clay)' },
+  ];
+  swatches.innerHTML = '';
+  SWATCH_COLORS.forEach(c => {
+    const b = document.createElement('button');
+    b.className = 'sw'; b.title = c.name;
+    b.style.background = c.v;
+    b.onclick = () => {
+      if (!state.selectedId) return;
+      const card = state.cards[state.selectedId];
+      card.color = c.v;
+      // For board tiles, color sets tile bg
+      hideContextMenu();
+      renderBoard();
+    };
+    swatches.appendChild(b);
+  });
+
+  function openContextMenu(x, y, card) {
+    ctx.style.left = Math.min(window.innerWidth - 220, x) + 'px';
+    ctx.style.top  = Math.min(window.innerHeight - 280, y) + 'px';
+    ctx.classList.add('visible');
+    // toggle item visibility based on card type
+    ctx.querySelectorAll('.item').forEach(it => {
+      const only = it.dataset.only;
+      it.style.display = (!only || only === card.type) ? '' : 'none';
+    });
+  }
+  function hideContextMenu() { ctx.classList.remove('visible'); }
+  document.addEventListener('mousedown', (e) => {
+    if (!e.target.closest('.ctx')) hideContextMenu();
+  });
+  ctx.querySelectorAll('.item').forEach(it => {
+    it.addEventListener('click', () => {
+      const act = it.dataset.act;
+      const cid = state.selectedId; if (!cid) return;
+      const card = state.cards[cid];
+      hideContextMenu();
+      if (act === 'duplicate') duplicateCard(cid);
+      if (act === 'delete') deleteCard(cid);
+      if (act === 'bring-front') { card._z = (card._z || 0) + 1; /* simple stacking */ canvas.querySelector(`.card[data-id="${cid}"]`).style.zIndex = card._z + 5; }
+      if (act === 'open-doc') openDocument(cid);
+      if (act === 'enter-board') navigateTo(cid);
+      if (act === 'convert-doc') convertNoteToDoc(cid);
+    });
+  });
+
+  function duplicateCard(cid) {
+    const orig = state.cards[cid];
+    const copy = JSON.parse(JSON.stringify(orig));
+    if (orig.type === 'board') {
+      // Duplicating a board: shallow — make a new empty board with same look
+      addBoard({ name: orig.name + ' (copy)', x: orig.x + 30, y: orig.y + 30, color: orig.color, icon: orig.icon });
+    } else {
+      copy.id = id();
+      copy.x = (orig.x || 0) + 30; copy.y = (orig.y || 0) + 30;
+      state.cards[copy.id] = copy;
+      state.boards[state.currentBoardId].cardIds.push(copy.id);
+    }
+    renderBoard();
+  }
+
+  function deleteCard(cid) {
+    const card = state.cards[cid];
+    state.trash.push({ id: id(), type: 'card', cardType: card.type, cardId: cid, snapshot: JSON.parse(JSON.stringify(card)), boardId: state.currentBoardId, deletedAt: Date.now() });
+    // remove from current board's cardIds
+    const board = state.boards[state.currentBoardId];
+    board.cardIds = board.cardIds.filter(x => x !== cid);
+    delete state.cards[cid];
+    if (card.type === 'board') {
+      // Don't delete the board entry from state.boards yet — restore needs it
+      // (Trash holds the snapshot; if "purge" were a feature it would clean up.)
+    }
+    state.selectedId = null;
+    renderBoard();
+    renderTrash();
+  }
+
+  // ============================================================
+  // Document overlay
+  // ============================================================
+  const overlay = document.getElementById('doc-overlay');
+  const docTitle = document.getElementById('doc-title');
+  const docBody  = document.getElementById('doc-body');
+  let activeDocId = null;
+  function openDocument(cid) {
+    const card = state.cards[cid];
+    if (!card || card.type !== 'document') return;
+    activeDocId = cid;
+    docTitle.value = card.title || '';
+    docBody.innerHTML = card.docBody || '';
+    overlay.classList.add('visible');
+    setTimeout(() => docBody.focus(), 60);
+  }
+  function closeDocument() {
+    overlay.classList.remove('visible');
+    if (activeDocId) {
+      const card = state.cards[activeDocId];
+      card.title = docTitle.value;
+      card.docBody = docBody.innerHTML;
+      activeDocId = null;
+      renderBoard();
+    }
+  }
+  document.getElementById('doc-close').onclick = closeDocument;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDocument(); });
+  docBody.addEventListener('keydown', (e) => handleMarkdownShortcuts(e, docBody));
+  document.querySelectorAll('[data-doc-cmd]').forEach(b => {
+    b.addEventListener('mousedown', (e) => e.preventDefault());
+    b.addEventListener('click', () => {
+      const cmd = b.dataset.docCmd;
+      if (cmd === 'h1') document.execCommand('formatBlock', false, '<H1>');
+      else if (cmd === 'h2') document.execCommand('formatBlock', false, '<H2>');
+      else if (cmd === 'ul') document.execCommand('insertUnorderedList');
+      else if (cmd === 'ol') document.execCommand('insertOrderedList');
+      else if (cmd === 'blockquote') document.execCommand('formatBlock', false, '<BLOCKQUOTE>');
+      else if (cmd === 'code') wrapInline('code');
+      else if (cmd === 'link') {
+        const url = prompt('Link URL', 'https://');
+        if (url) document.execCommand('createLink', false, url);
+      } else document.execCommand(cmd);
+      docBody.focus();
+    });
+  });
+
+  // ============================================================
+  // Trash drawer
+  // ============================================================
+  const trash = document.getElementById('trash');
+  document.getElementById('trash-btn').onclick = () => {
+    trash.classList.toggle('open');
+    if (trash.classList.contains('open')) renderTrash();
+  };
+  document.getElementById('trash-close').onclick = () => trash.classList.remove('open');
+  function closeTrash() { trash.classList.remove('open'); }
+
+  function renderTrash() {
+    const body = document.getElementById('trash-body');
+    body.innerHTML = '';
+    const items = state.trash.slice().reverse();
+    if (items.length === 0) {
+      body.innerHTML = '<div class="empty">Nothing has been deleted.<br/>Items removed from a board land here.</div>';
+      return;
+    }
+    items.forEach(t => {
+      const row = document.createElement('div'); row.className = 'row';
+      const info = document.createElement('div'); info.className = 'info';
+      const meta = document.createElement('div'); meta.className = 'meta';
+      const when = new Date(t.deletedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      meta.textContent = (t.type === 'todo-item' ? 'To-do item' : (t.cardType || 'card')) + ' · ' + when;
+      const preview = document.createElement('div'); preview.className = 'preview';
+      if (t.type === 'todo-item') preview.textContent = (t.snapshot.text || '(empty)');
+      else if (t.type === 'card') {
+        const c = t.snapshot;
+        preview.innerHTML = c.type === 'note' ? c.body
+          : c.type === 'heading' ? c.body
+          : c.type === 'link' ? c.title + ' — ' + c.url
+          : c.type === 'document' ? c.title
+          : c.type === 'todo' ? (c.title || 'To-do') + ' · ' + (c.todos||[]).length + ' items'
+          : c.type === 'board' ? 'Board: ' + c.name
+          : '';
+      }
+      info.appendChild(meta); info.appendChild(preview);
+
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const restore = document.createElement('button'); restore.textContent = 'Restore';
+      restore.onclick = () => restoreFromTrash(t.id);
+      actions.appendChild(restore);
+
+      row.appendChild(info); row.appendChild(actions);
+      body.appendChild(row);
+    });
+  }
+
+  function restoreFromTrash(trashId) {
+    const idx = state.trash.findIndex(t => t.id === trashId);
+    if (idx < 0) return;
+    const t = state.trash.splice(idx, 1)[0];
+    if (t.type === 'card') {
+      const c = t.snapshot;
+      // re-add (use original id if free, else new)
+      const newId = state.cards[c.id] ? id() : c.id;
+      c.id = newId;
+      state.cards[newId] = c;
+      // restore to original board if it still exists, otherwise current board
+      const targetBoard = state.boards[t.boardId] ? t.boardId : state.currentBoardId;
+      state.boards[targetBoard].cardIds.push(newId);
+    } else if (t.type === 'todo-item') {
+      const card = state.cards[t.cardId];
+      if (card && card.type === 'todo') {
+        card.todos = card.todos || [];
+        card.todos.push(t.snapshot);
+      }
+    }
+    renderBoard();
+    renderTrash();
+  }
+
+  // ============================================================
+  // Boot
+  // ============================================================
+  seed();
+  view = { x: 60, y: 40, k: 1 };
+  applyTransform();
+  renderBoard();
+</script>
+</body>
+</html>

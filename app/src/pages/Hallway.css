@@ -137,8 +137,8 @@
 .sphere:focus-visible .sub { opacity: 1; transform: translateY(0); }
 .sphere:active { transform: scale(0.985); }
 .sphere.big:hover                        { transform: translate(-50%, -50%) scale(1.02); }
-.sphere.small.s-wonder:hover             { transform: translateX(-50%) scale(1.03); }
-.sphere.small:not(.s-wonder):hover       { transform: scale(1.03); }
+.sphere.small.s-notes:hover             { transform: translateX(-50%) scale(1.03); }
+.sphere.small:not(.s-notes):hover       { transform: scale(1.03); }
 
 .sphere.big   { width: 30%; aspect-ratio: 1; }
 .sphere.small { width: 18%; aspect-ratio: 1; }
@@ -152,7 +152,7 @@
    Timeline & Workshop symmetric around 50%. */
 .s-sanctuary { left: 50%; top: 58%; transform: translate(-50%, -50%); }
 .s-timeline  { left: 16%; top: 22%; }
-.s-wonder    { left: 50%; top: 12%; transform: translateX(-50%); }
+.s-notes    { left: 50%; top: 12%; transform: translateX(-50%); }
 .s-workshop  { right: 16%; top: 22%; }
 
 /* Quiet hairline arc */
@@ -311,7 +311,7 @@
   @keyframes hw-dawn { 0%, 100% { opacity: 1; filter: none; } }
 }
 
-.s-wonder    { animation-delay: 250ms; }
+.s-notes    { animation-delay: 250ms; }
 .s-timeline  { animation-delay: 600ms; }
 .s-workshop  { animation-delay: 900ms; }
 .s-sanctuary { animation-delay: 1200ms; }
