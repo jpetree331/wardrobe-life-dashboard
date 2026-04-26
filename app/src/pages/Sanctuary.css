@@ -541,7 +541,16 @@
   padding: 5px 10px; cursor: pointer; border-radius: 3px;
 }
 .sa-sel-toolbar button:hover { background: rgba(255,255,255,0.12); }
-.sa-sc-highlight { background: var(--hi); padding: 0 2px; }
+.sa-sc-highlight {
+  background: var(--hi);
+  padding: 0 2px;
+  cursor: pointer;
+  /* Subtle hover hint — slightly darker wash so users notice it's clickable. */
+  transition: background 150ms ease;
+}
+.sa-sc-highlight:hover {
+  background: color-mix(in oklab, var(--hi) 70%, var(--accent-strong) 30%);
+}
 
 /* Status bar */
 .sa-status {

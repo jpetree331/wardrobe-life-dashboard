@@ -73,6 +73,19 @@ export default function Sanctuary() {
   } | null>(null);
   const scriptureBodyRef = useRef<HTMLDivElement | null>(null);
 
+  // Verses are rendered as an HTML string instead of JSX so that
+  // user-applied highlights (DOM-mutated <span class="sa-sc-highlight">)
+  // can be cached and restored when the user navigates away and back to
+  // the same passage. Without the cache, switching Luke 24 → Luke 23 →
+  // Luke 24 would re-fetch fresh verses and the highlights would be lost.
+  const [versesHtml, setVersesHtml] = useState<string>('');
+  const versesCache = useRef<Map<string, string>>(new Map());
+  const currentVersesKey = useRef<string>('');
+  const versesHtmlRef = useRef<string>('');
+  useEffect(() => {
+    versesHtmlRef.current = versesHtml;
+  }, [versesHtml]);
+
   // Resizable binder column. Persisted to localStorage so the width
   // survives reloads. Clamped to [180, 600] in the drag handler.
   const [binderWidth, setBinderWidth] = useState<number>(() => {
@@ -546,6 +559,27 @@ export default function Sanctuary() {
   }
 
   // ── Scripture ──────────────────────────────────────────────────────────
+  // Manage the verses cache. When scResult changes:
+  //   1. Save the OUTGOING passage's current versesHtml to the cache
+  //      (preserves any highlights the user just applied).
+  //   2. Look up the INCOMING passage in the cache. If found, restore that
+  //      HTML (including saved highlights). If not, render fresh from
+  //      `scResult.verses`.
+  // No save happens when switching to/from a null result (loading, error).
+  useEffect(() => {
+    if (!scResult) return;
+    const newKey = `${scResult.reference}::${scResult.translation}`;
+    if (currentVersesKey.current === newKey) return;
+
+    if (currentVersesKey.current && versesHtmlRef.current) {
+      versesCache.current.set(currentVersesKey.current, versesHtmlRef.current);
+    }
+    currentVersesKey.current = newKey;
+
+    const cached = versesCache.current.get(newKey);
+    setVersesHtml(cached ?? renderVersesHtml(scResult.verses));
+  }, [scResult]);
+
   const lookupScripture = useCallback(async () => {
     if (!scRef.trim()) return;
     setScLoading(true);
@@ -616,18 +650,46 @@ export default function Sanctuary() {
       } catch {
         /* ignore */
       }
+      syncVersesHtmlFromDom();
     } else if (action === 'unhighlight') {
       // Walk up from the selection to find the .sa-sc-highlight ancestor;
-      // unwrap it (replace the span with its children).
+      // unwrap that ONE span (replace it with its children). Other highlights
+      // elsewhere in the passage are untouched.
       const range = s.getRangeAt(0);
       const host = findAncestor(range.commonAncestorContainer, 'sa-sc-highlight');
       if (host && host.parentNode) {
         while (host.firstChild) host.parentNode.insertBefore(host.firstChild, host);
         host.parentNode.removeChild(host);
       }
+      syncVersesHtmlFromDom();
     }
     s.removeAllRanges();
     setSel(null);
+  }
+
+  // After any DOM mutation inside the scripture body (add/remove highlight),
+  // mirror the resulting HTML back into React state. Without this, navigating
+  // away and back via the cache would lose the change — the cache reads
+  // versesHtmlRef, which only updates when versesHtml state updates.
+  function syncVersesHtmlFromDom() {
+    const verses = scriptureBodyRef.current?.querySelector('.sa-verses');
+    if (verses) setVersesHtml(verses.innerHTML);
+  }
+
+  // Click-to-select. The selection toolbar only appears on a non-collapsed
+  // selection, so a plain click on a highlight wouldn't surface the "Remove
+  // highlight" affordance. This handler programmatically selects the text
+  // contents of any highlight the user clicks, which trips the existing
+  // selectionchange path and shows the toolbar with the Remove button.
+  function handleScriptureClick(e: React.MouseEvent) {
+    const highlight = findAncestor(e.target as Node, 'sa-sc-highlight');
+    if (!highlight) return;
+    const range = document.createRange();
+    range.selectNodeContents(highlight);
+    const s = window.getSelection();
+    if (!s) return;
+    s.removeAllRanges();
+    s.addRange(range);
   }
 
   // ── Filtering / search ─────────────────────────────────────────────────
@@ -1043,28 +1105,27 @@ export default function Sanctuary() {
               )}
             </div>
             {paneTab === 'scripture' ? (
-              <div className="sa-scripture-body" ref={scriptureBodyRef}>
+              <div
+                className="sa-scripture-body"
+                ref={scriptureBodyRef}
+                onClick={handleScriptureClick}
+              >
                 {scLoading && <div className="sa-sc-loading">Fetching…</div>}
                 {scError && <div className="sa-sc-error">{scError}</div>}
                 {scResult && (
-                  // The `key` here forces a full unmount-and-remount of the
-                  // verses block whenever the user moves to a different
-                  // reference or translation. Without it, in-DOM highlights
-                  // applied via the selection toolbar would carry over to
-                  // the new chapter and visually attach to text the user
-                  // never selected.
-                  <div key={`${scResult.reference}::${scResult.translation}`}>
+                  <>
                     <h2>{scResult.reference}</h2>
-                    <p>
-                      {scResult.verses.map((v, i) => (
-                        <span key={`${v.chapter}-${v.verse}-${i}`}>
-                          <span className="sa-vnum">{v.verse}</span>
-                          {v.text}{' '}
-                        </span>
-                      ))}
-                    </p>
+                    {/* Verses are rendered as HTML so user-applied highlight
+                        spans survive across passage navigation via the
+                        per-(reference, translation) cache. The HTML source
+                        is either freshly built from `scResult.verses` or
+                        restored from cache (with prior highlights baked in). */}
+                    <p
+                      className="sa-verses"
+                      dangerouslySetInnerHTML={{ __html: versesHtml }}
+                    />
                     <div className="sa-sc-source">Source: {scResult.source}</div>
-                  </div>
+                  </>
                 )}
                 {!scResult && !scLoading && !scError && (
                   <div style={{ fontStyle: 'italic', color: 'var(--ink-faint)' }}>
@@ -1378,6 +1439,34 @@ function ImportPreviewDialog({
       </div>
     </div>
   );
+}
+
+/**
+ * Render a fresh verses HTML string from the API result. Used when the
+ * user navigates to a passage we haven't cached yet. The structure mirrors
+ * what the previous JSX render produced — outer wrapping span per verse,
+ * inner `.sa-vnum` superscript, then the verse text — so the CSS
+ * selectors continue to match.
+ *
+ * Verse text is HTML-escaped so any odd characters in the API response
+ * can't inject markup.
+ */
+export function renderVersesHtml(
+  verses: Array<{ verse: number; text: string }>,
+): string {
+  return verses
+    .map(
+      (v) =>
+        `<span><span class="sa-vnum">${v.verse}</span>${escapeHtmlForVerses(v.text || '')} </span>`,
+    )
+    .join('');
+}
+
+function escapeHtmlForVerses(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 /** Walk parent chain from a node looking for an Element with the given class. */
