@@ -358,12 +358,19 @@ export default function Sanctuary() {
         tags: e.tags,
         scripture_refs: e.scripture_refs,
       }));
-      const result = await bulkInsertSanctuary(payload);
-      setStatusMsg(
-        `Imported ${result.inserted}${
-          result.skipped ? ` · skipped ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'}` : ''
-        } from ${plan.folderName}.`,
-      );
+      const result = await bulkInsertSanctuary(payload, (done, total) => {
+        setStatusMsg(`Importing ${done} of ${total}…`);
+      });
+      const parts: string[] = [`Imported ${result.inserted}`];
+      if (result.skipped) {
+        parts.push(`skipped ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'}`);
+      }
+      if (result.failed) {
+        parts.push(
+          `${result.failed} failed — re-run import to retry (already-inserted rows will skip)`,
+        );
+      }
+      setStatusMsg(`${parts.join(' · ')} from ${plan.folderName}.`);
       setImportPreview(null);
       const data = await listSanctuary();
       setEntries(data);

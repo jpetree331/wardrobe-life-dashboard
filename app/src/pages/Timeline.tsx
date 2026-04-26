@@ -226,10 +226,19 @@ export default function Timeline() {
     const plan = importPlan;
     setImportPlan(null);
     try {
-      const result = await bulkInsertTimeline(plan.rows);
-      flashStatus(
-        `Imported ${result.inserted}${result.skipped ? ` · skipped ${result.skipped} exact duplicate${result.skipped === 1 ? '' : 's'}` : ''} from ${plan.fileName}.`,
-      );
+      const result = await bulkInsertTimeline(plan.rows, (done, total) => {
+        setStatusMsg(`Importing ${done} of ${total}…`);
+      });
+      const parts: string[] = [`Imported ${result.inserted}`];
+      if (result.skipped) {
+        parts.push(`skipped ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'}`);
+      }
+      if (result.failed) {
+        parts.push(
+          `${result.failed} failed — re-run import to retry (already-inserted rows will skip)`,
+        );
+      }
+      flashStatus(`${parts.join(' · ')} from ${plan.fileName}.`);
       await refresh();
     } catch (err) {
       console.error(err);

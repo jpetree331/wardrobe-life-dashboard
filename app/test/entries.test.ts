@@ -17,6 +17,10 @@ type Captured = {
 
 let captured: Captured;
 let nextResult: { data: any; error: any } = { data: null, error: null };
+// When set, each query in sequence gets shifted off this queue instead of
+// reading nextResult — useful for batch-insert tests that need different
+// responses per call (prefetch ok, batch 1 ok, batch 2 errors, etc.)
+let resultQueue: Array<{ data: any; error: any }> | null = null;
 let userId = 'user-1';
 let getUserError: any = null;
 
@@ -44,9 +48,13 @@ function builder() {
     captured.upsert = { rows, opts };
     return b;
   };
-  b.single = () => { captured.finisher = 'single'; return Promise.resolve(nextResult); };
-  b.maybeSingle = () => { captured.finisher = 'maybeSingle'; return Promise.resolve(nextResult); };
-  b.then = (resolve: (v: any) => void) => resolve(nextResult);
+  const peekResult = () => {
+    if (resultQueue && resultQueue.length > 0) return resultQueue.shift()!;
+    return nextResult;
+  };
+  b.single = () => { captured.finisher = 'single'; return Promise.resolve(peekResult()); };
+  b.maybeSingle = () => { captured.finisher = 'maybeSingle'; return Promise.resolve(peekResult()); };
+  b.then = (resolve: (v: any) => void) => resolve(peekResult());
   return b;
 }
 
@@ -82,6 +90,7 @@ import {
 beforeEach(() => {
   captured = { filters: [], finisher: null };
   nextResult = { data: null, error: null };
+  resultQueue = null;
   userId = 'user-1';
   getUserError = null;
 });
@@ -305,7 +314,7 @@ describe('timelineForDate', () => {
 describe('bulkInsertTimeline (single-mode, exact-duplicate skip)', () => {
   it('returns 0/0 for empty input without any DB calls', async () => {
     const out = await bulkInsertTimeline([]);
-    expect(out).toEqual({ inserted: 0, skipped: 0 });
+    expect(out).toEqual({ inserted: 0, skipped: 0, failed: 0 });
   });
 
   it('skips a row whose (date, summary) pair already exists; inserts new ones', async () => {
@@ -319,7 +328,7 @@ describe('bulkInsertTimeline (single-mode, exact-duplicate skip)', () => {
       { entry_date: '2024-01-02', summary: 'b', tags: [] }, // new → insert
       { entry_date: '2024-01-03', summary: 'c', tags: [] }, // new → insert
     ]);
-    expect(out).toEqual({ inserted: 2, skipped: 1 });
+    expect(out).toEqual({ inserted: 2, skipped: 1, failed: 0 });
   });
 
   it('keeps DISTINCT same-day entries (different text on the same date)', async () => {
@@ -333,7 +342,7 @@ describe('bulkInsertTimeline (single-mode, exact-duplicate skip)', () => {
       { entry_date: '2024-01-01', summary: 'morning event', tags: [] }, // dupe
       { entry_date: '2024-01-01', summary: 'evening event', tags: [] }, // distinct
     ]);
-    expect(out).toEqual({ inserted: 1, skipped: 1 });
+    expect(out).toEqual({ inserted: 1, skipped: 1, failed: 0 });
   });
 
   it('de-dupes within the import file itself (two identical rows = one inserted)', async () => {
@@ -343,7 +352,7 @@ describe('bulkInsertTimeline (single-mode, exact-duplicate skip)', () => {
       { entry_date: '2024-01-01', summary: 'same', tags: [] },
       { entry_date: '2024-01-01', summary: 'same', tags: [] },
     ]);
-    expect(out).toEqual({ inserted: 1, skipped: 2 });
+    expect(out).toEqual({ inserted: 1, skipped: 2, failed: 0 });
   });
 
   it('treats trailing whitespace as identical (avoids near-duplicate noise)', async () => {
@@ -354,14 +363,14 @@ describe('bulkInsertTimeline (single-mode, exact-duplicate skip)', () => {
     const out = await bulkInsertTimeline([
       { entry_date: '2024-01-01', summary: 'walked   ', tags: [] }, // trailing ws → dupe
     ]);
-    expect(out).toEqual({ inserted: 0, skipped: 1 });
+    expect(out).toEqual({ inserted: 0, skipped: 1, failed: 0 });
   });
 });
 
 describe('bulkInsertSanctuary (exact-text dedupe + batch insert)', () => {
   it('returns 0/0 for empty input', async () => {
     const out = await bulkInsertSanctuary([]);
-    expect(out).toEqual({ inserted: 0, skipped: 0 });
+    expect(out).toEqual({ inserted: 0, skipped: 0, failed: 0 });
   });
 
   it('skips a row whose (entry_date, body) already exists; inserts new ones', async () => {
@@ -373,7 +382,7 @@ describe('bulkInsertSanctuary (exact-text dedupe + batch insert)', () => {
       { entry_date: '2024-04-19', title: 'A', body: '<p>existing</p>' }, // dupe
       { entry_date: '2024-04-20', title: 'B', body: '<p>new</p>' },
     ]);
-    expect(out).toEqual({ inserted: 1, skipped: 1 });
+    expect(out).toEqual({ inserted: 1, skipped: 1, failed: 0 });
   });
 
   it('keeps multiple distinct entries on the same date', async () => {
@@ -382,7 +391,7 @@ describe('bulkInsertSanctuary (exact-text dedupe + batch insert)', () => {
       { entry_date: '2024-04-19', title: 'morning', body: '<p>a</p>' },
       { entry_date: '2024-04-19', title: 'evening', body: '<p>b</p>' },
     ]);
-    expect(out).toEqual({ inserted: 2, skipped: 0 });
+    expect(out).toEqual({ inserted: 2, skipped: 0, failed: 0 });
   });
 
   it('de-dupes within the import payload', async () => {
@@ -391,7 +400,7 @@ describe('bulkInsertSanctuary (exact-text dedupe + batch insert)', () => {
       { entry_date: '2024-04-19', title: 'A', body: '<p>same</p>' },
       { entry_date: '2024-04-19', title: 'A', body: '<p>same</p>' },
     ]);
-    expect(out).toEqual({ inserted: 1, skipped: 1 });
+    expect(out).toEqual({ inserted: 1, skipped: 1, failed: 0 });
   });
 
   it('inserts with sensible defaults for optional fields', async () => {
@@ -427,6 +436,41 @@ describe('bulkInsertSanctuary (exact-text dedupe + batch insert)', () => {
         entry_type: 'lectio',
         tags: ['t1', 't2'],
       }),
+    ]);
+  });
+
+  it('continues past a failed batch and reports the failure count', async () => {
+    // Three calls in sequence: prefetch (no existing), batch 1 OK, batch 2
+    // errors. The bulk insert must report the partial success rather than
+    // aborting on the second batch's failure.
+    resultQueue = [
+      { data: [], error: null },                          // prefetch existing
+      { data: null, error: null },                        // batch 1 OK (50 rows)
+      { data: null, error: { message: 'simulated' } },    // batch 2 errors (25 rows)
+    ];
+    const rows = Array.from({ length: 75 }, (_, i) => ({
+      entry_date: '2024-04-19',
+      title: `t${i}`,
+      body: `<p>body ${i}</p>`,
+    }));
+    const out = await bulkInsertSanctuary(rows);
+    expect(out).toEqual({ inserted: 50, skipped: 0, failed: 25 });
+  });
+
+  it('reports progress via the optional callback once per batch', async () => {
+    nextResult = { data: [], error: null };
+    const calls: Array<{ done: number; total: number }> = [];
+    const rows = Array.from({ length: 75 }, (_, i) => ({
+      entry_date: '2024-04-19',
+      title: `t${i}`,
+      body: `<p>body ${i}</p>`,
+    }));
+    await bulkInsertSanctuary(rows, (done, total) => {
+      calls.push({ done, total });
+    });
+    expect(calls).toEqual([
+      { done: 50, total: 75 },
+      { done: 75, total: 75 },
     ]);
   });
 });
