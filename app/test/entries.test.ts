@@ -66,6 +66,7 @@ vi.mock('../src/lib/supabase', () => ({
 }));
 
 import {
+  bulkInsertSanctuary,
   bulkInsertTimeline,
   createSanctuaryEntry,
   deleteEntry,
@@ -354,5 +355,78 @@ describe('bulkInsertTimeline (single-mode, exact-duplicate skip)', () => {
       { entry_date: '2024-01-01', summary: 'walked   ', tags: [] }, // trailing ws → dupe
     ]);
     expect(out).toEqual({ inserted: 0, skipped: 1 });
+  });
+});
+
+describe('bulkInsertSanctuary (exact-text dedupe + batch insert)', () => {
+  it('returns 0/0 for empty input', async () => {
+    const out = await bulkInsertSanctuary([]);
+    expect(out).toEqual({ inserted: 0, skipped: 0 });
+  });
+
+  it('skips a row whose (entry_date, body) already exists; inserts new ones', async () => {
+    nextResult = {
+      data: [{ entry_date: '2024-04-19', body: '<p>existing</p>' }],
+      error: null,
+    };
+    const out = await bulkInsertSanctuary([
+      { entry_date: '2024-04-19', title: 'A', body: '<p>existing</p>' }, // dupe
+      { entry_date: '2024-04-20', title: 'B', body: '<p>new</p>' },
+    ]);
+    expect(out).toEqual({ inserted: 1, skipped: 1 });
+  });
+
+  it('keeps multiple distinct entries on the same date', async () => {
+    nextResult = { data: [], error: null };
+    const out = await bulkInsertSanctuary([
+      { entry_date: '2024-04-19', title: 'morning', body: '<p>a</p>' },
+      { entry_date: '2024-04-19', title: 'evening', body: '<p>b</p>' },
+    ]);
+    expect(out).toEqual({ inserted: 2, skipped: 0 });
+  });
+
+  it('de-dupes within the import payload', async () => {
+    nextResult = { data: [], error: null };
+    const out = await bulkInsertSanctuary([
+      { entry_date: '2024-04-19', title: 'A', body: '<p>same</p>' },
+      { entry_date: '2024-04-19', title: 'A', body: '<p>same</p>' },
+    ]);
+    expect(out).toEqual({ inserted: 1, skipped: 1 });
+  });
+
+  it('inserts with sensible defaults for optional fields', async () => {
+    nextResult = { data: [], error: null };
+    await bulkInsertSanctuary([
+      { entry_date: '2024-04-19', title: 'A', body: '<p>x</p>' },
+    ]);
+    expect(captured.insert).toEqual([
+      expect.objectContaining({
+        room: 'sanctuary',
+        body_type: 'rich',
+        tags: [],
+        scripture_refs: [],
+        entry_type: null,
+        user_id: 'user-1',
+      }),
+    ]);
+  });
+
+  it('respects explicit tags and entry_type', async () => {
+    nextResult = { data: [], error: null };
+    await bulkInsertSanctuary([
+      {
+        entry_date: '2024-04-19',
+        title: 'A',
+        body: '<p>x</p>',
+        entry_type: 'lectio',
+        tags: ['t1', 't2'],
+      },
+    ]);
+    expect(captured.insert).toEqual([
+      expect.objectContaining({
+        entry_type: 'lectio',
+        tags: ['t1', 't2'],
+      }),
+    ]);
   });
 });

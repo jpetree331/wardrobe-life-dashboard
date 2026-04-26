@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
+  bulkInsertSanctuary,
   createSanctuaryEntry,
   deleteEntry,
   listSanctuary,
@@ -16,6 +17,11 @@ import {
   type ScriptureResult,
   type Translation,
 } from '../lib/scripture';
+import {
+  parseMetadata,
+  parseSanctuaryFile,
+  type ParsedSanctuaryEntry,
+} from '../lib/sanctuaryImport';
 import './Sanctuary.css';
 
 type Mode = 'single' | 'dual';
@@ -63,6 +69,15 @@ export default function Sanctuary() {
   const bodyHydrationKey = useRef<string | null>(null);
 
   const [timelineLine, setTimelineLine] = useState<TimelineRow | null>(null);
+
+  // Folder-import state
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importPreview, setImportPreview] = useState<{
+    entries: ParsedSanctuaryEntry[];
+    skipped: Array<{ filename: string; reason: string }>;
+    folderName: string;
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
 
   // ── Load list ──────────────────────────────────────────────────────────
   const refresh = useCallback(async () => {
@@ -274,6 +289,89 @@ export default function Sanctuary() {
     } catch (err) {
       console.error(err);
       setStatusMsg('Delete failed.');
+    }
+  }
+
+  // ── Folder import (Scrivener "File → Export → Files…" output) ──────────
+  async function handleImportFolder(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setStatusMsg(`Reading ${files.length} files…`);
+
+    // Group by base name to pair each .md with its sibling " MetaData.txt"
+    const fileList = Array.from(files);
+    const mdFiles = fileList.filter((f) => /\.md$/i.test(f.name));
+    const metaByPath = new Map<string, File>();
+    for (const f of fileList) {
+      if (/ MetaData\.txt$/i.test(f.name)) {
+        const path = (f as any).webkitRelativePath || f.name;
+        metaByPath.set(path, f);
+      }
+    }
+
+    const folderName = (fileList[0] as any).webkitRelativePath?.split('/')[0] || 'folder';
+
+    const entries: ParsedSanctuaryEntry[] = [];
+    const skipped: Array<{ filename: string; reason: string }> = [];
+
+    for (const md of mdFiles) {
+      const mdPath = (md as any).webkitRelativePath || md.name;
+      const metaPath = mdPath.replace(/\.md$/i, ' MetaData.txt');
+      let metadata = null;
+      const metaFile = metaByPath.get(metaPath);
+      if (metaFile) {
+        try {
+          metadata = parseMetadata(await metaFile.text());
+        } catch {
+          metadata = null;
+        }
+      }
+      let body: string;
+      try {
+        body = await md.text();
+      } catch {
+        skipped.push({ filename: md.name, reason: 'could not read file' });
+        continue;
+      }
+      const parsed = parseSanctuaryFile(md.name, body, metadata);
+      if (!parsed) {
+        skipped.push({ filename: md.name, reason: 'no date in filename or metadata' });
+        continue;
+      }
+      entries.push(parsed);
+    }
+
+    setImportPreview({ entries, skipped, folderName });
+    setStatusMsg(`Read ${entries.length} entries from ${folderName}.`);
+  }
+
+  async function performImport() {
+    if (!importPreview) return;
+    setImporting(true);
+    const plan = importPreview;
+    setStatusMsg(`Importing ${plan.entries.length} entries…`);
+    try {
+      const payload = plan.entries.map((e) => ({
+        entry_date: e.date,
+        title: e.title,
+        body: e.body_html,
+        entry_type: 'journal' as EntryType,
+        tags: e.tags,
+        scripture_refs: e.scripture_refs,
+      }));
+      const result = await bulkInsertSanctuary(payload);
+      setStatusMsg(
+        `Imported ${result.inserted}${
+          result.skipped ? ` · skipped ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'}` : ''
+        } from ${plan.folderName}.`,
+      );
+      setImportPreview(null);
+      const data = await listSanctuary();
+      setEntries(data);
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Import failed. Some rows may have been added.');
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -502,9 +600,27 @@ export default function Sanctuary() {
         <aside className="sa-panel" aria-label="Binder">
           <div className="sa-panel-head">
             <h2>Binder</h2>
-            <button className="tool" onClick={newEntry}>
-              + new
-            </button>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+              <input
+                ref={importInputRef}
+                type="file"
+                multiple
+                style={{ display: 'none' }}
+                // webkitdirectory enables folder picking in Chromium/WebKit;
+                // not in TS's HTMLInputElement type — cast attribute through.
+                {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+                onChange={(e) => {
+                  handleImportFolder(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <button className="tool" onClick={() => importInputRef.current?.click()}>
+                import…
+              </button>
+              <button className="tool" onClick={newEntry}>
+                + new
+              </button>
+            </div>
           </div>
           <nav className="sa-binder">
             {visibleEntries.length === 0 ? (
@@ -818,6 +934,15 @@ export default function Sanctuary() {
         </div>
       )}
 
+      {importPreview && (
+        <ImportPreviewDialog
+          preview={importPreview}
+          importing={importing}
+          onCancel={() => setImportPreview(null)}
+          onConfirm={performImport}
+        />
+      )}
+
       <footer className="sa-status">
         <div>{statusMsg}</div>
         <div className="right">
@@ -952,6 +1077,98 @@ function Inspector({
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
+
+// ── Import preview dialog ───────────────────────────────────────────────
+
+function ImportPreviewDialog({
+  preview,
+  importing,
+  onCancel,
+  onConfirm,
+}: {
+  preview: {
+    entries: ParsedSanctuaryEntry[];
+    skipped: Array<{ filename: string; reason: string }>;
+    folderName: string;
+  };
+  importing: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const byYear = new Map<string, number>();
+  for (const e of preview.entries) {
+    const y = e.date.slice(0, 4);
+    byYear.set(y, (byYear.get(y) || 0) + 1);
+  }
+  const years = [...byYear.entries()].sort();
+  const titlelessCount = preview.entries.filter((e) => !e.title).length;
+  const fromMetadataCount = preview.entries.filter((e) => e.dateSource === 'metadata').length;
+
+  return (
+    <div className="sa-import-modal-bg" onClick={importing ? undefined : onCancel}>
+      <div className="sa-import-modal" onClick={(e) => e.stopPropagation()}>
+        <h2>Import {preview.folderName}</h2>
+        <p>
+          Found <strong>{preview.entries.length}</strong> prayer-journal entries
+          {preview.skipped.length > 0 && (
+            <> · <span style={{ color: 'var(--ink-faint)' }}>{preview.skipped.length} files couldn't be parsed</span></>
+          )}.
+        </p>
+
+        <div className="sa-import-stats">
+          {years.map(([y, n]) => (
+            <span key={y} className="sa-import-year">
+              {y} <em>{n}</em>
+            </span>
+          ))}
+        </div>
+
+        <p style={{ color: 'var(--ink-faint)', fontStyle: 'italic', fontSize: 13 }}>
+          {fromMetadataCount > 0 && (
+            <>
+              {fromMetadataCount} entr{fromMetadataCount === 1 ? 'y has' : 'ies have'} no
+              date in the filename — falling back to the Scrivener "Created"
+              timestamp.{' '}
+            </>
+          )}
+          {titlelessCount > 0 && (
+            <>
+              {titlelessCount} entr{titlelessCount === 1 ? 'y has' : 'ies have'} no
+              title in filename or body — the binder will show those as italic
+              "untitled" with the date.{' '}
+            </>
+          )}
+          Existing entries with the same date and body will be skipped.
+          You can re-run the import safely; nothing imports twice.
+        </p>
+
+        {preview.skipped.length > 0 && (
+          <details className="sa-import-skipped">
+            <summary>{preview.skipped.length} files skipped (no usable date)</summary>
+            <ul>
+              {preview.skipped.slice(0, 30).map((s) => (
+                <li key={s.filename}>
+                  {s.filename}
+                  <span style={{ color: 'var(--ink-faint)' }}> — {s.reason}</span>
+                </li>
+              ))}
+              {preview.skipped.length > 30 && <li>… and {preview.skipped.length - 30} more</li>}
+            </ul>
+          </details>
+        )}
+
+        <div className="sa-import-actions">
+          <button onClick={onCancel} disabled={importing}>
+            Cancel
+          </button>
+          <button className="primary" onClick={onConfirm} disabled={importing}>
+            {importing ? 'Importing…' : `Import ${preview.entries.length}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function entryTypeLabel(t: EntryType): string {
   if (!t) return 'Journal';
