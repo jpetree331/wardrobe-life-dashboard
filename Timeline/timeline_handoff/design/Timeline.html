@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Timeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Sorts+Mill+Goudy:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #f3efe6;
+    --bg-2: #ece6d6;
+    --bg-3: #ddd2b6;
+    --panel: #ece3cf;
+    --page: #faf5e8;
+    --ink: #2b2419;
+    --ink-soft: #5a4f3c;
+    --ink-faint: #8a7d63;
+    --line: #2b241933;
+    --line-strong: #2b241955;
+    --accent: #7a6a3a;
+    --accent-strong: #9c8240;
+    --red: #8a2a1a;
+    --hi: rgba(218, 181, 86, 0.35);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: 'EB Garamond', Georgia, serif;
+    -webkit-font-smoothing: antialiased;
+    height: 100vh;
+    display: grid; grid-template-rows: auto auto 1fr auto;
+    overflow: hidden;
+  }
+
+  /* Ribbon */
+  .ribbon {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px;
+    background: var(--bg-2); border-bottom: 1px solid var(--line);
+  }
+  .ribbon .left { display: flex; align-items: center; gap: 20px; }
+  .ribbon .back {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    color: var(--ink-soft); text-decoration: none; font-size: 14px;
+    letter-spacing: 0.04em; padding-bottom: 2px;
+    border-bottom: 1px solid transparent;
+  }
+  .ribbon .back:hover { color: var(--ink); border-bottom-color: var(--line-strong); }
+  .ribbon .place {
+    font-family: 'Cormorant Garamond', serif; font-weight: 400;
+    font-size: 16px; letter-spacing: 0.32em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .ribbon .meta {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    font-size: 13px; color: var(--ink-faint); letter-spacing: 0.06em;
+  }
+  .ribbon .right { display: flex; gap: 10px; align-items: center; }
+  .btn-quiet {
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    background: transparent; border: 1px solid var(--line-strong);
+    color: var(--ink-soft); padding: 5px 12px; cursor: pointer;
+    border-radius: 2px; letter-spacing: 0.04em;
+  }
+  .btn-quiet:hover { color: var(--ink); border-color: var(--ink-soft); }
+
+  /* Year tabs (Excel-like) */
+  .year-tabs {
+    display: flex; align-items: end; gap: 2px;
+    padding: 12px 24px 0;
+    background: var(--bg-3);
+    border-bottom: 1px solid var(--line-strong);
+    overflow-x: auto;
+  }
+  .year-tab {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 14px; letter-spacing: 0.18em;
+    padding: 8px 16px 9px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-bottom: 0;
+    color: var(--ink-soft);
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+    position: relative;
+    bottom: -1px;
+    white-space: nowrap;
+  }
+  .year-tab[aria-pressed="true"] {
+    background: var(--bg);
+    color: var(--ink);
+    border-color: var(--line-strong);
+    font-weight: 500;
+  }
+  .year-tab .count {
+    font-family: 'EB Garamond', serif;
+    font-style: italic; font-size: 11px;
+    color: var(--ink-faint);
+    margin-left: 6px;
+  }
+  .year-tabs .add-year {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    color: var(--ink-faint); border: 0;
+    background: transparent; cursor: pointer;
+    padding: 8px 10px; font-size: 13px;
+  }
+  .year-tabs .add-year:hover { color: var(--ink); }
+
+  /* Sheet */
+  .sheet-wrap {
+    overflow-y: auto;
+    padding: 24px 32px 60px;
+    background: var(--bg);
+  }
+  .sheet {
+    width: 100%; max-width: 1100px; margin: 0 auto;
+    background: var(--page);
+    border: 1px solid var(--line);
+    box-shadow: 0 14px 40px -28px rgba(43,36,25,0.3);
+  }
+  .sheet-head {
+    display: grid;
+    grid-template-columns: 110px 1fr 200px 36px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line-strong);
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .sheet-head > div { padding: 10px 14px; border-right: 1px solid var(--line); }
+  .sheet-head > div:last-child { border-right: 0; }
+  .row {
+    display: grid;
+    grid-template-columns: 110px 1fr 200px 36px;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+  .row:hover { background: color-mix(in oklab, var(--bg-3) 35%, transparent); }
+  .row.selected { background: color-mix(in oklab, var(--bg-3) 55%, transparent); }
+  .row > div {
+    padding: 10px 14px;
+    border-right: 1px solid var(--line);
+    min-height: 40px;
+    display: flex; align-items: center;
+  }
+  .row > div:last-child { border-right: 0; }
+  .row .date {
+    font-family: 'EB Garamond', serif;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+    font-size: 13.5px;
+    letter-spacing: 0.02em;
+  }
+  .row .summary {
+    font-family: 'EB Garamond', serif;
+    font-size: 16px;
+    color: var(--ink);
+    line-height: 1.45;
+    outline: none;
+  }
+  .row .summary[contenteditable]:focus {
+    background: color-mix(in oklab, var(--page) 30%, white);
+  }
+  .row .tags {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    align-items: center;
+  }
+  .tag {
+    font-family: 'EB Garamond', serif;
+    font-style: italic;
+    font-size: 12px;
+    color: var(--ink-soft);
+    border: 1px solid var(--line);
+    padding: 1px 8px; border-radius: 999px;
+  }
+  .row .link-cell { justify-content: center; }
+  .link-icon {
+    color: var(--accent-strong);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: color 150ms ease, transform 150ms ease;
+  }
+  .link-icon:hover { color: var(--ink); transform: scale(1.15); }
+  .link-icon.disabled { color: var(--line); cursor: default; }
+  .link-icon.disabled:hover { transform: none; color: var(--line); }
+
+  /* Hover preview popover */
+  .preview {
+    position: fixed; z-index: 80;
+    background: var(--page);
+    border: 1px solid var(--line-strong);
+    padding: 14px 18px;
+    max-width: 360px;
+    box-shadow: 0 14px 40px -16px rgba(43,36,25,0.4);
+    font-family: 'EB Garamond', serif;
+    color: var(--ink);
+    font-size: 14px;
+    line-height: 1.5;
+    display: none;
+  }
+  .preview.visible { display: block; }
+  .preview .head {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 6px;
+  }
+  .preview .title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 18px; color: var(--ink);
+    margin-bottom: 6px;
+  }
+  .preview .open-link {
+    margin-top: 10px;
+    display: inline-block;
+    font-style: italic;
+    color: var(--accent-strong);
+    text-decoration: none;
+    border-bottom: 1px solid var(--line-strong);
+    font-size: 13px;
+  }
+  .preview .open-link:hover { color: var(--ink); border-bottom-color: var(--ink); }
+
+  /* Side editor (slides in on row click) */
+  .editor-side {
+    position: fixed; top: 0; right: 0; bottom: 0;
+    width: 380px; background: var(--bg-2);
+    border-left: 1px solid var(--line-strong);
+    box-shadow: -16px 0 40px -24px rgba(43,36,25,0.35);
+    z-index: 70;
+    transform: translateX(100%);
+    transition: transform 280ms ease;
+    display: flex; flex-direction: column;
+  }
+  .editor-side.open { transform: translateX(0); }
+  .editor-side .head {
+    padding: 14px 18px; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+    background: var(--bg-3);
+  }
+  .editor-side h3 {
+    margin: 0; font-family: 'Cormorant Garamond', serif;
+    font-weight: 400; font-size: 13px;
+    letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .editor-side .body { padding: 18px; overflow-y: auto; flex: 1; }
+  .editor-side label {
+    display: block; font-size: 11px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--ink-faint);
+    margin: 12px 0 4px;
+  }
+  .editor-side input, .editor-side textarea {
+    width: 100%;
+    font-family: 'EB Garamond', serif;
+    font-size: 14px; color: var(--ink);
+    background: var(--page);
+    border: 1px solid var(--line);
+    padding: 8px 10px; border-radius: 2px;
+  }
+  .editor-side textarea { min-height: 80px; resize: vertical; line-height: 1.45; }
+  .editor-side .sanctuary-link {
+    margin-top: 16px; padding: 12px;
+    border: 1px solid var(--accent);
+    background: var(--page);
+  }
+  .editor-side .sanctuary-link .sig {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--accent-strong); display: block; margin-bottom: 6px;
+  }
+  .editor-side .sanctuary-link a {
+    color: var(--ink); text-decoration: none;
+    border-bottom: 1px solid var(--line-strong);
+    font-style: italic;
+  }
+  .editor-side .actions {
+    display: flex; gap: 8px; margin-top: 18px;
+  }
+  .editor-side .actions button {
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    background: transparent; border: 1px solid var(--line-strong);
+    color: var(--ink-soft); padding: 6px 14px; cursor: pointer; border-radius: 2px;
+  }
+  .editor-side .actions button.primary {
+    background: var(--ink); color: var(--bg);
+    border-color: var(--ink);
+  }
+  .editor-side .close-btn {
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--ink-faint); font-family: 'EB Garamond', serif;
+    font-style: italic; font-size: 13px;
+  }
+  .editor-side .close-btn:hover { color: var(--ink); }
+
+  /* Status */
+  .status {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 24px;
+    background: var(--bg-2); border-top: 1px solid var(--line);
+    font-family: 'EB Garamond', serif; font-style: italic;
+    font-size: 12px; color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+
+  /* Drop zone overlay */
+  .dropzone {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(43, 36, 25, 0.5);
+    backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center;
+    pointer-events: none;
+  }
+  .dropzone.visible { display: flex; }
+  .dropzone .panel {
+    background: var(--page); border: 2px dashed var(--accent-strong);
+    padding: 60px 80px;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 24px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  @keyframes fade { from { opacity: 0.01; } to { opacity: 1; } }
+  .ribbon, .year-tabs, .sheet-wrap, .status { animation: fade 700ms ease-out; }
+</style>
+</head>
+<body>
+
+  <header class="ribbon">
+    <div class="left">
+      <a class="back" href="Hallway Wireframes.html">← hallway</a>
+      <div class="place">Timeline</div>
+      <span class="meta">One sentence per day · across the years</span>
+    </div>
+    <div class="right">
+      <input type="file" id="file-input" accept=".xlsx,.xls,.csv,.txt" style="display:none" />
+      <button class="btn-quiet" id="import-btn">Import…</button>
+      <button class="btn-quiet" id="export-btn">Export</button>
+      <button class="btn-quiet" id="add-row">+ entry</button>
+    </div>
+  </header>
+
+  <nav class="year-tabs" id="year-tabs" aria-label="Years"></nav>
+
+  <main class="sheet-wrap">
+    <div class="sheet">
+      <div class="sheet-head">
+        <div>Date</div>
+        <div>One-sentence highlight</div>
+        <div>Tags</div>
+        <div title="Linked Sanctuary entry">✦</div>
+      </div>
+      <div id="rows"></div>
+    </div>
+  </main>
+
+  <footer class="status">
+    <div id="status-left">Local sample data — connect Supabase in production.</div>
+    <div id="status-right">All entries · all years</div>
+  </footer>
+
+  <!-- Hover preview -->
+  <div class="preview" id="preview"></div>
+
+  <!-- Side editor -->
+  <aside class="editor-side" id="editor-side" aria-label="Edit entry">
+    <div class="head">
+      <h3>Entry</h3>
+      <button class="close-btn" id="ed-close">close</button>
+    </div>
+    <div class="body">
+      <label>Date</label>
+      <input type="date" id="ed-date" />
+      <label>One-sentence highlight</label>
+      <textarea id="ed-summary" placeholder="The one thing that mattered today."></textarea>
+      <label>Tags <span style="font-style:italic; text-transform:none; letter-spacing:0; color:var(--ink-faint); font-size:12px;">(comma-separated)</span></label>
+      <input type="text" id="ed-tags" placeholder="family, prayer, work" />
+
+      <div class="sanctuary-link" id="ed-sanctuary-link" style="display:none;">
+        <span class="sig">Linked Sanctuary entry</span>
+        <a id="ed-sanctuary-anchor" href="#" target="_blank">Open prayer journal entry</a>
+        <div style="font-style:italic; color:var(--ink-faint); margin-top:6px; font-size:12px;">
+          Same date in Sanctuary — opens the full entry.
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="ed-save">Save</button>
+        <button id="ed-delete">Delete</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Drop zone overlay -->
+  <div class="dropzone" id="dropzone">
+    <div class="panel">Drop your timeline file</div>
+  </div>
+
+<script>
+  // ---------- Sample data: timeline entries + Sanctuary date index ----------
+  // In production these come from Supabase tables (see handoff README).
+  let timeline = [
+    // 2026
+    { id: 1,  date: '2026-04-19', summary: 'Walked to Emmaus before dawn; the sky was lavender and the air felt held.', tags: ['Easter', 'walking'] },
+    { id: 2,  date: '2026-04-12', summary: 'Easter morning at the cathedral — Lily wore the white dress, sang every word.', tags: ['Easter', 'family'] },
+    { id: 3,  date: '2026-04-03', summary: 'Good Friday: stayed silent until evening; the silence carried me.', tags: ['Lent', 'silence'] },
+    { id: 4,  date: '2026-03-15', summary: 'Read Romans 8 again; the part about nothing separating us undid me in the kitchen.', tags: ['scripture'] },
+    { id: 5,  date: '2026-02-14', summary: 'M. and I had soup and watched the snow; the radiator clanked like a heart.', tags: ['marriage', 'winter'] },
+
+    // 2025
+    { id: 6,  date: '2025-12-25', summary: 'Christmas — first time the whole family was under one roof since 2019.', tags: ['Christmas', 'family'] },
+    { id: 7,  date: '2025-09-04', summary: 'Started the new job; the building smelled like coffee and floor wax.', tags: ['work'] },
+    { id: 8,  date: '2025-06-21', summary: 'Solstice swim with the kids; lake was glass.', tags: ['summer', 'family'] },
+    { id: 9,  date: '2025-04-20', summary: 'Easter at our parish — Father Tom\'s homily on the Emmaus Road broke me open.', tags: ['Easter'] },
+    { id: 10, date: '2025-02-02', summary: 'Lost Joan today; the world feels thinner without her.', tags: ['grief'] },
+
+    // 2024
+    { id: 11, date: '2024-11-12', summary: 'Walked the Camino\'s last stretch; threw my stone at the cross at Cruz de Ferro.', tags: ['camino', 'travel'] },
+    { id: 12, date: '2024-08-19', summary: 'M.\'s 40th — surprised her with the pottery class; she laughed until she cried.', tags: ['marriage', 'birthday'] },
+    { id: 13, date: '2024-05-05', summary: 'First confession in fifteen years. Walked out lighter than I have ever felt.', tags: ['confession'] },
+    { id: 14, date: '2024-01-01', summary: 'New year — I promised myself I\'d write one sentence every day. Today I begin.', tags: ['beginnings'] },
+
+    // 2023
+    { id: 15, date: '2023-10-08', summary: 'Lily was born at 4:47 am; her hair was the color of wheat at sunset.', tags: ['family', 'birth'] },
+    { id: 16, date: '2023-06-12', summary: 'M. told me she was pregnant on the back porch; we held each other and didn\'t speak.', tags: ['family'] },
+    { id: 17, date: '2023-03-21', summary: 'Began praying the Liturgy of the Hours again after years away.', tags: ['prayer'] },
+
+    // 2022
+    { id: 18, date: '2022-09-14', summary: 'Moved into the house on Maple — the floors creak like a song.', tags: ['home'] },
+    { id: 19, date: '2022-05-22', summary: 'Married M. under the oak; her father wept harder than anyone.', tags: ['marriage'] },
+
+    // 2021
+    { id: 20, date: '2021-08-05', summary: 'Met M. at the bookstore; she was holding a copy of Annie Dillard.', tags: ['meeting'] },
+
+    // 2020
+    { id: 21, date: '2020-03-15', summary: 'Lockdown began; baked bread for the first time and called Mom every night.', tags: ['pandemic'] },
+
+    // 2019
+    { id: 22, date: '2019-07-04', summary: 'Watched the fireworks alone from the roof; felt the strangest peace.', tags: ['solitude'] },
+
+    // 2018
+    { id: 23, date: '2018-10-31', summary: 'Quit the corporate job; the relief tasted like rain.', tags: ['work', 'beginnings'] },
+  ];
+
+  // Sanctuary date index — dates that have a prayer journal entry
+  // (matches the sample binder in Sanctuary.html; in production this comes from Supabase JOIN)
+  const sanctuaryByDate = {
+    '2026-04-19': { id: 'e1',  title: 'Emmaus Road, early morning' },
+    '2026-04-18': { id: 'e3',  title: 'Psalm 23 at dawn' },
+    '2026-04-17': { id: 'e5',  title: 'I will extol thee, O Lord — Ps. 30' },
+    '2026-04-16': { id: 'e6',  title: 'Intercession — friends of R.' },
+    '2026-04-14': { id: 'e7',  title: 'Romans 8, nothing can separate' },
+    '2026-04-12': { id: 'e8',  title: 'The stone rolled away' },
+    '2026-04-10': { id: 'e9',  title: 'On silence in the morning' },
+    '2026-04-05': { id: 'e10', title: 'Passion narratives in parallel' },
+    '2026-03-15': { id: 'e7',  title: 'Romans 8, nothing can separate' },
+    '2025-04-20': { id: 'lx',  title: 'Easter homily — Emmaus Road notes' },
+  };
+
+  // ---------- State ----------
+  let activeYear = 'all';
+
+  // ---------- Year tabs ----------
+  function years() {
+    const set = new Set(timeline.map(e => e.date.slice(0,4)));
+    return [...set].sort((a,b) => Number(b) - Number(a));
+  }
+  function renderYearTabs() {
+    const container = document.getElementById('year-tabs');
+    const yrs = years();
+    container.innerHTML = '';
+    const allBtn = btn('all', 'All');
+    container.appendChild(allBtn);
+    yrs.forEach(y => container.appendChild(btn(y, y)));
+    const add = document.createElement('button');
+    add.className = 'add-year';
+    add.textContent = '+ year';
+    add.onclick = () => {
+      const y = prompt('Add year', String(new Date().getFullYear()));
+      if (!y || !/^\d{4}$/.test(y)) return;
+      // create a placeholder entry at Jan 1 so the year shows up; user can edit
+      timeline.push({ id: Date.now(), date: y + '-01-01', summary: '', tags: [] });
+      activeYear = y;
+      renderAll();
+    };
+    container.appendChild(add);
+
+    function btn(value, label) {
+      const b = document.createElement('button');
+      b.className = 'year-tab';
+      b.dataset.year = value;
+      b.setAttribute('aria-pressed', activeYear === value ? 'true' : 'false');
+      const count = value === 'all' ? timeline.length : timeline.filter(e => e.date.startsWith(value)).length;
+      b.innerHTML = `${label}<span class="count">${count}</span>`;
+      b.onclick = () => { activeYear = value; renderAll(); };
+      return b;
+    }
+  }
+
+  // ---------- Rows ----------
+  function visibleEntries() {
+    let xs = timeline.slice();
+    if (activeYear !== 'all') xs = xs.filter(e => e.date.startsWith(activeYear));
+    xs.sort((a,b) => b.date.localeCompare(a.date));
+    return xs;
+  }
+  function renderRows() {
+    const c = document.getElementById('rows');
+    const xs = visibleEntries();
+    c.innerHTML = '';
+    xs.forEach(e => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.dataset.id = e.id;
+      const linked = sanctuaryByDate[e.date];
+      row.innerHTML = `
+        <div class="date">${e.date}</div>
+        <div class="summary" contenteditable="true" spellcheck="true">${escapeHtml(e.summary)}</div>
+        <div class="tags">${(e.tags||[]).map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('')}</div>
+        <div class="link-cell">
+          <span class="link-icon ${linked ? '' : 'disabled'}" title="${linked ? 'Open in Sanctuary' : 'no Sanctuary entry'}">${linked ? '✦' : '·'}</span>
+        </div>
+      `;
+      // edit summary inline
+      const summary = row.querySelector('.summary');
+      summary.addEventListener('blur', () => {
+        const updated = summary.textContent.trim();
+        const found = timeline.find(t => t.id === e.id);
+        if (found) found.summary = updated;
+        flashStatus('Saved.');
+      });
+      // open editor on row click (avoid clicks on link or summary)
+      row.addEventListener('click', (ev) => {
+        if (ev.target.closest('.summary') || ev.target.closest('.link-icon')) return;
+        openEditor(e.id);
+      });
+      // sanctuary link click
+      const linkEl = row.querySelector('.link-icon');
+      if (linked) {
+        linkEl.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          // In a real app: route to /sanctuary?date=YYYY-MM-DD or entry id
+          window.location.href = `Sanctuary.html#date=${e.date}`;
+        });
+        linkEl.addEventListener('mouseenter', (ev) => showPreview(ev, e, linked));
+        linkEl.addEventListener('mouseleave', hidePreview);
+      }
+      c.appendChild(row);
+    });
+    document.getElementById('status-right').textContent =
+      activeYear === 'all'
+        ? `${xs.length} entries · all years`
+        : `${xs.length} entries · ${activeYear}`;
+  }
+
+  // ---------- Hover preview ----------
+  const preview = document.getElementById('preview');
+  function showPreview(ev, entry, linked) {
+    preview.innerHTML = `
+      <div class="head">${entry.date} · Sanctuary</div>
+      <div class="title">${escapeHtml(linked.title)}</div>
+      <div style="font-style:italic; color:var(--ink-soft);">${escapeHtml(entry.summary)}</div>
+      <a class="open-link" href="Sanctuary.html#date=${entry.date}">Open prayer journal entry →</a>
+    `;
+    const r = ev.target.getBoundingClientRect();
+    preview.style.top = (r.top - 12) + 'px';
+    preview.style.left = Math.max(20, r.left - 380) + 'px';
+    preview.classList.add('visible');
+  }
+  function hidePreview() { preview.classList.remove('visible'); }
+
+  // ---------- Side editor ----------
+  const ed = document.getElementById('editor-side');
+  let editingId = null;
+  function openEditor(id) {
+    const e = timeline.find(x => x.id === id);
+    if (!e) return;
+    editingId = id;
+    document.getElementById('ed-date').value = e.date;
+    document.getElementById('ed-summary').value = e.summary;
+    document.getElementById('ed-tags').value = (e.tags||[]).join(', ');
+    const linked = sanctuaryByDate[e.date];
+    const linkBlock = document.getElementById('ed-sanctuary-link');
+    if (linked) {
+      linkBlock.style.display = 'block';
+      const a = document.getElementById('ed-sanctuary-anchor');
+      a.textContent = linked.title;
+      a.href = `Sanctuary.html#date=${e.date}`;
+    } else {
+      linkBlock.style.display = 'none';
+    }
+    ed.classList.add('open');
+  }
+  document.getElementById('ed-close').onclick = () => ed.classList.remove('open');
+  document.getElementById('ed-save').onclick = () => {
+    const e = timeline.find(x => x.id === editingId);
+    if (!e) return;
+    e.date = document.getElementById('ed-date').value;
+    e.summary = document.getElementById('ed-summary').value;
+    e.tags = document.getElementById('ed-tags').value.split(',').map(s => s.trim()).filter(Boolean);
+    ed.classList.remove('open');
+    renderAll();
+    flashStatus('Saved.');
+  };
+  document.getElementById('ed-delete').onclick = () => {
+    if (!confirm('Delete this entry?')) return;
+    timeline = timeline.filter(x => x.id !== editingId);
+    ed.classList.remove('open');
+    renderAll();
+    flashStatus('Deleted.');
+  };
+
+  // ---------- Add new ----------
+  document.getElementById('add-row').onclick = () => {
+    const today = new Date().toISOString().slice(0,10);
+    const id = Date.now();
+    timeline.push({ id, date: today, summary: '', tags: [] });
+    if (activeYear !== 'all' && !today.startsWith(activeYear)) activeYear = today.slice(0,4);
+    renderAll();
+    setTimeout(() => openEditor(id), 50);
+  };
+
+  // ---------- Import ----------
+  const fileInput = document.getElementById('file-input');
+  document.getElementById('import-btn').onclick = () => fileInput.click();
+  fileInput.addEventListener('change', (ev) => importFile(ev.target.files[0]));
+
+  // drag-and-drop
+  const dz = document.getElementById('dropzone');
+  let dzDepth = 0;
+  window.addEventListener('dragenter', (e) => { dzDepth++; dz.classList.add('visible'); });
+  window.addEventListener('dragleave', () => { dzDepth--; if (dzDepth <= 0) { dzDepth = 0; dz.classList.remove('visible'); } });
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => {
+    e.preventDefault(); dzDepth = 0; dz.classList.remove('visible');
+    if (e.dataTransfer.files[0]) importFile(e.dataTransfer.files[0]);
+  });
+
+  async function importFile(file) {
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    flashStatus(`Importing ${file.name}…`);
+    try {
+      let rows = [];
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+        // assume first sheet OR each sheet is a year
+        wb.SheetNames.forEach(sn => {
+          const sh = wb.Sheets[sn];
+          const data = XLSX.utils.sheet_to_json(sh, { defval: '', raw: false });
+          data.forEach(r => rows.push(normalizeRow(r, sn)));
+        });
+      } else if (name.endsWith('.csv')) {
+        const text = await file.text();
+        const wb = XLSX.read(text, { type: 'string' });
+        const sh = wb.Sheets[wb.SheetNames[0]];
+        XLSX.utils.sheet_to_json(sh, { defval: '', raw: false }).forEach(r => rows.push(normalizeRow(r)));
+      } else {
+        // plain text — date — sentence per line
+        const text = await file.text();
+        text.split(/\r?\n/).forEach(line => {
+          const m = line.match(/^\s*(\d{4}-\d{2}-\d{2})[\s\u2013\u2014\-:|]+(.+)$/);
+          if (m) rows.push({ date: m[1], summary: m[2].trim(), tags: [] });
+        });
+      }
+      const accepted = rows.filter(r => r.date && r.summary);
+      const startId = Math.max(0, ...timeline.map(t => t.id)) + 1;
+      accepted.forEach((r, i) => timeline.push({ id: startId + i, ...r }));
+      renderAll();
+      flashStatus(`Imported ${accepted.length} entries from ${file.name}.`);
+    } catch (err) {
+      console.error(err);
+      flashStatus(`Could not read ${file.name}.`);
+    }
+  }
+  function normalizeRow(r, sheetName) {
+    // Try common column names
+    const date = pick(r, ['Date','date','DATE','Day','day']) || coerceDate(r, sheetName);
+    const summary = pick(r, ['Summary','summary','Highlight','highlight','One-sentence highlight','One Sentence','sentence','Note','note','Entry','entry']);
+    const tagsRaw = pick(r, ['Tags','tags','Tag','tag','Categories','category']);
+    const tags = tagsRaw ? String(tagsRaw).split(/[,;]/).map(s => s.trim()).filter(Boolean) : [];
+    return { date: normalizeDate(date), summary: String(summary||'').trim(), tags };
+  }
+  function pick(row, keys) {
+    for (const k of keys) if (row[k]) return row[k];
+    return '';
+  }
+  function coerceDate(r, sheetName) {
+    // if row has Year/Month/Day or Month + Day and sheet name is a year
+    const y = r.Year || r.year || (sheetName && /^\d{4}$/.test(sheetName) ? sheetName : null);
+    const m = r.Month || r.month;
+    const d = r.Day || r.day;
+    if (y && m && d) return `${y}-${pad2(m)}-${pad2(d)}`;
+    return '';
+  }
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  function normalizeDate(s) {
+    if (!s) return '';
+    if (s instanceof Date) return s.toISOString().slice(0,10);
+    const t = String(s).trim();
+    // YYYY-MM-DD
+    let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+    // MM/DD/YYYY
+    m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (m) return `${m[3]}-${pad2(m[1])}-${pad2(m[2])}`;
+    // try Date()
+    const d = new Date(t);
+    if (!isNaN(d)) return d.toISOString().slice(0,10);
+    return '';
+  }
+
+  // ---------- Export ----------
+  document.getElementById('export-btn').onclick = () => {
+    const wb = XLSX.utils.book_new();
+    const yrs = years();
+    yrs.forEach(y => {
+      const rows = timeline.filter(t => t.date.startsWith(y))
+        .sort((a,b) => a.date.localeCompare(b.date))
+        .map(t => ({ Date: t.date, 'One-sentence highlight': t.summary, Tags: (t.tags||[]).join(', ') }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(wb, ws, y);
+    });
+    XLSX.writeFile(wb, 'timeline.xlsx');
+    flashStatus('Exported timeline.xlsx.');
+  };
+
+  // ---------- Helpers ----------
+  function escapeHtml(s) {
+    return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+  }
+  function flashStatus(msg) {
+    const el = document.getElementById('status-left');
+    const old = el.textContent;
+    el.textContent = msg;
+    clearTimeout(flashStatus._t);
+    flashStatus._t = setTimeout(() => { el.textContent = 'Local sample data — connect Supabase in production.'; }, 2400);
+  }
+  function renderAll() { renderYearTabs(); renderRows(); }
+  renderAll();
+</script>
+</body>
+</html>

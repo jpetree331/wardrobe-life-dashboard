@@ -1,0 +1,317 @@
+/* Hallway — landing page. Pawprint sphere arrangement, breathing halos,
+   cursor-proximity warmth, threshold transition.
+   Faithful port of design_handoff_life_board/design_files/Hallway.html */
+
+.hallway {
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  max-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---------------- Date seal (top-left) ---------------- */
+.seal {
+  position: fixed;
+  top: 28px;
+  left: 32px;
+  z-index: 5;
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  border: 1.2px solid var(--ink-soft);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-soft);
+  font-family: 'Cormorant Garamond', serif;
+  line-height: 1;
+  transform: rotate(-6deg);
+  animation: hw-dawn 2000ms ease-out both;
+}
+.seal::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  border: 0.5px dashed var(--ink-soft);
+  opacity: 0.5;
+}
+.seal .m { font-size: 10px; letter-spacing: 0.32em; text-transform: uppercase; }
+.seal .d { font-size: 26px; font-weight: 500; margin-top: 4px; letter-spacing: 0.02em; }
+.seal .y { font-size: 9px; letter-spacing: 0.26em; margin-top: 4px; color: var(--ink-faint); }
+
+/* ---------------- Stage ---------------- */
+.stage {
+  flex: 1;
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 0 20px;
+  min-height: 0;
+}
+.stage-inner {
+  position: relative;
+  width: min(92vw, 78vh * 16 / 12, 1100px);
+  aspect-ratio: 16 / 12;
+}
+
+/* ---------------- Spheres ---------------- */
+.sphere {
+  position: absolute;
+  border-radius: 50%;
+  background: transparent;
+  border: 1.4px solid var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--ink);
+  transition: box-shadow 900ms ease, background 600ms ease, border-color 600ms ease,
+    transform 900ms cubic-bezier(0.2, 0.6, 0.2, 1);
+  animation: hw-dawn 1800ms ease-out both;
+  --prox: 0;
+  will-change: transform, box-shadow;
+}
+.sphere::before {
+  content: '';
+  position: absolute;
+  inset: -12%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(var(--glow), 0.35), rgba(var(--glow), 0) 70%);
+  opacity: calc(0.35 + var(--prox) * 0.55);
+  filter: blur(6px);
+  pointer-events: none;
+  animation: hw-breathe 9s ease-in-out infinite;
+  transition: opacity 700ms ease;
+}
+.sphere::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  border: 0.6px solid var(--ink-soft);
+  opacity: calc(0.35 + var(--prox) * 0.35);
+  pointer-events: none;
+  transition: opacity 600ms ease;
+}
+.sphere .inner { padding: 6px 14px; }
+.sphere .label {
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 400;
+  color: var(--ink);
+  line-height: 1.1;
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+.sphere .sub {
+  display: block;
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  color: var(--ink-faint);
+  margin-top: 6px;
+  letter-spacing: 0.02em;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 600ms ease, transform 600ms ease;
+}
+
+.sphere:hover,
+.sphere:focus-visible {
+  outline: none;
+  box-shadow: 0 0 110px 18px rgba(var(--glow), 0.6),
+    inset 0 0 80px 0 rgba(var(--glow), 0.5);
+  background: color-mix(in oklab, var(--bg-2) 55%, transparent);
+  border-color: var(--ink);
+}
+.sphere:hover::after,
+.sphere:focus-visible::after { opacity: 0.8; }
+.sphere:hover .sub,
+.sphere:focus-visible .sub { opacity: 1; transform: translateY(0); }
+.sphere:active { transform: scale(0.985); }
+.sphere.big:hover                        { transform: translate(-50%, -50%) scale(1.02); }
+.sphere.small.s-wonder:hover             { transform: translateX(-50%) scale(1.03); }
+.sphere.small:not(.s-wonder):hover       { transform: scale(1.03); }
+
+.sphere.big   { width: 30%; aspect-ratio: 1; }
+.sphere.small { width: 18%; aspect-ratio: 1; }
+
+.sphere.big   .label { font-size: clamp(24px, 2.6vw, 34px); }
+.sphere.big   .sub   { font-size: clamp(12px, 1.1vw, 15px); }
+.sphere.small .label { font-size: clamp(13px, 1.3vw, 18px); }
+.sphere.small .sub   { font-size: clamp(10px, 0.9vw, 12px); }
+
+/* Pawprint — Sanctuary big & centered horizontally directly under Wonder Room.
+   Timeline & Workshop symmetric around 50%. */
+.s-sanctuary { left: 50%; top: 58%; transform: translate(-50%, -50%); }
+.s-timeline  { left: 16%; top: 22%; }
+.s-wonder    { left: 50%; top: 12%; transform: translateX(-50%); }
+.s-workshop  { right: 16%; top: 22%; }
+
+/* Quiet hairline arc */
+.archline {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  transition: opacity 600ms ease;
+}
+
+/* Footer epigraph */
+.epigraph {
+  text-align: center;
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 15px;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
+  padding: 0 32px 40px;
+  animation: hw-dawn 2400ms ease-out both;
+  animation-delay: 1400ms;
+}
+
+/* Entrance — opacity + blur only, so positioning transforms survive */
+@keyframes hw-dawn {
+  0%   { opacity: 0; filter: blur(8px); }
+  100% { opacity: 1; filter: blur(0); }
+}
+@keyframes hw-breathe {
+  0%, 100% { transform: scale(0.92); opacity: 0.25; }
+  50%      { transform: scale(1.12); opacity: 0.7;  }
+}
+
+/* Threshold transition — clicking a sphere */
+.hallway.entering { pointer-events: none; }
+.hallway.entering .sphere:not(.is-entering) {
+  opacity: 0.08;
+  filter: blur(6px);
+  transition: opacity 1200ms ease, filter 1200ms ease;
+}
+.hallway.entering .seal,
+.hallway.entering .epigraph,
+.hallway.entering .archline {
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+.sphere.is-entering {
+  z-index: 5;
+  transition: transform 5200ms cubic-bezier(0.25, 0.5, 0.2, 1),
+    box-shadow 4000ms ease, border-color 3000ms ease, background 3600ms ease;
+  border-color: transparent;
+  background: radial-gradient(
+    closest-side,
+    rgba(var(--glow), 0.95),
+    color-mix(in oklab, var(--bg) 70%, rgba(var(--glow), 0.4)) 75%
+  );
+  box-shadow: 0 0 220px 60px rgba(var(--glow), 0.7),
+    inset 0 0 140px 0 rgba(var(--glow), 0.7);
+}
+.sphere.is-entering::after { opacity: 0; }
+.sphere.is-entering::before { opacity: 0.9; }
+.sphere.is-entering .inner {
+  opacity: 0;
+  transition: opacity 500ms ease;
+}
+
+/* Threshold overlay */
+.threshold {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in oklab, var(--bg) 50%, rgba(var(--glow), 0.5)) 0%,
+    var(--bg) 70%
+  );
+  opacity: 0;
+  transition: opacity 3200ms ease;
+  pointer-events: none;
+}
+.threshold.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.threshold .room-name {
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 300;
+  font-size: clamp(38px, 5vw, 64px);
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  margin: 0;
+}
+.threshold .room-sub {
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: clamp(14px, 1.2vw, 18px);
+  color: var(--ink-faint);
+  margin-top: 8px;
+  letter-spacing: 0.06em;
+}
+.threshold .entering-word {
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  color: var(--ink-faint);
+  font-size: 13px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  margin-bottom: 24px;
+  opacity: 0;
+  animation: hw-fadeInSlow 1400ms ease-out 400ms forwards;
+}
+.threshold .return,
+.threshold .enter-room {
+  margin-top: 40px;
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 4px 2px;
+  cursor: pointer;
+  opacity: 0;
+  animation: hw-fadeInSlow 1400ms ease-out 1400ms forwards;
+}
+.threshold .return:hover,
+.threshold .enter-room:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+.threshold .coming-soon {
+  margin-top: 40px;
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  opacity: 0;
+  animation: hw-fadeInSlow 1400ms ease-out 900ms forwards;
+}
+@keyframes hw-fadeInSlow { to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .sphere::before { animation: none; }
+  .sphere,
+  .sphere.is-entering,
+  .threshold { transition-duration: 300ms !important; }
+  @keyframes hw-dawn { 0%, 100% { opacity: 1; filter: none; } }
+}
+
+.s-wonder    { animation-delay: 250ms; }
+.s-timeline  { animation-delay: 600ms; }
+.s-workshop  { animation-delay: 900ms; }
+.s-sanctuary { animation-delay: 1200ms; }

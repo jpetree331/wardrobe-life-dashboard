@@ -1,0 +1,21 @@
+/* Wardrobe design tokens — from the design handoff.
+   Override defaults via the Tweaks panel (Build 2). */
+
+:root {
+  --bg:        #efe7d6;   /* parchment background */
+  --bg-2:      #e4d8bf;   /* slightly deeper parchment for ribbons/footers */
+  --bg-3:      #d8caa8;   /* deeper still — used for active states */
+  --panel:     #ece3cf;   /* panel surface */
+  --page:      #f6efde;   /* the writing surface (lifts above bg) */
+  --ink:       #2b2419;   /* primary text */
+  --ink-soft:  #5a4f3c;   /* secondary text */
+  --ink-faint: #8a7d63;   /* tertiary text, captions, dates */
+  --line:        #2b241933;   /* hairline (20% ink) */
+  --line-strong: #2b241955;   /* stronger hairline (33% ink) */
+  --accent:        #7a6a3a;   /* soft gold — pips, accents, active borders */
+  --accent-strong: #9c8240;   /* strong gold — drop caps, selected borders */
+  --red:           #8a2a1a;   /* rubric red — for Christ's words and headings */
+  --glow: 255, 224, 150;      /* RGB triplet — used inside rgba() for warm glow */
+  --hi: rgba(218, 181, 86, 0.35); /* highlight wash */
+  --scripture-bg: var(--page);
+}

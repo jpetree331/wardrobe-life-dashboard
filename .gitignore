@@ -1,0 +1,32 @@
+# Top-level gitignore for the Wardrobe / life-dashboard workspace.
+# (See app/.gitignore for the running app's own ignores.)
+
+# ── Secrets — never commit ─────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+**/.env.local
+
+# ── Node ───────────────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Build artefacts ────────────────────────────────────────────────────
+dist/
+**/dist/
+dist-ssr/
+*.tsbuildinfo
+
+# ── Editor / OS ────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── Misc ───────────────────────────────────────────────────────────────
+*.log
+.vercel/
+
+# Pre-extracted handoff archives — the unpacked folders are committed instead
+*.zip

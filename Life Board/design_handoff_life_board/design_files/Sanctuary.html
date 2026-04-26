@@ -1,0 +1,1229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Sanctuary</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Sorts+Mill+Goudy:ital@0;1&family=Caveat:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #efe7d6;
+    --bg-2: #e4d8bf;
+    --bg-3: #d8caa8;
+    --panel: #ece3cf;
+    --page: #f6efde;           /* parchment — the writing surface */
+    --ink: #2b2419;
+    --ink-soft: #5a4f3c;
+    --ink-faint: #8a7d63;
+    --line: #2b241933;
+    --line-strong: #2b241955;
+    --accent: #7a6a3a;          /* soft gold */
+    --accent-strong: #9c8240;
+    --red: #8a2a1a;             /* rubric red */
+    --glow: 255, 224, 150;
+    --hi: rgba(218, 181, 86, 0.35); /* highlight */
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'EB Garamond', Georgia, serif;
+    -webkit-font-smoothing: antialiased;
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+  }
+
+  /* ---------- Chrome: top ribbon ---------- */
+  .ribbon {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line);
+    gap: 16px;
+  }
+  .ribbon .left, .ribbon .right { display: flex; align-items: center; gap: 20px; }
+  .ribbon .back {
+    font-family: 'EB Garamond', serif;
+    font-style: italic;
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid transparent;
+    padding-bottom: 2px;
+    transition: border-color 200ms ease, color 200ms ease;
+  }
+  .ribbon .back:hover { color: var(--ink); border-bottom-color: var(--line-strong); }
+  .ribbon .place {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 400;
+    font-size: 16px;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .ribbon .season {
+    font-family: 'EB Garamond', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-faint);
+    letter-spacing: 0.06em;
+  }
+  .ribbon .season .dot { color: var(--accent); margin: 0 8px; }
+
+  /* mode toggle */
+  .mode-toggle {
+    display: inline-flex;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    padding: 3px;
+    background: var(--bg);
+  }
+  .mode-toggle button {
+    font-family: 'EB Garamond', serif;
+    font-size: 12px; letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    border: 0; background: transparent; cursor: pointer;
+    color: var(--ink-soft);
+    border-radius: 999px;
+  }
+  .mode-toggle button[aria-pressed="true"] {
+    background: var(--ink);
+    color: var(--bg);
+  }
+
+  /* ---------- Main three-column layout ---------- */
+  .body-grid {
+    display: grid;
+    grid-template-columns: 280px 1fr 280px;
+    min-height: 0;
+  }
+  .body-grid.dual {
+    grid-template-columns: 280px 1fr 1fr 0;
+  }
+  .body-grid.dual .inspector { display: none; }
+
+  .panel {
+    background: var(--panel);
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .panel + .panel { border-left: 1px solid var(--line); }
+  .panel .panel-head {
+    padding: 14px 18px 10px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg-2);
+  }
+  .panel .panel-head h2 {
+    margin: 0;
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 400;
+    font-size: 13px; letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .panel .panel-head .tool {
+    background: transparent; border: 0; cursor: pointer;
+    color: var(--ink-soft);
+    font-family: 'EB Garamond', serif;
+    font-style: italic;
+    font-size: 13px;
+  }
+  .panel .panel-head .tool:hover { color: var(--ink); }
+
+  /* ---------- Binder (left) ---------- */
+  .binder { overflow-y: auto; flex: 1; padding: 8px 0 16px; }
+  .binder-group {
+    padding: 10px 10px 4px 18px;
+  }
+  .binder-group .folder {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-soft);
+    cursor: pointer;
+    user-select: none;
+    padding: 4px 0;
+  }
+  .binder-group .folder .chev {
+    width: 10px; text-align: center;
+    font-size: 10px; color: var(--ink-faint);
+    transition: transform 200ms ease;
+  }
+  .binder-group.collapsed .chev { transform: rotate(-90deg); }
+  .binder-group.collapsed .entries { display: none; }
+  .binder-group .count {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    font-size: 11px; color: var(--ink-faint); letter-spacing: 0.04em;
+    margin-left: auto;
+  }
+
+  .entries {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0 0 0 22px;
+  }
+  .entries li {
+    padding: 6px 10px 6px 12px;
+    font-family: 'EB Garamond', serif;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    margin-left: -22px;
+    padding-left: 20px;
+    line-height: 1.35;
+    border-radius: 0;
+    transition: background 180ms ease, color 180ms ease, border-color 180ms ease;
+  }
+  .entries li .date {
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    margin-right: 6px;
+  }
+  .entries li:hover {
+    background: color-mix(in oklab, var(--bg-3) 50%, transparent);
+    color: var(--ink);
+  }
+  .entries li.active {
+    background: color-mix(in oklab, var(--bg-3) 70%, transparent);
+    border-left-color: var(--accent);
+    color: var(--ink);
+  }
+  .entries li.active .date { color: var(--ink-soft); }
+
+  .binder-foot {
+    padding: 10px 14px;
+    border-top: 1px solid var(--line);
+    display: flex; gap: 8px;
+    background: var(--bg-2);
+  }
+  .binder-foot button {
+    font-family: 'EB Garamond', serif;
+    font-size: 13px;
+    background: transparent;
+    border: 1px solid var(--line-strong);
+    color: var(--ink-soft);
+    padding: 5px 10px;
+    cursor: pointer;
+    border-radius: 2px;
+    letter-spacing: 0.04em;
+  }
+  .binder-foot button:hover { color: var(--ink); border-color: var(--ink-soft); }
+
+  /* ---------- Editor (center) ---------- */
+  .editor-wrap {
+    display: flex; flex-direction: column;
+    min-height: 0; flex: 1;
+    background: var(--bg);
+  }
+  .toolbar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 20px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+  .toolbar-group { display: flex; align-items: center; gap: 4px; }
+  .toolbar-group + .toolbar-group {
+    padding-left: 14px;
+    border-left: 1px solid var(--line);
+  }
+  .toolbar .btn {
+    background: transparent; border: 1px solid transparent;
+    padding: 4px 8px; cursor: pointer; border-radius: 2px;
+    color: var(--ink-soft);
+    font-family: 'EB Garamond', serif;
+    font-size: 14px;
+    min-width: 28px;
+    line-height: 1;
+    transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  }
+  .toolbar .btn:hover { color: var(--ink); background: var(--bg); }
+  .toolbar .btn[aria-pressed="true"] { color: var(--ink); background: var(--bg-3); }
+  .toolbar .btn.b { font-weight: 600; }
+  .toolbar .btn.i { font-style: italic; }
+  .toolbar .btn.u { text-decoration: underline; }
+  .toolbar .btn.s { text-decoration: line-through; }
+  .toolbar .btn.hl { background: var(--hi); }
+  .toolbar .btn.red { color: var(--red); }
+
+  .toolbar select {
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    padding: 4px 8px;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .toolbar .size-control {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    color: var(--ink-soft);
+  }
+  .toolbar .size-control input {
+    width: 44px;
+    font-family: inherit; font-size: inherit;
+    background: var(--bg); border: 1px solid var(--line);
+    color: var(--ink); padding: 3px 6px;
+    border-radius: 2px;
+    text-align: center;
+  }
+  .toolbar .spacer { flex: 1; }
+  .toolbar .muted { font-family: 'EB Garamond', serif; font-style: italic; color: var(--ink-faint); font-size: 12px; }
+
+  /* Page / editor */
+  .editor-pane {
+    flex: 1;
+    display: flex; align-items: flex-start; justify-content: center;
+    overflow-y: auto;
+    padding: 40px 40px 80px;
+    background:
+      radial-gradient(ellipse at top, color-mix(in oklab, var(--bg) 95%, rgba(var(--glow), 0.15)) 0%, var(--bg) 60%);
+  }
+  .page {
+    width: 100%;
+    max-width: 700px;
+    min-height: calc(100% - 20px);
+    background: var(--page);
+    padding: 48px 56px 80px;
+    box-shadow:
+      0 1px 0 rgba(0,0,0,0.02),
+      0 24px 60px -30px rgba(43, 36, 25, 0.25),
+      0 2px 10px -4px rgba(43, 36, 25, 0.08);
+    border: 1px solid #e4d8bf;
+    font-family: var(--font-body, 'EB Garamond'), Georgia, serif;
+    font-size: var(--font-size, 17px);
+    line-height: 1.65;
+    color: var(--ink);
+    outline: none;
+  }
+  .page h1.title {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 400;
+    font-size: 32px;
+    letter-spacing: 0.02em;
+    margin: 0 0 6px;
+    color: var(--ink);
+    outline: none;
+  }
+  .page .meta-line {
+    font-family: 'EB Garamond', serif;
+    font-style: italic;
+    color: var(--ink-faint);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    margin-bottom: 28px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--line);
+    display: flex; gap: 12px; flex-wrap: wrap;
+  }
+  .page .meta-line .pip { color: var(--accent); }
+
+  .page[contenteditable] p { margin: 0 0 1em; }
+  .page mark { background: var(--hi); padding: 0 2px; color: inherit; }
+  .page .rubric { color: var(--red); font-variant: small-caps; letter-spacing: 0.08em; }
+  .page .verse-num {
+    font-family: 'Sorts Mill Goudy', serif;
+    color: var(--accent);
+    font-size: 0.78em;
+    vertical-align: super;
+    margin-right: 3px;
+    user-select: none;
+  }
+  .page .red-letter { color: var(--red); }
+  .page blockquote {
+    margin: 1em 0 1em 12px;
+    padding-left: 20px;
+    border-left: 2px solid var(--accent);
+    color: var(--ink-soft);
+    font-style: italic;
+  }
+  .page .dropcap::first-letter {
+    font-family: 'Sorts Mill Goudy', serif;
+    font-size: 4.2em;
+    float: left;
+    line-height: 0.85;
+    padding: 6px 10px 0 0;
+    color: var(--accent-strong);
+  }
+
+  /* Scripture pane for dual mode */
+  .scripture-pane {
+    background: var(--page);
+    border-left: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .scripture-head {
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-2);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .pane-tabs { display: inline-flex; gap: 4px; }
+  .pane-tab {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase;
+    padding: 4px 10px; border: 0; background: transparent; cursor: pointer;
+    color: var(--ink-faint);
+    border-bottom: 1.5px solid transparent;
+  }
+  .pane-tab[aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+  .sc-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .scripture-head select, .scripture-head input {
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    background: var(--bg); border: 1px solid var(--line);
+    color: var(--ink); padding: 4px 8px; border-radius: 2px;
+  }
+  .scripture-head input { width: 160px; }
+  .sc-source {
+    margin-top: 28px; padding-top: 14px;
+    border-top: 1px dashed var(--line);
+    font-family: 'EB Garamond', serif; font-style: italic;
+    font-size: 12px; color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+
+  /* Floating selection toolbar */
+  .sel-toolbar {
+    position: fixed; z-index: 50;
+    display: none;
+    background: var(--ink); color: var(--bg);
+    padding: 4px; border-radius: 4px;
+    box-shadow: 0 10px 30px -10px rgba(0,0,0,0.4);
+    font-family: 'EB Garamond', serif;
+  }
+  .sel-toolbar.visible { display: inline-flex; gap: 2px; }
+  .sel-toolbar button {
+    background: transparent; border: 0; color: var(--bg);
+    font-family: inherit; font-size: 12px; letter-spacing: 0.08em;
+    padding: 5px 10px; cursor: pointer; border-radius: 3px;
+  }
+  .sel-toolbar button:hover { background: rgba(255,255,255,0.12); }
+  .sc-highlight { background: var(--hi); padding: 0 2px; }
+  .scripture-body {
+    flex: 1; overflow-y: auto;
+    padding: 40px 48px 80px;
+    font-family: 'Sorts Mill Goudy', serif;
+    font-size: 17px;
+    line-height: 1.75;
+    color: var(--ink);
+  }
+  .scripture-body h2 {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 400; font-size: 28px;
+    letter-spacing: 0.03em;
+    margin: 0 0 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+    color: var(--ink);
+  }
+  .scripture-body .vnum { font-family: 'Sorts Mill Goudy', serif; color: var(--accent); font-size: 0.78em; vertical-align: super; margin-right: 4px; }
+
+  /* ---------- Inspector (right) ---------- */
+  .inspector {
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .inspector .insp-body {
+    padding: 18px 18px;
+    overflow-y: auto; flex: 1;
+    font-size: 14px;
+  }
+  .insp-section { margin-bottom: 22px; }
+  .insp-section h3 {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 400; font-size: 12px;
+    letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 10px;
+  }
+  .insp-row { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 0; }
+  .insp-row .k { color: var(--ink-faint); font-style: italic; font-size: 13px; }
+  .insp-row .v { color: var(--ink); font-size: 14px; letter-spacing: 0.02em; }
+  .tag {
+    display: inline-block;
+    font-family: 'EB Garamond', serif; font-size: 12px;
+    color: var(--ink-soft); border: 1px solid var(--line-strong);
+    padding: 2px 8px; border-radius: 999px;
+    margin: 2px 4px 2px 0;
+    font-style: italic;
+  }
+  .refs li {
+    font-family: 'EB Garamond', serif; font-size: 13.5px;
+    color: var(--ink); padding: 4px 0;
+    border-bottom: 1px dashed var(--line);
+  }
+  .refs { list-style: none; padding: 0; margin: 0; }
+  /* ---------- Tweaks panel ---------- */
+  .tweaks-panel {
+    position: fixed;
+    right: 24px; bottom: 36px;
+    width: 300px;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    background: var(--bg-2);
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 14px 40px -20px rgba(43,36,25,0.35);
+    padding: 16px 18px 14px;
+    z-index: 60;
+    font-family: 'EB Garamond', serif;
+    color: var(--ink);
+    display: none;
+  }
+  .tweaks-panel.visible { display: block; }
+  .tweaks-panel h3 {
+    margin: 0 0 12px;
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 400; font-size: 13px;
+    letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--ink-soft);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .tweaks-panel h3 button {
+    background: transparent; border: 0; color: var(--ink-faint);
+    font-family: 'EB Garamond', serif; font-style: italic; font-size: 12px;
+    cursor: pointer; letter-spacing: 0.04em;
+  }
+  .tweaks-panel h3 button:hover { color: var(--ink); }
+  .tweaks-panel label, .tweaks-panel .label {
+    display: block;
+    font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 12px 0 6px;
+  }
+  .tweaks-panel input[type="range"] { width: 100%; accent-color: var(--accent-strong); }
+  .tweaks-panel .swatch-row {
+    display: flex; justify-content: space-between;
+    font-style: italic; font-size: 12px; color: var(--ink-faint);
+    margin-top: 2px;
+  }
+
+  /* theme preset chips */
+  .theme-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .theme-chip {
+    display: flex; align-items: center; gap: 8px;
+    background: transparent;
+    border: 1px solid var(--line);
+    padding: 6px 8px; cursor: pointer;
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    color: var(--ink); text-align: left;
+    border-radius: 2px;
+  }
+  .theme-chip[aria-pressed="true"] { border-color: var(--accent-strong); }
+  .theme-chip .swatch {
+    width: 18px; height: 18px; border-radius: 50%;
+    border: 1px solid var(--line-strong);
+    flex-shrink: 0;
+  }
+  .theme-chip:hover { background: var(--bg); }
+
+  /* per-section custom-color pickers */
+  .advanced summary {
+    list-style: none;
+    cursor: pointer;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 16px 0 10px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .advanced summary::-webkit-details-marker { display: none; }
+  .advanced summary::after { content: "+"; color: var(--ink-faint); font-style: normal; }
+  .advanced[open] summary::after { content: "−"; }
+  .color-row {
+    display: grid; grid-template-columns: 1fr auto auto;
+    align-items: center; gap: 8px;
+    margin: 6px 0;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .color-row input[type="color"] {
+    width: 32px; height: 24px;
+    border: 1px solid var(--line-strong); padding: 0; background: transparent;
+    cursor: pointer; border-radius: 2px;
+  }
+  .color-row .reset {
+    background: transparent; border: 0;
+    color: var(--ink-faint);
+    font-family: 'EB Garamond', serif; font-style: italic; font-size: 12px;
+    cursor: pointer;
+    padding: 2px 4px;
+  }
+  .color-row .reset:hover { color: var(--ink); }
+  .color-row .name { letter-spacing: 0.04em; }
+
+  /* ---------- Status bar ---------- */
+  .status {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 20px;
+    background: var(--bg-2);
+    border-top: 1px solid var(--line);
+    font-family: 'EB Garamond', serif;
+    font-style: italic;
+    font-size: 12px;
+    color: var(--ink-faint);
+    letter-spacing: 0.04em;
+  }
+  .status .right { display: flex; gap: 16px; }
+
+  /* subtle entrance — never gate visibility on the animation */
+  .body-grid, .ribbon, .status { opacity: 1; }
+  @keyframes sanctuaryFadeIn { 0% { opacity: 0.01; } 100% { opacity: 1; } }
+  .body-grid, .ribbon, .status { animation: sanctuaryFadeIn 800ms ease-out 1; }
+</style>
+</head>
+<body>
+
+  <!-- Top ribbon -->
+  <header class="ribbon">
+    <div class="left">
+      <a class="back" href="Hallway Wireframes.html">← hallway</a>
+      <div class="place">Sanctuary</div>
+      <div class="season">
+        <span>Easter · Second Sunday</span>
+        <span class="dot">✦</span>
+        <span id="today">Sunday, 19 April · A·D 2026</span>
+      </div>
+    </div>
+    <div class="right">
+      <div class="mode-toggle" role="group" aria-label="Layout mode">
+        <button data-mode="single" aria-pressed="true">Single</button>
+        <button data-mode="dual"   aria-pressed="false">Scripture + Prayer</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main body -->
+  <div class="body-grid" id="grid">
+
+    <!-- Binder -->
+    <aside class="panel binder-panel" aria-label="Binder">
+      <div class="panel-head">
+        <h2>Binder</h2>
+        <button class="tool" id="new-entry">+ new</button>
+      </div>
+      <nav class="binder" id="binder">
+        <!-- chronological list; populated by JS -->
+      </nav>
+      <div class="binder-foot">
+        <button>Search</button>
+        <button>Sort: newest</button>
+      </div>
+    </aside>
+
+    <!-- Editor -->
+    <section class="editor-wrap">
+      <div class="toolbar" role="toolbar" aria-label="Formatting">
+        <div class="toolbar-group">
+          <select id="font-family" aria-label="Font">
+            <option value="'EB Garamond', Georgia, serif">EB Garamond</option>
+            <option value="'Cormorant Garamond', serif">Cormorant</option>
+            <option value="'Sorts Mill Goudy', serif">Sorts Mill Goudy</option>
+            <option value="Georgia, serif">Georgia</option>
+            <option value="'Iowan Old Style', 'Palatino Linotype', serif">Iowan / Palatino</option>
+          </select>
+          <div class="size-control">
+            <button class="btn" data-cmd="sizeDown" aria-label="Smaller">−</button>
+            <input type="number" id="font-size" value="17" min="12" max="36" />
+            <button class="btn" data-cmd="sizeUp" aria-label="Larger">+</button>
+          </div>
+        </div>
+
+        <div class="toolbar-group">
+          <button class="btn b" data-cmd="bold" aria-pressed="false" title="Bold (⌘B)">B</button>
+          <button class="btn i" data-cmd="italic" aria-pressed="false" title="Italic (⌘I)"><em>I</em></button>
+          <button class="btn u" data-cmd="underline" aria-pressed="false" title="Underline">U</button>
+          <button class="btn s" data-cmd="strikeThrough" aria-pressed="false" title="Strikethrough">S̶</button>
+          <button class="btn hl" data-cmd="hiliteColor" aria-pressed="false" title="Highlight">H</button>
+          <button class="btn red" data-cmd="redLetter" aria-pressed="false" title="Red-letter (Christ's words)">✝</button>
+        </div>
+
+        <div class="toolbar-group">
+          <button class="btn" data-cmd="formatBlock:h2" title="Heading">H</button>
+          <button class="btn" data-cmd="formatBlock:blockquote" title="Quote">❝</button>
+          <button class="btn" data-cmd="dropcap" title="Drop cap on first paragraph">Ɒ</button>
+          <button class="btn" data-cmd="verseNum" title="Insert verse number">1</button>
+          <button class="btn" data-cmd="rubric" title="Rubric (liturgical red)">R</button>
+        </div>
+
+        <div class="spacer"></div>
+        <span class="muted" id="saved-at">saved just now</span>
+      </div>
+
+      <div class="editor-pane" id="editor-pane">
+        <article class="page" id="page" contenteditable="true" spellcheck="true">
+          <h1 class="title" contenteditable="true">2026-04-19. Emmaus Road, early morning</h1>
+          <div class="meta-line" id="meta-line">
+            <span class="pip">✦</span>
+            <span>Lectio Divina</span>
+            <span class="pip">✦</span>
+            <span>Luke 24:13–35</span>
+            <span class="pip">✦</span>
+            <span>Easter · Second Sunday</span>
+          </div>
+          <p class="dropcap"><span class="rubric">Lectio.</span> Two of them were going that very day to a village named Emmaus, which was about seven miles from Jerusalem. And they were talking with each other about all these things which had taken place. While they were talking and discussing, Jesus Himself approached and began traveling with them.</p>
+          <p><span class="rubric">Meditatio.</span> <mark>They did not recognize Him</mark> — not because He was hidden, but because their eyes were kept from seeing. How often I walk the road in sorrow, speaking of Him in the third person, while He is the one listening?</p>
+          <p><span class="rubric">Oratio.</span> Lord, open my eyes at the breaking of bread. Let me know You by presence, not by argument. <span class="red-letter">"Was not our heart burning within us?"</span></p>
+          <p><span class="rubric">Contemplatio.</span> Silence. A slow walk. The warmth that stays in the room after He has vanished from sight.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- Scripture pane (only in dual mode) -->
+    <section class="scripture-pane" id="scripture-pane" aria-label="Scripture">
+      <div class="scripture-head">
+        <div class="pane-tabs" role="tablist">
+          <button class="pane-tab" data-pane="scripture" aria-pressed="true">Scripture</button>
+          <button class="pane-tab" data-pane="inspector" aria-pressed="false">Inspector</button>
+        </div>
+        <div class="sc-controls">
+          <select id="sc-translation" title="Translation">
+            <option value="kjv" selected>KJV (public domain)</option>
+            <option value="web">WEB (public domain)</option>
+            <option value="asv">ASV (public domain)</option>
+            <option value="bbe">BBE (public domain)</option>
+            <option value="darby">Darby (public domain)</option>
+            <option value="ylt">Young's Literal (public domain)</option>
+            <option value="__copyright" disabled>── copyrighted (contact publisher) ──</option>
+            <option value="esv" disabled>ESV — license required</option>
+            <option value="rsvce" disabled>RSVCE — license required</option>
+            <option value="nrsv" disabled>NRSV — license required</option>
+          </select>
+          <input type="text" id="sc-ref" value="Luke 24:13-35" placeholder="Luke 24:13-35" />
+          <button class="tool" id="sc-open">Open</button>
+        </div>
+      </div>
+      <div class="scripture-body" id="scripture-body">
+        <div class="sc-loading" id="sc-loading" style="display:none; font-style:italic; color:var(--ink-faint);">Fetching from bible-api.com…</div>
+        <div class="sc-error" id="sc-error" style="display:none; color:var(--red); font-style:italic;"></div>
+        <div id="sc-content"></div>
+        <div class="sc-source" id="sc-source"></div>
+      </div>
+      <!-- Inspector tab content lives here, hidden until tab clicked -->
+      <div class="scripture-body" id="inspector-in-pane" style="display:none;">
+        <div class="insp-section">
+          <h3>Entry</h3>
+          <div class="insp-row"><span class="k">Created</span><span class="v">19 Apr, 6:12 a.m.</span></div>
+          <div class="insp-row"><span class="k">Words</span><span class="v insp-wc">124</span></div>
+          <div class="insp-row"><span class="k">Season</span><span class="v">Easter</span></div>
+        </div>
+        <div class="insp-section">
+          <h3>Tags</h3>
+          <div>
+            <span class="tag">presence</span>
+            <span class="tag">bread</span>
+            <span class="tag">recognition</span>
+            <span class="tag">sorrow</span>
+            <span class="tag">+ add</span>
+          </div>
+        </div>
+        <div class="insp-section">
+          <h3>Scripture References</h3>
+          <ul class="refs">
+            <li>Luke 24:13–35 <em style="color:var(--ink-faint); font-size:12px;">— primary</em></li>
+            <li>John 21:12</li>
+            <li>Genesis 18:1–8</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Floating selection toolbar for Scripture (highlight + copy) -->
+    <div class="sel-toolbar" id="sel-toolbar">
+      <button data-sel="highlight">Highlight</button>
+      <button data-sel="copy">Copy</button>
+    </div>
+
+    <!-- Inspector (right) -->
+    <aside class="panel inspector" id="inspector" aria-label="Inspector">
+      <div class="panel-head">
+        <h2>Inspector</h2>
+      </div>
+      <div class="insp-body">
+        <div class="insp-section">
+          <h3>Entry</h3>
+          <div class="insp-row"><span class="k">Created</span><span class="v">19 Apr, 6:12 a.m.</span></div>
+          <div class="insp-row"><span class="k">Words</span><span class="v" id="word-count">124</span></div>
+          <div class="insp-row"><span class="k">Season</span><span class="v">Easter</span></div>
+        </div>
+
+        <div class="insp-section">
+          <h3>Tags</h3>
+          <div>
+            <span class="tag">presence</span>
+            <span class="tag">bread</span>
+            <span class="tag">recognition</span>
+            <span class="tag">sorrow</span>
+            <span class="tag">+ add</span>
+          </div>
+        </div>
+
+        <div class="insp-section">
+          <h3>Scripture References</h3>
+          <ul class="refs">
+            <li>Luke 24:13–35 <em style="color:var(--ink-faint); font-size:12px;">— primary</em></li>
+            <li>John 21:12</li>
+            <li>Genesis 18:1–8</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Tweaks panel: themes · sliders · custom colors -->
+  <aside class="tweaks-panel" id="tweaks-panel" aria-label="Tweaks">
+    <h3>
+      <span>Tweaks</span>
+      <button id="tweaks-close" aria-label="close">close</button>
+    </h3>
+
+    <div class="label">Themes</div>
+    <div class="theme-row" id="theme-row">
+      <button class="theme-chip" data-theme="snow"><span class="swatch" style="background:#fafaf6"></span>Snow</button>
+      <button class="theme-chip" data-theme="linen"><span class="swatch" style="background:#f3efe6"></span>Linen</button>
+      <button class="theme-chip" data-theme="parchment"><span class="swatch" style="background:#efe7d6"></span>Parchment</button>
+      <button class="theme-chip" data-theme="vellum"><span class="swatch" style="background:#e9dcbb"></span>Vellum</button>
+      <button class="theme-chip" data-theme="candlelit"><span class="swatch" style="background:#d9c89d"></span>Candlelit</button>
+      <button class="theme-chip" data-theme="dusk"><span class="swatch" style="background:#cdc8b6"></span>Dusk</button>
+    </div>
+
+    <label for="tw-cream">Creaminess</label>
+    <input type="range" id="tw-cream" min="0" max="100" value="50" step="1" />
+    <div class="swatch-row"><span>nearly white</span><span>warm parchment</span></div>
+
+    <label for="tw-light">Lightness</label>
+    <input type="range" id="tw-light" min="0" max="100" value="50" step="1" />
+    <div class="swatch-row"><span>candle dim</span><span>dawn bright</span></div>
+
+    <details class="advanced" id="advanced">
+      <summary>Custom colors</summary>
+      <div class="color-row" data-key="bg">       <span class="name">Background</span><input type="color" /><button class="reset">reset</button></div>
+      <div class="color-row" data-key="panel">    <span class="name">Side panels</span><input type="color" /><button class="reset">reset</button></div>
+      <div class="color-row" data-key="page">     <span class="name">Journal page</span><input type="color" /><button class="reset">reset</button></div>
+      <div class="color-row" data-key="scripture"><span class="name">Scripture page</span><input type="color" /><button class="reset">reset</button></div>
+      <div class="color-row" data-key="ink">      <span class="name">Ink (text)</span><input type="color" /><button class="reset">reset</button></div>
+    </details>
+  </aside>
+
+  <!-- Status bar -->
+  <footer class="status">
+    <div class="left">
+      <span id="cur-entry-path">Sanctuary · Lectio Divina · 2026-04-19. Emmaus Road</span>
+    </div>
+    <div class="right">
+      <span>124 words</span>
+      <span>·</span>
+      <span>saved 3 min ago</span>
+      <span>·</span>
+      <span>“Stay with us, for it is nearly evening.”</span>
+    </div>
+  </footer>
+
+<script>
+  // ---------- Sample entries (chronological, YEAR-MONTH-DAY. TITLE) ----------
+  const entries = [
+    { id: 'e1',  date: '2026-04-19', title: 'Emmaus Road, early morning',   active: true },
+    { id: 'e2',  date: '2026-04-19', title: 'For my mother' },
+    { id: 'e3',  date: '2026-04-18', title: 'Psalm 23 at dawn' },
+    { id: 'e4',  date: '2026-04-18', title: 'Evening examen' },
+    { id: 'e5',  date: '2026-04-17', title: 'I will extol thee, O Lord — Ps. 30' },
+    { id: 'e6',  date: '2026-04-16', title: 'Intercession — friends of R.' },
+    { id: 'e7',  date: '2026-04-14', title: 'Romans 8, nothing can separate' },
+    { id: 'e8',  date: '2026-04-12', title: 'The stone rolled away' },
+    { id: 'e9',  date: '2026-04-10', title: 'On silence in the morning' },
+    { id: 'e10', date: '2026-04-05', title: 'Passion narratives in parallel' },
+    { id: 'e11', date: '2026-03-30', title: 'Returning to the Rule' },
+  ];
+
+  const binderEl = document.getElementById('binder');
+  function renderBinder() {
+    binderEl.innerHTML = `
+      <ul class="entries flat">
+        ${entries.map(it => `
+          <li data-id="${it.id}" class="${it.active ? 'active' : ''}">
+            <span class="date">${it.date}.</span>${it.title}
+          </li>
+        `).join('')}
+      </ul>
+    `;
+    binderEl.querySelectorAll('.entries li').forEach(li => {
+      li.addEventListener('click', () => {
+        binderEl.querySelectorAll('.entries li').forEach(x => x.classList.remove('active'));
+        li.classList.add('active');
+        const d = li.querySelector('.date').textContent.replace(/\.$/, '');
+        const rest = li.textContent.replace(li.querySelector('.date').textContent, '').trim();
+        document.querySelector('.page .title').textContent = `${d}. ${rest}`;
+      });
+    });
+  }
+  renderBinder();
+
+  // ---------- Mode toggle ----------
+  const grid = document.getElementById('grid');
+  const modeBtns = document.querySelectorAll('.mode-toggle button');
+  function setMode(m) {
+    modeBtns.forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === m ? 'true' : 'false'));
+    if (m === 'dual') { grid.classList.add('dual'); fetchScripture(); }
+    else grid.classList.remove('dual');
+  }
+  modeBtns.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  // hide scripture-pane in single mode
+  const scripturePane = document.getElementById('scripture-pane');
+  function syncScripturePaneVisibility() {
+    scripturePane.style.display = grid.classList.contains('dual') ? 'flex' : 'none';
+  }
+  new MutationObserver(syncScripturePaneVisibility).observe(grid, { attributes: true, attributeFilter: ['class'] });
+  syncScripturePaneVisibility();
+
+  // ---------- Scripture tab (Scripture / Inspector in the right pane) ----------
+  const paneTabs = document.querySelectorAll('.pane-tab');
+  const scBody = document.getElementById('scripture-body');
+  const inspInPane = document.getElementById('inspector-in-pane');
+  const scControls = document.querySelector('.sc-controls');
+  paneTabs.forEach(t => t.addEventListener('click', () => {
+    paneTabs.forEach(x => x.setAttribute('aria-pressed', x === t ? 'true' : 'false'));
+    const mode = t.dataset.pane;
+    scBody.style.display = mode === 'scripture' ? 'block' : 'none';
+    inspInPane.style.display = mode === 'inspector' ? 'block' : 'none';
+    scControls.style.display = mode === 'scripture' ? 'flex' : 'none';
+  }));
+
+  // ---------- Scripture fetch (bible-api.com — real public-domain source) ----------
+  const scTranslation = document.getElementById('sc-translation');
+  const scRef = document.getElementById('sc-ref');
+  const scOpen = document.getElementById('sc-open');
+  const scContent = document.getElementById('sc-content');
+  const scLoading = document.getElementById('sc-loading');
+  const scError = document.getElementById('sc-error');
+  const scSource = document.getElementById('sc-source');
+
+  async function fetchScripture() {
+    const ref = scRef.value.trim();
+    const tr  = scTranslation.value;
+    if (!ref) return;
+    scLoading.style.display = 'block';
+    scError.style.display = 'none';
+    scContent.innerHTML = '';
+    scSource.textContent = '';
+    try {
+      const url = `https://bible-api.com/${encodeURIComponent(ref)}?translation=${tr}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('lookup failed');
+      const data = await res.json();
+      const refTitle = data.reference || ref;
+      const transName = (data.translation_name || tr).toString();
+      let html = `<h2>${refTitle}</h2>`;
+      const verses = data.verses || [];
+      // group verses into paragraphs by chapter boundary, and render verse numbers
+      html += '<p>' + verses.map(v => `<span class="vnum">${v.verse}</span>${escapeHtml(v.text.trim())} `).join('') + '</p>';
+      scContent.innerHTML = html;
+      scSource.textContent = `Source: bible-api.com · ${transName} · unmodified public-domain text.`;
+    } catch (e) {
+      scError.textContent = 'Could not fetch “' + ref + '”. Try a simpler reference (e.g. Luke 24:13-35) or another translation.';
+      scError.style.display = 'block';
+      scSource.textContent = '';
+    } finally {
+      scLoading.style.display = 'none';
+    }
+  }
+  function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])); }
+  scOpen.addEventListener('click', fetchScripture);
+  scRef.addEventListener('keydown', e => { if (e.key === 'Enter') fetchScripture(); });
+  scTranslation.addEventListener('change', fetchScripture);
+
+  // ---------- Selection toolbar for Scripture (highlight + copy) ----------
+  const selTb = document.getElementById('sel-toolbar');
+  function updateSelToolbar() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { selTb.classList.remove('visible'); return; }
+    const range = sel.getRangeAt(0);
+    // show only if the selection is within the scripture body
+    if (!scBody.contains(range.commonAncestorContainer)) { selTb.classList.remove('visible'); return; }
+    const rect = range.getBoundingClientRect();
+    selTb.style.top  = (rect.top - 38 + window.scrollY) + 'px';
+    selTb.style.left = (rect.left + rect.width / 2 - 70 + window.scrollX) + 'px';
+    selTb.classList.add('visible');
+  }
+  document.addEventListener('selectionchange', updateSelToolbar);
+  document.addEventListener('mouseup', updateSelToolbar);
+  selTb.querySelectorAll('button').forEach(b => b.addEventListener('mousedown', e => e.preventDefault()));
+  selTb.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+    const action = b.dataset.sel;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    if (action === 'copy') {
+      navigator.clipboard && navigator.clipboard.writeText(sel.toString());
+      b.textContent = 'Copied';
+      setTimeout(() => { b.textContent = 'Copy'; }, 1200);
+    } else if (action === 'highlight') {
+      const range = sel.getRangeAt(0);
+      const span = document.createElement('span');
+      span.className = 'sc-highlight';
+      try { span.appendChild(range.extractContents()); range.insertNode(span); } catch (_) {}
+      sel.removeAllRanges();
+      selTb.classList.remove('visible');
+    }
+  }));
+
+  // ---------- Editor formatting ----------
+  const page = document.getElementById('page');
+  const fontFamily = document.getElementById('font-family');
+  const fontSize = document.getElementById('font-size');
+
+  function setFontSize(n) {
+    n = Math.max(12, Math.min(36, Number(n)));
+    fontSize.value = n;
+    page.style.setProperty('--font-size', n + 'px');
+  }
+  setFontSize(fontSize.value);
+
+  fontFamily.addEventListener('change', () => {
+    page.style.setProperty('--font-body', fontFamily.value.split(',')[0].replace(/['"]/g,''));
+    page.style.fontFamily = fontFamily.value;
+  });
+  fontSize.addEventListener('input', () => setFontSize(fontSize.value));
+
+  document.querySelectorAll('.toolbar .btn').forEach(btn => {
+    btn.addEventListener('mousedown', (e) => e.preventDefault()); // keep selection
+    btn.addEventListener('click', () => {
+      const cmd = btn.dataset.cmd;
+      if (!cmd) return;
+      page.focus();
+      if (cmd === 'sizeDown') return setFontSize(Number(fontSize.value) - 1);
+      if (cmd === 'sizeUp')   return setFontSize(Number(fontSize.value) + 1);
+      if (cmd === 'hiliteColor') {
+        document.execCommand('hiliteColor', false, 'rgba(218, 181, 86, 0.35)');
+      } else if (cmd === 'redLetter') {
+        wrapSelection('span', 'red-letter');
+      } else if (cmd === 'rubric') {
+        wrapSelection('span', 'rubric');
+      } else if (cmd === 'dropcap') {
+        const sel = document.getSelection();
+        const node = sel && sel.anchorNode && sel.anchorNode.closest ? sel.anchorNode.closest('p') : null;
+        const p = (node && page.contains(node)) ? node : page.querySelector('p');
+        if (p) p.classList.toggle('dropcap');
+      } else if (cmd === 'verseNum') {
+        const span = document.createElement('span');
+        span.className = 'verse-num';
+        span.textContent = prompt('Verse number', '1') || '1';
+        insertNode(span);
+      } else if (cmd.startsWith('formatBlock:')) {
+        document.execCommand('formatBlock', false, cmd.split(':')[1]);
+      } else {
+        document.execCommand(cmd, false);
+      }
+      updateToolbarState();
+    });
+  });
+
+  function wrapSelection(tag, className) {
+    const sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const span = document.createElement(tag);
+    if (className) span.className = className;
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    sel.removeAllRanges();
+  }
+  function insertNode(node) {
+    const sel = document.getSelection();
+    if (!sel || sel.rangeCount === 0) { page.appendChild(node); return; }
+    const range = sel.getRangeAt(0);
+    range.insertNode(node);
+    range.setStartAfter(node); range.setEndAfter(node);
+    sel.removeAllRanges(); sel.addRange(range);
+  }
+
+  function updateToolbarState() {
+    const map = { bold: 'bold', italic: 'italic', underline: 'underline', strikeThrough: 'strikeThrough' };
+    Object.entries(map).forEach(([cmd, qc]) => {
+      const btn = document.querySelector(`.toolbar .btn[data-cmd="${cmd}"]`);
+      if (btn) btn.setAttribute('aria-pressed', document.queryCommandState(qc) ? 'true' : 'false');
+    });
+  }
+  document.addEventListener('selectionchange', updateToolbarState);
+
+  // word count
+  const wordCountEl = document.getElementById('word-count');
+  function updateWords() {
+    const txt = page.innerText.replace(/\s+/g, ' ').trim();
+    const n = txt ? txt.split(' ').length : 0;
+    if (wordCountEl) wordCountEl.textContent = n;
+  }
+  page.addEventListener('input', updateWords);
+  updateWords();
+
+  // ---------- Tweaks: themes · cream/light sliders · per-section custom colors ----------
+  const TWEAKS = /*EDITMODE-BEGIN*/{
+    "theme": "parchment",
+    "cream": 55,
+    "light": 65,
+    "customBg": null,
+    "customPanel": null,
+    "customPage": null,
+    "customScripture": null,
+    "customInk": null
+  }/*EDITMODE-END*/;
+
+  const THEMES = {
+    snow:      { cream: 8,  light: 92 },
+    linen:     { cream: 25, light: 80 },
+    parchment: { cream: 55, light: 65 },
+    vellum:    { cream: 75, light: 55 },
+    candlelit: { cream: 80, light: 35 },
+    dusk:      { cream: 35, light: 30 },
+  };
+
+  const tweaksPanel = document.getElementById('tweaks-panel');
+  const twCream = document.getElementById('tw-cream');
+  const twLight = document.getElementById('tw-light');
+  twCream.value = TWEAKS.cream;
+  twLight.value = TWEAKS.light;
+
+  function applyPalette() {
+    const c = Number(TWEAKS.cream) / 100;     // 0 = nearly white, 1 = warm parchment
+    const l = Number(TWEAKS.light) / 100;     // 0 = dim, 1 = bright
+    // Lightness range goes much higher now — up to ~0.97 (near-white)
+    const Lbg    = 0.84 + l * 0.13;            // 0.84..0.97
+    const Lbg2   = Lbg - 0.045;
+    const Lbg3   = Lbg - 0.090;
+    const Lpage  = Math.min(0.99, Lbg + 0.025);
+    const Lpanel = Lbg - 0.020;
+    // Chroma drops sharply at low cream so it goes truly pale
+    const C   = c * 0.052;                     // 0..0.052
+    const Hue = 70 + c * 14;                   // 70..84
+    const inkL = 0.20 - (l - 0.5) * 0.05;
+    const root = document.documentElement.style;
+    // Apply base palette
+    root.setProperty('--bg',    TWEAKS.customBg    || `oklch(${Lbg.toFixed(3)} ${C.toFixed(3)} ${Hue})`);
+    root.setProperty('--bg-2',  `oklch(${Lbg2.toFixed(3)} ${(C*1.05).toFixed(3)} ${Hue})`);
+    root.setProperty('--bg-3',  `oklch(${Lbg3.toFixed(3)} ${(C*1.10).toFixed(3)} ${Hue})`);
+    root.setProperty('--page',  TWEAKS.customPage  || `oklch(${Lpage.toFixed(3)} ${(C*0.85).toFixed(3)} ${Hue})`);
+    root.setProperty('--panel', TWEAKS.customPanel || `oklch(${Lpanel.toFixed(3)} ${(C*1.00).toFixed(3)} ${Hue})`);
+    root.setProperty('--ink',   TWEAKS.customInk   || `oklch(${inkL.toFixed(3)} 0.020 ${Hue})`);
+    // Scripture page: applied via a dedicated CSS var read by the scripture pane
+    root.setProperty('--scripture-bg', TWEAKS.customScripture || `oklch(${Lpage.toFixed(3)} ${(C*0.85).toFixed(3)} ${Hue})`);
+  }
+  // expose scripture-bg by overriding the .scripture-pane bg via inline style hook
+  function applyScripturePaneBg() {
+    const pane = document.querySelector('.scripture-pane');
+    const body = document.querySelector('.scripture-body');
+    if (pane) pane.style.background = 'var(--scripture-bg)';
+    if (body) body.style.background = 'var(--scripture-bg)';
+    const pageEl = document.querySelector('.page');
+    if (pageEl) pageEl.style.background = 'var(--page)';
+  }
+  applyPalette();
+  applyScripturePaneBg();
+
+  function pushEdit(edits) {
+    try { window.parent.postMessage({ type: '__edit_mode_set_keys', edits }, '*'); } catch(_) {}
+  }
+
+  // Theme chip handling
+  const themeRow = document.getElementById('theme-row');
+  function syncThemeChips() {
+    themeRow.querySelectorAll('.theme-chip').forEach(b => {
+      b.setAttribute('aria-pressed', b.dataset.theme === TWEAKS.theme ? 'true' : 'false');
+    });
+  }
+  themeRow.querySelectorAll('.theme-chip').forEach(b => b.addEventListener('click', () => {
+    const t = b.dataset.theme;
+    const preset = THEMES[t];
+    if (!preset) return;
+    TWEAKS.theme = t;
+    TWEAKS.cream = preset.cream;
+    TWEAKS.light = preset.light;
+    twCream.value = preset.cream;
+    twLight.value = preset.light;
+    applyPalette();
+    syncThemeChips();
+    pushEdit({ theme: t, cream: preset.cream, light: preset.light });
+  }));
+  syncThemeChips();
+
+  // Slider handling — changing a slider clears the active theme chip
+  function clearThemeIfDrift() {
+    const preset = THEMES[TWEAKS.theme];
+    if (!preset) return;
+    if (Number(TWEAKS.cream) !== preset.cream || Number(TWEAKS.light) !== preset.light) {
+      TWEAKS.theme = null;
+      syncThemeChips();
+      pushEdit({ theme: null });
+    }
+  }
+  twCream.addEventListener('input', () => {
+    TWEAKS.cream = Number(twCream.value); applyPalette(); applyScripturePaneBg();
+    clearThemeIfDrift();
+    pushEdit({ cream: TWEAKS.cream });
+  });
+  twLight.addEventListener('input', () => {
+    TWEAKS.light = Number(twLight.value); applyPalette(); applyScripturePaneBg();
+    clearThemeIfDrift();
+    pushEdit({ light: TWEAKS.light });
+  });
+
+  // Custom color pickers
+  const customMap = { bg: 'customBg', panel: 'customPanel', page: 'customPage', scripture: 'customScripture', ink: 'customInk' };
+  document.querySelectorAll('.color-row').forEach(row => {
+    const key = row.dataset.key;
+    const tweakKey = customMap[key];
+    const picker = row.querySelector('input[type="color"]');
+    const reset = row.querySelector('.reset');
+    // initialize swatch from current var
+    const init = TWEAKS[tweakKey];
+    if (init && /^#/.test(init)) picker.value = init;
+    else picker.value = '#f4ecd8';
+    picker.addEventListener('input', () => {
+      TWEAKS[tweakKey] = picker.value;
+      applyPalette(); applyScripturePaneBg();
+      pushEdit({ [tweakKey]: picker.value });
+    });
+    reset.addEventListener('click', () => {
+      TWEAKS[tweakKey] = null;
+      applyPalette(); applyScripturePaneBg();
+      pushEdit({ [tweakKey]: null });
+    });
+  });
+
+  // host protocol — listener first, then announce
+  window.addEventListener('message', (e) => {
+    const d = e.data || {};
+    if (d.type === '__activate_edit_mode')   tweaksPanel.classList.add('visible');
+    if (d.type === '__deactivate_edit_mode') tweaksPanel.classList.remove('visible');
+  });
+  document.getElementById('tweaks-close').addEventListener('click', () => {
+    tweaksPanel.classList.remove('visible');
+    try { window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*'); } catch(_) {}
+  });
+  try { window.parent.postMessage({ type: '__edit_mode_available' }, '*'); } catch(_) {}
+
+  // Ribbon — today
+  (function () {
+    const d = new Date();
+    const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    document.getElementById('today').textContent =
+      `${days[d.getDay()]}, ${d.getDate()} ${months[d.getMonth()]} · A·D ${d.getFullYear()}`;
+  })();
+</script>
+</body>
+</html>
