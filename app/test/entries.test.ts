@@ -301,59 +301,58 @@ describe('timelineForDate', () => {
   });
 });
 
-describe('bulkInsertTimeline', () => {
-  // The implementation does N+1 round-trips per test: one prefetch plus
-  // one insert/update per row. We simulate by feeding sequential results.
-  let queue: Array<{ data: any; error: any }> = [];
-  let originalThen: (resolve: any) => void;
-
-  beforeEach(() => {
-    queue = [];
-    // Replace the thenable so each await pops the next queued result.
-    const orig = builder;
-    (globalThis as any).__builderOverride = () => {
-      const b = orig();
-      b.then = (resolve: (v: any) => void) => resolve(queue.shift() || nextResult);
-      b.single = () => Promise.resolve(queue.shift() || nextResult);
-      b.maybeSingle = () => Promise.resolve(queue.shift() || nextResult);
-      return b;
-    };
-  });
-
+describe('bulkInsertTimeline (single-mode, exact-duplicate skip)', () => {
   it('returns 0/0 for empty input without any DB calls', async () => {
-    const out = await bulkInsertTimeline([], 'skip');
+    const out = await bulkInsertTimeline([]);
     expect(out).toEqual({ inserted: 0, skipped: 0 });
   });
 
-  it('inserts rows whose dates do NOT exist; skips rows whose dates DO exist (skip mode)', async () => {
-    // Pre-fetch returns one existing date; we send three rows.
+  it('skips a row whose (date, summary) pair already exists; inserts new ones', async () => {
+    // Pre-fetch returns one existing pair; we send three rows.
     nextResult = {
-      data: [{ id: 'existing-1', entry_date: '2024-01-01' }],
+      data: [{ entry_date: '2024-01-01', body: 'a' }],
       error: null,
     };
-    const out = await bulkInsertTimeline(
-      [
-        { entry_date: '2024-01-01', summary: 'a', tags: [] }, // existing → skip
-        { entry_date: '2024-01-02', summary: 'b', tags: [] }, // new → insert
-        { entry_date: '2024-01-03', summary: 'c', tags: [] }, // new → insert
-      ],
-      'skip',
-    );
+    const out = await bulkInsertTimeline([
+      { entry_date: '2024-01-01', summary: 'a', tags: [] }, // exact dupe → skip
+      { entry_date: '2024-01-02', summary: 'b', tags: [] }, // new → insert
+      { entry_date: '2024-01-03', summary: 'c', tags: [] }, // new → insert
+    ]);
     expect(out).toEqual({ inserted: 2, skipped: 1 });
   });
 
-  it('overwrite mode updates existing rows, inserts new ones', async () => {
+  it('keeps DISTINCT same-day entries (different text on the same date)', async () => {
+    // Pre-fetch shows date 2024-01-01 already has summary "morning"; we send
+    // a new sentence for that same date — must NOT be treated as a dupe.
     nextResult = {
-      data: [{ id: 'existing-1', entry_date: '2024-01-01' }],
+      data: [{ entry_date: '2024-01-01', body: 'morning event' }],
       error: null,
     };
-    const out = await bulkInsertTimeline(
-      [
-        { entry_date: '2024-01-01', summary: 'overwrite me', tags: [] },
-        { entry_date: '2024-01-02', summary: 'new', tags: [] },
-      ],
-      'overwrite',
-    );
-    expect(out).toEqual({ inserted: 2, skipped: 0 });
+    const out = await bulkInsertTimeline([
+      { entry_date: '2024-01-01', summary: 'morning event', tags: [] }, // dupe
+      { entry_date: '2024-01-01', summary: 'evening event', tags: [] }, // distinct
+    ]);
+    expect(out).toEqual({ inserted: 1, skipped: 1 });
+  });
+
+  it('de-dupes within the import file itself (two identical rows = one inserted)', async () => {
+    nextResult = { data: [], error: null };
+    const out = await bulkInsertTimeline([
+      { entry_date: '2024-01-01', summary: 'same', tags: [] },
+      { entry_date: '2024-01-01', summary: 'same', tags: [] },
+      { entry_date: '2024-01-01', summary: 'same', tags: [] },
+    ]);
+    expect(out).toEqual({ inserted: 1, skipped: 2 });
+  });
+
+  it('treats trailing whitespace as identical (avoids near-duplicate noise)', async () => {
+    nextResult = {
+      data: [{ entry_date: '2024-01-01', body: 'walked' }],
+      error: null,
+    };
+    const out = await bulkInsertTimeline([
+      { entry_date: '2024-01-01', summary: 'walked   ', tags: [] }, // trailing ws → dupe
+    ]);
+    expect(out).toEqual({ inserted: 0, skipped: 1 });
   });
 });

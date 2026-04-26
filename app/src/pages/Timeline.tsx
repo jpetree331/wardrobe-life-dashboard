@@ -129,9 +129,9 @@ export default function Timeline() {
       flashStatus('Saved.');
       closeEditor();
       await refresh();
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      flashStatus(err?.code === '23505' ? 'Another entry already exists for that date.' : 'Save failed.');
+      flashStatus('Save failed.');
     } finally {
       setSavingEd(false);
     }
@@ -182,22 +182,9 @@ export default function Timeline() {
         sanctuary_scripture_refs: null,
       };
       openEditor(newRow);
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      // Already exists for today → load it and open editor. Don't read from
-      // local `rows` here — the closure captured it before refresh().
-      if (err?.code === '23505') {
-        const fresh = await listTimeline('all');
-        const existing = fresh.find((r) => r.entry_date === today);
-        if (existing) {
-          setRows(fresh);
-          openEditor(existing);
-        } else {
-          flashStatus('An entry for today already exists.');
-        }
-      } else {
-        flashStatus('Could not create entry.');
-      }
+      flashStatus('Could not create entry.');
     }
   }
 
@@ -233,15 +220,15 @@ export default function Timeline() {
     }
   }
 
-  async function performImport(mode: 'skip' | 'overwrite') {
+  async function performImport() {
     if (!importPlan) return;
     flashStatus(`Importing ${importPlan.rows.length} entries…`);
     const plan = importPlan;
     setImportPlan(null);
     try {
-      const result = await bulkInsertTimeline(plan.rows, mode);
+      const result = await bulkInsertTimeline(plan.rows);
       flashStatus(
-        `Imported ${result.inserted}${result.skipped ? ` · skipped ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'}` : ''} from ${plan.fileName}.`,
+        `Imported ${result.inserted}${result.skipped ? ` · skipped ${result.skipped} exact duplicate${result.skipped === 1 ? '' : 's'}` : ''} from ${plan.fileName}.`,
       );
       await refresh();
     } catch (err) {
@@ -396,14 +383,9 @@ export default function Timeline() {
                 sanctuary_title: null,
                 sanctuary_scripture_refs: null,
               });
-            } catch (err: any) {
-              if (err?.code === '23505') {
-                setActiveYear(Number(y));
-                await refresh();
-              } else {
-                console.error(err);
-                flashStatus('Could not add year.');
-              }
+            } catch (err) {
+              console.error(err);
+              flashStatus('Could not add year.');
             }
           }}
         >
@@ -529,12 +511,12 @@ export default function Timeline() {
             <h2>Import {importPlan.fileName}</h2>
             <p>Found <strong>{importPlan.rows.length}</strong> entries with a date and a sentence.</p>
             <p style={{ color: 'var(--ink-faint)', fontStyle: 'italic' }}>
-              How should duplicates be handled when a date already exists?
+              Rows whose <em>date and sentence</em> already exist will be skipped.
+              Distinct events on the same day are kept as separate rows.
             </p>
             <div className="modal-actions">
               <button onClick={() => setImportPlan(null)}>Cancel</button>
-              <button onClick={() => performImport('skip')}>Skip duplicates</button>
-              <button className="primary" onClick={() => performImport('overwrite')}>Overwrite duplicates</button>
+              <button className="primary" onClick={performImport}>Import</button>
             </div>
           </div>
         </div>
