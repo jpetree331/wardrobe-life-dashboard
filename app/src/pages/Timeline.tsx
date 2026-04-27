@@ -14,6 +14,7 @@ import { useFavicon } from '../hooks/useFavicon';
 import './Timeline.css';
 
 type YearTab = number | 'all';
+type SortOrder = 'desc' | 'asc';
 
 type ImportPlan = {
   rows: Array<{ entry_date: string; summary: string; tags: string[] }>;
@@ -26,6 +27,11 @@ export default function Timeline() {
   const [activeYear, setActiveYear] = useState<YearTab>('all');
   const [rows, setRows] = useState<TimelineRow[]>([]);
   const [years, setYears] = useState<{ year: number; count: number }[]>([]);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(() => {
+    if (typeof window === 'undefined') return 'desc';
+    const saved = window.localStorage.getItem('tl-sort-order');
+    return saved === 'asc' ? 'asc' : 'desc';
+  });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [edDate, setEdDate] = useState('');
@@ -63,6 +69,11 @@ export default function Timeline() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Persist sort order across reloads.
+  useEffect(() => {
+    window.localStorage.setItem('tl-sort-order', sortOrder);
+  }, [sortOrder]);
 
   // Auto-clear status flash after 2.4s
   useEffect(() => {
@@ -321,13 +332,22 @@ export default function Timeline() {
   }, []);
 
   // ── Year tabs (always show 'All' + every year that has rows) ───────────
+  // `years` arrives newest-first from timelineYears(); reverse when the user
+  // has flipped to oldest-first so tabs and rows agree on direction.
   const yearTabs = useMemo<Array<{ value: YearTab; label: string; count: number }>>(() => {
     const total = years.reduce((acc, y) => acc + y.count, 0);
+    const ordered = sortOrder === 'asc' ? [...years].reverse() : years;
     return [
       { value: 'all', label: 'All', count: total },
-      ...years.map((y) => ({ value: y.year, label: String(y.year), count: y.count })),
+      ...ordered.map((y) => ({ value: y.year, label: String(y.year), count: y.count })),
     ];
-  }, [years]);
+  }, [years, sortOrder]);
+
+  // `rows` are fetched desc; flip client-side when oldest-first is on.
+  const orderedRows = useMemo(
+    () => (sortOrder === 'asc' ? [...rows].reverse() : rows),
+    [rows, sortOrder],
+  );
 
   return (
     <div className="timeline-page">
@@ -349,6 +369,17 @@ export default function Timeline() {
               e.target.value = '';
             }}
           />
+          <button
+            className="tl-btn-quiet"
+            onClick={() => setSortOrder((s) => (s === 'desc' ? 'asc' : 'desc'))}
+            title={
+              sortOrder === 'desc'
+                ? 'Currently newest first — click to flip to oldest first'
+                : 'Currently oldest first — click to flip to newest first'
+            }
+          >
+            {sortOrder === 'desc' ? 'newest ↓' : 'oldest ↑'}
+          </button>
           <button className="tl-btn-quiet" onClick={() => fileInputRef.current?.click()}>Import…</button>
           <button className="tl-btn-quiet" onClick={exportXlsx}>Export</button>
           <button className="tl-btn-quiet" onClick={addToday}>+ entry</button>
@@ -413,7 +444,7 @@ export default function Timeline() {
             <div title="Linked Sanctuary entry">✦</div>
           </div>
           <div>
-            {rows.map((row) => (
+            {orderedRows.map((row) => (
               <Row
                 key={row.id}
                 row={row}

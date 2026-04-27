@@ -68,6 +68,29 @@ describe('buildBinderTree', () => {
     expect(jan.monthLabel).toBe('January');
   });
 
+  it('flips every level when order="asc" (oldest-first chronological)', () => {
+    const a = entry('2024-04-15', 'a');
+    const b = entry('2024-04-19', 'b');
+    const c = entry('2024-01-02', 'c');
+    const d = entry('2023-09-10', 'd');
+    const tree = buildBinderTree([a, b, c, d], 'asc');
+    // Years ascending
+    expect(tree.map((y) => y.year)).toEqual(['2023', '2024']);
+    // Months ascending within year
+    const y2024 = tree.find((y) => y.year === '2024')!;
+    expect(y2024.months.map((m) => m.month)).toEqual([1, 4]);
+    // Entries ascending within month
+    expect(y2024.months.find((m) => m.month === 4)!.entries.map((e) => e.id))
+      .toEqual(['a', 'b']);
+  });
+
+  it('asc order uses created_at as tiebreaker for same-date entries (oldest-first)', () => {
+    const a: Entry = { ...entry('2024-04-15', 'a'), created_at: '2024-04-15T08:00:00Z' };
+    const b: Entry = { ...entry('2024-04-15', 'b'), created_at: '2024-04-15T22:00:00Z' };
+    const tree = buildBinderTree([a, b], 'asc');
+    expect(tree[0].months[0].entries.map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
   it('returns empty tree for empty input', () => {
     expect(buildBinderTree([])).toEqual([]);
   });

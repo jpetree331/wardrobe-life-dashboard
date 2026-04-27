@@ -27,6 +27,7 @@ import {
   expansionKeysForEntry,
   monthKey,
   yearKey,
+  type SortOrder,
 } from '../lib/binderTree';
 import { useFavicon } from '../hooks/useFavicon';
 import './Sanctuary.css';
@@ -111,6 +112,14 @@ export default function Sanctuary() {
     return new Set();
   });
 
+  // Display order toggle — newest-first ('desc') by default, oldest-first
+  // ('asc') for chronological reading. Persists per-user/browser.
+  const [sortOrder, setSortOrder] = useState<SortOrder>(() => {
+    if (typeof window === 'undefined') return 'desc';
+    const saved = window.localStorage.getItem('sa-sort-order');
+    return saved === 'asc' ? 'asc' : 'desc';
+  });
+
   const pageRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
   const titleHydrationKey = useRef<string | null>(null);
@@ -173,6 +182,11 @@ export default function Sanctuary() {
   useEffect(() => {
     window.localStorage.setItem('sa-binder-expanded', JSON.stringify([...expanded]));
   }, [expanded]);
+
+  // Persist sort order
+  useEffect(() => {
+    window.localStorage.setItem('sa-sort-order', sortOrder);
+  }, [sortOrder]);
 
   // Auto-expand the active entry's year + month on first activation, so the
   // user lands on a visible row instead of staring at a fully-collapsed tree.
@@ -695,24 +709,35 @@ export default function Sanctuary() {
   }
 
   // ── Filtering / search ─────────────────────────────────────────────────
+  // `entries` is fetched newest-first from the DB. We re-sort here so the
+  // sort toggle drives ALL views (tree + search-flat list) without a refetch.
+  const orderedEntries = useMemo(() => {
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    return entries.slice().sort((a, b) => {
+      const d = a.entry_date.localeCompare(b.entry_date) * dir;
+      if (d !== 0) return d;
+      return (a.created_at || '').localeCompare(b.created_at || '') * dir;
+    });
+  }, [entries, sortOrder]);
+
   const visibleEntries = useMemo(() => {
-    if (!search.trim()) return entries;
+    if (!search.trim()) return orderedEntries;
     const q = search.toLowerCase();
-    return entries.filter(
+    return orderedEntries.filter(
       (e) =>
         (e.title || '').toLowerCase().includes(q) ||
         (e.body || '').toLowerCase().includes(q) ||
         (e.tags || []).some((t) => t.toLowerCase().includes(q)) ||
         e.entry_date.includes(q),
     );
-  }, [entries, search]);
+  }, [orderedEntries, search]);
 
   // Tree view of the binder. Only built when no search is active — when the
   // user is searching, we collapse to a flat hit list (matches across years
   // shouldn't be hidden behind closed folders).
   const tree = useMemo(
-    () => (search.trim() ? null : buildBinderTree(visibleEntries)),
-    [visibleEntries, search],
+    () => (search.trim() ? null : buildBinderTree(visibleEntries, sortOrder)),
+    [visibleEntries, search, sortOrder],
   );
 
   const wordCount = useMemo(() => {
@@ -801,6 +826,17 @@ export default function Sanctuary() {
                   e.target.value = '';
                 }}
               />
+              <button
+                className="tool"
+                onClick={() => setSortOrder((s) => (s === 'desc' ? 'asc' : 'desc'))}
+                title={
+                  sortOrder === 'desc'
+                    ? 'Currently newest first — click to flip to oldest first'
+                    : 'Currently oldest first — click to flip to newest first'
+                }
+              >
+                {sortOrder === 'desc' ? 'newest ↓' : 'oldest ↑'}
+              </button>
               <button className="tool" onClick={() => importInputRef.current?.click()}>
                 import…
               </button>

@@ -34,13 +34,18 @@ export function monthKey(year: string, month: number): string {
   return `${year}-${String(month).padStart(2, '0')}`;
 }
 
+export type SortOrder = 'desc' | 'asc';
+
 /**
- * Group flat entries into year > month > entries. Years descend (newest
- * first); months descend within year; entries descend within month, then
- * by created_at as a tiebreaker so multiple entries on the same day stay
- * in insertion order.
+ * Group flat entries into year > month > entries. Order is consistent at
+ * every level — by default newest first ('desc'), but callers can pass
+ * 'asc' for a chronological (oldest-first) read, which mirrors how Jess's
+ * paper journals were arranged before the import.
  */
-export function buildBinderTree(entries: Entry[]): BinderTree {
+export function buildBinderTree(
+  entries: Entry[],
+  order: SortOrder = 'desc',
+): BinderTree {
   const yearMap = new Map<string, Map<number, Entry[]>>();
   for (const e of entries) {
     if (!e.entry_date || e.entry_date.length < 7) continue;
@@ -54,19 +59,21 @@ export function buildBinderTree(entries: Entry[]): BinderTree {
     arr.push(e);
   }
 
+  const dir = order === 'asc' ? 1 : -1;
+
   return [...yearMap.entries()]
-    .sort(([a], [b]) => b.localeCompare(a))
+    .sort(([a], [b]) => a.localeCompare(b) * dir)
     .map(([year, monthsMap]) => {
       const months: MonthGroup[] = [...monthsMap.entries()]
-        .sort(([a], [b]) => b - a)
+        .sort(([a], [b]) => (a - b) * dir)
         .map(([month, es]) => ({
           month,
           monthLabel: MONTH_LABELS[month - 1],
           count: es.length,
           entries: es.slice().sort((a, b) => {
-            const d = b.entry_date.localeCompare(a.entry_date);
+            const d = a.entry_date.localeCompare(b.entry_date) * dir;
             if (d !== 0) return d;
-            return (b.created_at || '').localeCompare(a.created_at || '');
+            return (a.created_at || '').localeCompare(b.created_at || '') * dir;
           }),
         }));
       const count = months.reduce((acc, m) => acc + m.count, 0);
