@@ -752,11 +752,16 @@ export default function Sanctuary() {
   // so these handlers don't need their own setEntries call.
   function addTag() {
     if (!active) return;
-    const t = window.prompt('Tag');
-    if (!t) return;
-    const trimmed = t.trim();
-    if (!trimmed) return;
-    const tags = Array.from(new Set([...(active.tags || []), trimmed]));
+    const input = window.prompt('Tag (comma-separated for multiple)');
+    if (!input) return;
+    // Accept "presence, bread, recognition" → three tags. Empty pieces and
+    // duplicates against the existing list are dropped.
+    const incoming = input
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (incoming.length === 0) return;
+    const tags = Array.from(new Set([...(active.tags || []), ...incoming]));
     scheduleSave({ tags });
   }
   function removeTag(tag: string) {

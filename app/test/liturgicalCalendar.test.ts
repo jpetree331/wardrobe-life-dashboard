@@ -50,8 +50,12 @@ describe('firstSundayOfAdvent', () => {
 });
 
 describe('liturgicalLabel', () => {
-  it('returns null in Ordinary Time (mid-summer, no feast nearby)', () => {
-    expect(liturgicalLabel(new Date(2026, 6, 14))).toBeNull(); // July 14
+  it('returns null on most days (no season-spanning labels)', () => {
+    expect(liturgicalLabel(new Date(2026, 6, 14))).toBeNull(); // ordinary July
+    // Today the user reported (April 27, 2026): Easter is past, Pentecost is
+    // weeks away. The previous version returned 'Eastertide' here for 50+
+    // days; now it returns null so the ribbon stays quiet.
+    expect(liturgicalLabel(new Date(2026, 3, 27))).toBeNull();
   });
 
   it('names Christmas Eve and Christmas Day specifically', () => {
@@ -59,63 +63,45 @@ describe('liturgicalLabel', () => {
     expect(liturgicalLabel(new Date(2026, 11, 25))).toBe('Christmas Day');
   });
 
-  it('returns "Christmastide" for Dec 26 → Jan 5', () => {
-    expect(liturgicalLabel(new Date(2026, 11, 26))).toBe('Christmastide');
-    expect(liturgicalLabel(new Date(2026, 11, 31))).toBe('Christmastide');
-    expect(liturgicalLabel(new Date(2027, 0, 1))).toBe('Christmastide');
-    expect(liturgicalLabel(new Date(2027, 0, 5))).toBe('Christmastide');
+  it('does NOT label Christmastide / Eastertide / Advent / Lent / Holy Week', () => {
+    expect(liturgicalLabel(new Date(2026, 11, 26))).toBeNull(); // 2nd day of Christmas
+    expect(liturgicalLabel(new Date(2027, 0, 1))).toBeNull(); // New Year's Day
+    expect(liturgicalLabel(new Date(2026, 1, 19))).toBeNull(); // day after Ash Wed
+    expect(liturgicalLabel(new Date(2026, 2, 31))).toBeNull(); // Holy Week middle day
+    expect(liturgicalLabel(new Date(2026, 3, 6))).toBeNull(); // day after Easter
+    expect(liturgicalLabel(new Date(2026, 11, 23))).toBeNull(); // Advent middle
   });
 
-  it('names Epiphany and exits Christmastide on Jan 6', () => {
+  it('names Epiphany on January 6', () => {
     expect(liturgicalLabel(new Date(2027, 0, 6))).toBe('Epiphany');
   });
 
-  it('Easter season — feast days override season label', () => {
+  it('names every Easter Triduum day', () => {
     // Easter 2026 = April 5 (verified above).
     expect(liturgicalLabel(new Date(2026, 3, 5))).toBe('Easter Sunday');
-    // Day before = Holy Saturday (named); two days before = Good Friday.
     expect(liturgicalLabel(new Date(2026, 3, 4))).toBe('Holy Saturday');
     expect(liturgicalLabel(new Date(2026, 3, 3))).toBe('Good Friday');
-    // Sunday before = Palm Sunday.
     expect(liturgicalLabel(new Date(2026, 2, 29))).toBe('Palm Sunday');
-    // Mid-week between Palm Sunday and Easter = Holy Week.
-    expect(liturgicalLabel(new Date(2026, 2, 31))).toBe('Holy Week');
-    // Day after Easter = Eastertide (specific name has passed).
-    expect(liturgicalLabel(new Date(2026, 3, 6))).toBe('Eastertide');
   });
 
-  it('Lent runs Ash Wednesday → Holy Week (with Holy Week named separately)', () => {
+  it('names Ash Wednesday', () => {
     // Easter 2026 = April 5. Ash Wednesday = April 5 - 46 = February 18.
     expect(liturgicalLabel(new Date(2026, 1, 18))).toBe('Ash Wednesday');
-    // Day after Ash Wednesday is plain Lent.
-    expect(liturgicalLabel(new Date(2026, 1, 19))).toBe('Lent');
-    // Day before Palm Sunday is Lent.
-    expect(liturgicalLabel(new Date(2026, 2, 28))).toBe('Lent');
   });
 
-  it('names Pentecost and exits Eastertide the next day', () => {
+  it('names Pentecost', () => {
     // Easter 2026 = April 5; Pentecost = April 5 + 49 = May 24.
     expect(liturgicalLabel(new Date(2026, 4, 24))).toBe('Pentecost');
-    // Pentecost itself is a specific feast — no "Eastertide" label that day.
-    expect(liturgicalLabel(new Date(2026, 4, 23))).toBe('Eastertide');
-    expect(liturgicalLabel(new Date(2026, 4, 25))).toBeNull(); // Ordinary Time
+    expect(liturgicalLabel(new Date(2026, 4, 25))).toBeNull(); // back to silent
   });
 
-  it('returns "Advent" between Advent 1 and Christmas Eve', () => {
+  it('names the First Sunday of Advent', () => {
     // 2026 Advent 1 = Nov 29 (verified above).
-    expect(liturgicalLabel(new Date(2026, 10, 29))).toBe('Advent');
-    expect(liturgicalLabel(new Date(2026, 11, 23))).toBe('Advent');
-    // Christmas Eve has its own name.
-    expect(liturgicalLabel(new Date(2026, 11, 24))).toBe('Christmas Eve');
-  });
-
-  it('returns null just BEFORE Advent (the Saturday before Advent 1)', () => {
-    expect(liturgicalLabel(new Date(2026, 10, 28))).toBeNull();
+    expect(liturgicalLabel(new Date(2026, 10, 29))).toBe('First Sunday of Advent');
   });
 
   it('All Saints (Nov 1) is named even though Ordinary Time surrounds it', () => {
     expect(liturgicalLabel(new Date(2026, 10, 1))).toBe('All Saints');
-    // Day before / day after fall back to null (Ordinary Time).
     expect(liturgicalLabel(new Date(2026, 9, 31))).toBeNull();
     expect(liturgicalLabel(new Date(2026, 10, 2))).toBeNull();
   });

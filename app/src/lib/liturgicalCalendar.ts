@@ -42,10 +42,16 @@ export function firstSundayOfAdvent(year: number): Date {
 }
 
 /**
- * Return a single label for the given date — a feast day takes precedence
- * over a season, and named portions of seasons (Holy Week) take precedence
- * over the broader season (Lent). Returns null in Ordinary Time so the
- * caller can suppress whatever ribbon decoration depends on it.
+ * Return a single label for the given date — but only for *named days*,
+ * not for the multi-week seasons that surround them. The season variants
+ * (Lent, Advent, Eastertide, Christmastide, Holy Week) used to be
+ * returned here too, but a single label persisting on the ribbon for
+ * 40+ days at a stretch wears out its welcome; the season's start day
+ * is already a feast (Ash Wednesday, First Sunday of Advent, Easter
+ * Sunday, etc.) so the bracketing days are still marked.
+ *
+ * Returns null on every other day, so the caller can suppress whatever
+ * ribbon decoration depends on it.
  */
 export function liturgicalLabel(date: Date): string | null {
   const year = date.getFullYear();
@@ -61,15 +67,12 @@ export function liturgicalLabel(date: Date): string | null {
   const epiphany = new Date(year, 0, 6);
   const allSaints = new Date(year, 10, 1);
   const advent1 = firstSundayOfAdvent(year);
-  // Christmastide spans the year boundary; the next-year Epiphany applies
-  // for January dates.
-  const prevAdventChristmas = new Date(year - 1, 11, 25);
 
-  // Specific named days (most specific wins).
   if (sameDay(date, christmas))    return 'Christmas Day';
   if (sameDay(date, christmasEve)) return 'Christmas Eve';
   if (sameDay(date, epiphany))     return 'Epiphany';
   if (sameDay(date, allSaints))    return 'All Saints';
+  if (sameDay(date, advent1))      return 'First Sunday of Advent';
   if (sameDay(date, ashWed))       return 'Ash Wednesday';
   if (sameDay(date, palmSun))      return 'Palm Sunday';
   if (sameDay(date, goodFri))      return 'Good Friday';
@@ -77,24 +80,6 @@ export function liturgicalLabel(date: Date): string | null {
   if (sameDay(date, easter))       return 'Easter Sunday';
   if (sameDay(date, ascension))    return 'Ascension';
   if (sameDay(date, pentecost))    return 'Pentecost';
-
-  // Holy Week is named separately from the rest of Lent.
-  if (date > palmSun && date < easter) return 'Holy Week';
-
-  // Seasons.
-  if (date > ashWed && date < palmSun) return 'Lent';
-  if (date > easter && date < pentecost) return 'Eastertide';
-  if (date >= advent1 && date < christmasEve) return 'Advent';
-  // Christmastide spans Dec 25 → Jan 5 inclusive.
-  if (date > christmas && date.getMonth() === 11) return 'Christmastide';
-  if (
-    date.getMonth() === 0 && date.getDate() <= 5 &&
-    // Defensive — only call this Christmastide if the prior Christmas exists
-    // in our Gregorian range, which is always true for years ≥ 1583.
-    prevAdventChristmas.getFullYear() >= 1583
-  ) {
-    return 'Christmastide';
-  }
 
   return null;
 }

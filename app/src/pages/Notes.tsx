@@ -317,6 +317,38 @@ export default function Notes() {
     };
   }, []);
 
+  // ── Keyboard: Delete sends the selected card to trash ────────────────
+  // Skipped if the user is typing — we look at the current focus and bail
+  // out for any input/textarea/contentEditable element. Backspace is
+  // intentionally not bound: it's too easy to hit while editing text.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Delete') return;
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
+      ) {
+        return;
+      }
+      if (!selectedId) return;
+      const card = cards.find((c) => c.id === selectedId);
+      if (!card) return;
+      e.preventDefault();
+      // Inline soft-delete; the regular deleteCard isn't memoized and
+      // would force this effect to re-attach on every render.
+      setCards((prev) => prev.filter((c) => c.id !== card.id));
+      setSelectedId(null);
+      setCtxMenu(null);
+      softDeleteCard(card).catch((err) => {
+        console.error(err);
+        if (currentBoardId) loadBoard(currentBoardId);
+      });
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selectedId, cards, currentBoardId, loadBoard]);
+
   // ── Floating format toolbar ───────────────────────────────────────────
   // Show when the user makes a non-collapsed selection inside a Note body
   // (any element marked `data-note-body`). Position 8px above the selection.
@@ -952,7 +984,33 @@ function TodoBody({
     patchItems(items.map((it, i) => (i === idx ? { ...it, text } : it)));
   }
   function addLine() {
-    patchItems([...items, { id: cryptoRandomId(), text: '', done: false }]);
+    const id = cryptoRandomId();
+    patchItems([...items, { id, text: '', done: false }]);
+    focusItemAfterRender(id);
+  }
+  function insertAfter(idx: number) {
+    const id = cryptoRandomId();
+    const next = items.slice();
+    next.splice(idx + 1, 0, { id, text: '', done: false });
+    patchItems(next);
+    focusItemAfterRender(id);
+  }
+  function focusItemAfterRender(id: string) {
+    // Wait one frame for React to render the new <li>, then move the
+    // caret into its text div.
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLDivElement>(
+        `[data-todo-item-id="${id}"]`,
+      );
+      if (!el) return;
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    });
   }
 
   const titleRef = useRef<HTMLDivElement>(null);
@@ -980,6 +1038,7 @@ function TodoBody({
             onToggle={() => toggle(i)}
             onText={(t) => setText(i, t)}
             onDelete={() => onDeleteItem(it)}
+            onEnter={() => insertAfter(i)}
           />
         ))}
       </ol>
@@ -993,11 +1052,13 @@ function TodoLine({
   onToggle,
   onText,
   onDelete,
+  onEnter,
 }: {
   item: TodoItem;
   onToggle: () => void;
   onText: (text: string) => void;
   onDelete: () => void;
+  onEnter: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1013,9 +1074,19 @@ function TodoLine({
         className="text"
         contentEditable
         suppressContentEditableWarning
+        data-todo-item-id={item.id}
         onInput={(e) => onText((e.target as HTMLDivElement).textContent || '')}
         onKeyDown={(e) => {
-          if (e.key === 'Backspace' && !((e.target as HTMLDivElement).textContent || '')) {
+          if (e.key === 'Enter') {
+            // Enter creates a new empty item below this one and moves the
+            // caret into it. Default would just insert a <br> inside this
+            // contenteditable, which isn't what a checklist wants.
+            e.preventDefault();
+            onEnter();
+          } else if (
+            e.key === 'Backspace' &&
+            !((e.target as HTMLDivElement).textContent || '')
+          ) {
             e.preventDefault();
             onDelete();
           }
