@@ -29,6 +29,7 @@ import {
   yearKey,
   type SortOrder,
 } from '../lib/binderTree';
+import { liturgicalLabel } from '../lib/liturgicalCalendar';
 import { useFavicon } from '../hooks/useFavicon';
 import './Sanctuary.css';
 
@@ -787,8 +788,15 @@ export default function Sanctuary() {
           </Link>
           <div className="place">Sanctuary</div>
           <div className="season">
-            <span>{todayBlessing()}</span>
-            <span className="dot">✦</span>
+            {(() => {
+              const label = liturgicalLabel(new Date());
+              return label ? (
+                <>
+                  <span>{label}</span>
+                  <span className="dot">✦</span>
+                </>
+              ) : null;
+            })()}
             <span>{todayLine()}</span>
           </div>
         </div>
@@ -1527,16 +1535,6 @@ function ancestorMatches(node: Node | null, className: string): boolean {
 function entryTypeLabel(t: EntryType): string {
   if (!t) return 'Journal';
   return ENTRY_TYPES.find((x) => x.value === t)?.label || 'Journal';
-}
-
-function todayBlessing(): string {
-  // Gentle liturgical hint; not authoritative.
-  const m = new Date().getMonth();
-  if (m === 11 || m === 0) return 'Christmastide';
-  if (m === 1 || m === 2) return 'Lent';
-  if (m === 3) return 'Eastertide';
-  if (m === 4 || m === 5) return 'Pentecost';
-  return 'Ordinary Time';
 }
 
 function todayLine(): string {
