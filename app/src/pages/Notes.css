@@ -148,7 +148,17 @@
   border-radius: 3px;
   transition: box-shadow 200ms ease, border-color 200ms ease, transform 200ms ease;
   user-select: none;
+  /* The canvas wrapper sets cursor: grab; without this the cursor "leaks"
+     onto every card. Cards default to the system default; the drag handle,
+     contenteditable bodies, inputs, and the resize corner each set their
+     own override. */
+  cursor: default;
 }
+/* Any editable text region inside a card shows the I-beam, never the
+   wrapper's grab cursor. */
+.notes-page .nt-card [contenteditable] { cursor: text; }
+.notes-page .nt-card input[type="text"],
+.notes-page .nt-card input[type="url"] { cursor: text; }
 .nt-card:hover {
   border-color: var(--line-strong);
   box-shadow: 0 14px 36px -16px rgba(43,36,25,0.35);
@@ -179,9 +189,19 @@
 }
 .nt-card:hover .typetag, .nt-card.selected .typetag { opacity: 1; }
 
-/* Note card */
-.nt-card.type-note { padding: 14px 16px; min-width: 200px; min-height: 100px; }
+/* Note card. Card uses flex so the editable body fills the card's interior;
+   without this an empty Note's body is zero-height and clicks on the empty
+   area below it land on the card background, which triggers the drag
+   handler instead of focusing the editor. */
+.nt-card.type-note {
+  padding: 14px 16px;
+  min-width: 200px; min-height: 100px;
+  display: flex;
+  flex-direction: column;
+}
 .nt-card.type-note .body {
+  flex: 1;
+  min-height: 40px;
   font-family: 'EB Garamond', serif; font-size: 14px;
   color: var(--ink); line-height: 1.5;
   outline: none;
