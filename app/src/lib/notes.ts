@@ -222,6 +222,9 @@ export async function updateCard(id: string, patch: Partial<{
   z: number;
   color: SwatchKey;
   payload: CardPayload;
+  // `type` is patchable specifically to support Note → Document conversion.
+  // The DB CHECK constraint still enforces the allowed set.
+  type: CardType;
 }>): Promise<Card> {
   const { data, error } = await supabase
     .from('notes_cards')

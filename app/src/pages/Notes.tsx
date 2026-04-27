@@ -28,14 +28,16 @@ import {
   updateCard,
 } from '../lib/notes';
 import {
-  ZOOM_MAX,
-  ZOOM_MIN,
-  clampZoom,
   fitView,
   type View,
   wrapperToCanvas,
   zoomAroundCursor,
 } from '../lib/notesPanZoom';
+import {
+  detectMarkdownSentinel,
+  extractTitleFromHtml,
+  shouldOfferConvert,
+} from '../lib/notesShortcuts';
 import { useFavicon } from '../hooks/useFavicon';
 import './Notes.css';
 
@@ -83,6 +85,8 @@ export default function Notes() {
   const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [docOverlayId, setDocOverlayId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState('Drag a card type onto the canvas. Scroll to pan, ⌘+scroll to zoom.');
+  // Floating format toolbar over text selection inside a Note body.
+  const [fmtToolbar, setFmtToolbar] = useState<{ top: number; left: number } | null>(null);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -313,6 +317,109 @@ export default function Notes() {
     };
   }, []);
 
+  // ── Floating format toolbar ───────────────────────────────────────────
+  // Show when the user makes a non-collapsed selection inside a Note body
+  // (any element marked `data-note-body`). Position 8px above the selection.
+  useEffect(() => {
+    function update() {
+      const s = window.getSelection();
+      if (!s || s.isCollapsed || s.rangeCount === 0) {
+        setFmtToolbar(null);
+        return;
+      }
+      const range = s.getRangeAt(0);
+      const noteBody = findClosest(range.commonAncestorContainer, '[data-note-body]');
+      if (!noteBody) {
+        setFmtToolbar(null);
+        return;
+      }
+      const r = range.getBoundingClientRect();
+      // Clamp horizontally so the toolbar stays on screen.
+      const left = Math.max(8, Math.min(window.innerWidth - 220, r.left + r.width / 2 - 110));
+      const top = Math.max(8, r.top - 42);
+      setFmtToolbar({ top, left });
+    }
+    document.addEventListener('selectionchange', update);
+    document.addEventListener('mouseup', update);
+    return () => {
+      document.removeEventListener('selectionchange', update);
+      document.removeEventListener('mouseup', update);
+    };
+  }, []);
+
+  function execFmt(cmd: string, value?: string) {
+    document.execCommand(cmd, false, value);
+    // The contentEditable's onInput fires automatically and triggers a save.
+    // Refresh toolbar position after the DOM mutates.
+    setTimeout(() => {
+      const s = window.getSelection();
+      if (!s || s.rangeCount === 0 || s.isCollapsed) {
+        setFmtToolbar(null);
+        return;
+      }
+      const r = s.getRangeAt(0).getBoundingClientRect();
+      const left = Math.max(8, Math.min(window.innerWidth - 220, r.left + r.width / 2 - 110));
+      const top = Math.max(8, r.top - 42);
+      setFmtToolbar({ top, left });
+    }, 0);
+  }
+
+  // ── Bring to front ────────────────────────────────────────────────────
+  function bringToFront(card: Card) {
+    setCtxMenu(null);
+    const maxZ = cards.reduce((acc, c) => Math.max(acc, c.z), 0);
+    if (card.z >= maxZ) return; // already on top
+    scheduleCardSave(card.id, { z: maxZ + 1 });
+  }
+
+  // ── Resize handle ─────────────────────────────────────────────────────
+  function startResize(card: Card, e: React.MouseEvent) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startW = card.w ?? 240;
+    const startH = card.h ?? 140;
+    const k = view.k;
+    const onMove = (ev: MouseEvent) => {
+      const dx = (ev.clientX - startX) / k;
+      const dy = (ev.clientY - startY) / k;
+      const w = Math.max(140, startW + dx);
+      const h = Math.max(60, startH + dy);
+      patchCardLocal(card.id, { w, h });
+    };
+    const onUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      const dx = (ev.clientX - startX) / k;
+      const dy = (ev.clientY - startY) / k;
+      const w = Math.max(140, startW + dx);
+      const h = Math.max(60, startH + dy);
+      updateCard(card.id, { w, h }).catch(console.error);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  // ── Note → Document conversion ────────────────────────────────────────
+  function convertNoteToDocument(card: Card) {
+    const body = (card.payload as any).body || '';
+    const title = extractTitleFromHtml(body) || 'Untitled document';
+    const newPayload = { title, body, mode: 'preview' as const };
+    const w = Math.max(card.w ?? 240, 240);
+    const h = Math.max(card.h ?? 200, 200);
+    scheduleCardSave(card.id, {
+      type: 'document',
+      payload: newPayload,
+      w, h,
+    });
+  }
+  function dismissConvertPrompt(card: Card) {
+    const next = { ...(card.payload as any), dismissedConvert: true };
+    scheduleCardSave(card.id, { payload: next });
+  }
+
   // ── Context menu ──────────────────────────────────────────────────────
   function openContextMenu(card: Card, clientX: number, clientY: number) {
     setSelectedId(card.id);
@@ -489,6 +596,9 @@ export default function Notes() {
                   }
                 }}
                 onPatch={(patch) => scheduleCardSave(card.id, patch)}
+                onResizeStart={(e) => startResize(card, e)}
+                onConvertNote={() => convertNoteToDocument(card)}
+                onDismissConvert={() => dismissConvertPrompt(card)}
                 onDeleteTodoItem={async (item) => {
                   const updated = await softDeleteTodoItem(card, item).catch((e) => {
                     console.error(e); return null;
@@ -539,6 +649,9 @@ export default function Notes() {
           <button className="item" onClick={() => duplicateCard(ctxCard)}>
             Duplicate
           </button>
+          <button className="item" onClick={() => bringToFront(ctxCard)}>
+            Bring to front
+          </button>
           {ctxCard.type === 'board' && ctxCard.board_ref && (
             <button
               className="item"
@@ -561,10 +674,40 @@ export default function Notes() {
               Open document
             </button>
           )}
+          {ctxCard.type === 'note' && (
+            <button
+              className="item"
+              onClick={() => {
+                convertNoteToDocument(ctxCard);
+                setCtxMenu(null);
+              }}
+            >
+              Convert to Document
+            </button>
+          )}
           <div className="sep" />
           <button className="item delete" onClick={() => deleteCard(ctxCard)}>
             Delete
           </button>
+        </div>
+      )}
+
+      {fmtToolbar && (
+        <div
+          className="nt-fmt-toolbar"
+          style={{ top: fmtToolbar.top, left: fmtToolbar.left } as CSSProperties}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <button className="b" onClick={() => execFmt('bold')} title="Bold">B</button>
+          <button className="i" onClick={() => execFmt('italic')} title="Italic"><em>I</em></button>
+          <button className="u" onClick={() => execFmt('underline')} title="Underline">U</button>
+          <span className="sep" />
+          <button onClick={() => execFmt('formatBlock', 'h1')} title="Heading">H1</button>
+          <button onClick={() => execFmt('formatBlock', 'h2')} title="Subheading">H2</button>
+          <span className="sep" />
+          <button onClick={() => execFmt('insertUnorderedList')} title="Bullet list">•</button>
+          <button onClick={() => execFmt('insertOrderedList')} title="Numbered list">1.</button>
+          <button onClick={() => execFmt('formatBlock', 'blockquote')} title="Quote">❝</button>
         </div>
       )}
 
@@ -597,6 +740,9 @@ function CardView({
   onClick,
   onDoubleClick,
   onPatch,
+  onResizeStart,
+  onConvertNote,
+  onDismissConvert,
   onDeleteTodoItem,
   onOpenLink,
 }: {
@@ -607,6 +753,9 @@ function CardView({
   onClick: () => void;
   onDoubleClick: () => void;
   onPatch: (patch: Partial<Card>) => void;
+  onResizeStart: (e: React.MouseEvent) => void;
+  onConvertNote: () => void;
+  onDismissConvert: () => void;
   onDeleteTodoItem: (item: TodoItem) => void;
   onOpenLink: () => void;
 }) {
@@ -618,7 +767,12 @@ function CardView({
     background: card.type === 'heading' || card.type === 'board'
       ? undefined
       : `var(--c-${card.color})`,
+    zIndex: card.z || undefined,
   };
+
+  // Heading and Board cards don't get resize handles — heading auto-sizes
+  // to its text, Board has a fixed-shape tile.
+  const showResize = card.type !== 'heading' && card.type !== 'board';
 
   return (
     <div
@@ -631,7 +785,9 @@ function CardView({
     >
       <div className="nt-drag-handle" />
       <div className="typetag">{card.type}</div>
-      {card.type === 'note' && <NoteBody card={card} onPatch={onPatch} />}
+      {card.type === 'note' && (
+        <NoteBody card={card} onPatch={onPatch} onConvert={onConvertNote} onDismissConvert={onDismissConvert} />
+      )}
       {card.type === 'todo' && (
         <TodoBody card={card} onPatch={onPatch} onDeleteItem={onDeleteTodoItem} />
       )}
@@ -641,29 +797,115 @@ function CardView({
       )}
       {card.type === 'document' && <DocumentTile card={card} onPatch={onPatch} />}
       {card.type === 'board' && <BoardTile card={card} />}
+      {showResize && (
+        <div
+          className="nt-resize-se"
+          onMouseDown={onResizeStart}
+          title="Drag to resize"
+        />
+      )}
     </div>
   );
 }
 
-function NoteBody({ card, onPatch }: { card: Card; onPatch: (p: Partial<Card>) => void }) {
+function NoteBody({
+  card,
+  onPatch,
+  onConvert,
+  onDismissConvert,
+}: {
+  card: Card;
+  onPatch: (p: Partial<Card>) => void;
+  onConvert: () => void;
+  onDismissConvert: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const lastIdRef = useRef<string>('');
+  const payload = card.payload as { body?: string; dismissedConvert?: boolean };
   useEffect(() => {
     if (!ref.current) return;
     if (lastIdRef.current === card.id && document.activeElement === ref.current) return;
-    ref.current.innerHTML = (card.payload as any).body || '';
+    ref.current.innerHTML = payload.body || '';
     lastIdRef.current = card.id;
-  }, [card.id, card.payload]);
+  }, [card.id, payload.body]);
+
+  // Markdown shortcuts: when the user types one of the supported sentinels
+  // followed by space at the start of a block, transform the block. The
+  // sentinel and the trailing space are consumed (no literal characters
+  // left behind in the document).
+  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== ' ') return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
+    if (!ref.current) return;
+    const range = sel.getRangeAt(0);
+    if (!ref.current.contains(range.startContainer)) return;
+
+    // Read the text from the start of the current block to the caret. If
+    // it matches a sentinel exactly, we trigger the transform.
+    const block = findBlockAncestor(range.startContainer, ref.current);
+    if (!block) return;
+    const blockRange = document.createRange();
+    blockRange.setStart(block, 0);
+    blockRange.setEnd(range.startContainer, range.startOffset);
+    const prefix = blockRange.toString();
+    const action = detectMarkdownSentinel(prefix);
+    if (!action) return;
+
+    e.preventDefault();
+    // Remove the sentinel characters from the block (they're at its start).
+    blockRange.deleteContents();
+    if (action.kind === 'h1' || action.kind === 'h2' || action.kind === 'h3' || action.kind === 'blockquote') {
+      document.execCommand('formatBlock', false, action.kind);
+    } else if (action.kind === 'ul') {
+      document.execCommand('insertUnorderedList');
+    } else if (action.kind === 'ol') {
+      document.execCommand('insertOrderedList');
+    }
+    onPatch({ payload: { ...payload, body: ref.current.innerHTML } });
+  }
+
   return (
-    <div
-      ref={ref}
-      className="body"
-      contentEditable
-      suppressContentEditableWarning
-      data-placeholder="Note"
-      onInput={(e) => onPatch({ payload: { ...(card.payload as any), body: (e.target as HTMLDivElement).innerHTML } })}
-    />
+    <>
+      <div
+        ref={ref}
+        className="body"
+        contentEditable
+        suppressContentEditableWarning
+        data-note-body=""
+        data-placeholder="Note"
+        onInput={(e) =>
+          onPatch({
+            payload: { ...payload, body: (e.target as HTMLDivElement).innerHTML },
+          })
+        }
+        onKeyDown={onKeyDown}
+      />
+      {shouldOfferConvert(payload.body || '', payload.dismissedConvert) && (
+        <div className="nt-convert-prompt" contentEditable={false}>
+          <span>This note has grown — convert it into a Document?</span>
+          <div className="actions">
+            <button onClick={onConvert}>Convert</button>
+            <button className="ghost" onClick={onDismissConvert}>Keep as note</button>
+          </div>
+        </div>
+      )}
+    </>
   );
+}
+
+/** Walk up from `node` to find the closest block-level child of `root`. */
+function findBlockAncestor(node: Node | null, root: Element): Element | null {
+  let n: Node | null = node;
+  while (n && n !== root) {
+    if (n.nodeType === Node.ELEMENT_NODE && (n as Element).parentElement === root) {
+      return n as Element;
+    }
+    n = n.parentNode;
+  }
+  // If the caret is in a text node directly inside `root` (no wrapping
+  // <p>), return the root itself.
+  return root;
 }
 
 function HeadingBody({ card, onPatch }: { card: Card; onPatch: (p: Partial<Card>) => void }) {
@@ -994,6 +1236,19 @@ function defaultPayloadFor(type: CardType): any {
     case 'document': return { title: 'Untitled document', body: '', mode: 'icon' };
     default:         return {};
   }
+}
+
+/** Walk up from `node` to find the closest ancestor matching the selector. */
+function findClosest(node: Node | null, selector: string): HTMLElement | null {
+  let n: Node | null = node;
+  while (n) {
+    if (n.nodeType === Node.ELEMENT_NODE) {
+      const el = n as HTMLElement;
+      if (el.matches?.(selector)) return el;
+    }
+    n = n.parentNode;
+  }
+  return null;
 }
 
 function cryptoRandomId(): string {
