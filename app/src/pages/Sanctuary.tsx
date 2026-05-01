@@ -30,6 +30,7 @@ import {
   type SortOrder,
 } from '../lib/binderTree';
 import { liturgicalLabel } from '../lib/liturgicalCalendar';
+import { localToday } from '../lib/dates';
 import { useFavicon } from '../hooks/useFavicon';
 import './Sanctuary.css';
 
@@ -377,7 +378,10 @@ export default function Sanctuary() {
 
   // ── New / delete ───────────────────────────────────────────────────────
   async function newEntry() {
-    const today = new Date().toISOString().slice(0, 10);
+    // localToday, NOT toISOString().slice(0,10) — the latter returns UTC
+    // and would file a late-evening entry under tomorrow's date for any
+    // user west of UTC.
+    const today = localToday();
     try {
       const created = await createSanctuaryEntry({
         entry_date: today,

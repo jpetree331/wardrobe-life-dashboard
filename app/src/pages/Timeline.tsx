@@ -10,6 +10,7 @@ import {
   type TimelineRow,
 } from '../lib/entries';
 import { parseFile } from '../lib/timelineImport';
+import { localToday } from '../lib/dates';
 import { useFavicon } from '../hooks/useFavicon';
 import './Timeline.css';
 
@@ -169,7 +170,9 @@ export default function Timeline() {
 
   // ── Add new ────────────────────────────────────────────────────────────
   async function addToday() {
-    const today = new Date().toISOString().slice(0, 10);
+    // localToday in the user's timezone — toISOString() returns UTC and
+    // would file a late-evening "today" under tomorrow's date.
+    const today = localToday();
     try {
       const created = await upsertTimelineEntry({
         entry_date: today,
