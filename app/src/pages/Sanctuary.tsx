@@ -1068,6 +1068,8 @@ export default function Sanctuary() {
                   <span>{entryTypeLabel(active.entry_type)}</span>
                   <span className="pip">✦</span>
                   <span>{active.entry_date}</span>
+                  <span className="pip">✦</span>
+                  <span>{dayOfWeekFor(active.entry_date)}</span>
                   {(active.scripture_refs || []).slice(0, 1).map((r) => (
                     <span key={r} style={{ display: 'contents' }}>
                       <span className="pip">✦</span>
@@ -1540,6 +1542,21 @@ function ancestorMatches(node: Node | null, className: string): boolean {
 function entryTypeLabel(t: EntryType): string {
   if (!t) return 'Journal';
   return ENTRY_TYPES.find((x) => x.value === t)?.label || 'Journal';
+}
+
+/**
+ * Day of the week ("Thursday") for a 'YYYY-MM-DD' string. Constructs the
+ * Date from year/month/day in local time so a string like "2026-04-30"
+ * doesn't slip back to Wednesday in a US timezone (which `new Date(string)`
+ * would do — it parses ISO dates as UTC midnight). Returns '' for any
+ * malformed input so the meta-line gracefully omits the segment.
+ */
+function dayOfWeekFor(entryDate: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(entryDate || '');
+  if (!m) return '';
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (isNaN(d.getTime())) return '';
+  return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getDay()];
 }
 
 function todayLine(): string {
