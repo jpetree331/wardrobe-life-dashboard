@@ -153,7 +153,7 @@
 .s-sanctuary { left: 50%; top: 58%; transform: translate(-50%, -50%); }
 .s-timeline  { left: 16%; top: 22%; }
 .s-notes    { left: 50%; top: 12%; transform: translateX(-50%); }
-.s-workshop  { right: 16%; top: 22%; }
+.s-data  { right: 16%; top: 22%; }
 
 /* Quiet hairline arc */
 .archline {
@@ -313,5 +313,5 @@
 
 .s-notes    { animation-delay: 250ms; }
 .s-timeline  { animation-delay: 600ms; }
-.s-workshop  { animation-delay: 900ms; }
+.s-data  { animation-delay: 900ms; }
 .s-sanctuary { animation-delay: 1200ms; }

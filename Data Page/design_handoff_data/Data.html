@@ -1,0 +1,2280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Data — Life Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,400&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #efe7d6;
+    --bg-2: #e4d8bf;
+    --bg-3: #d8caa8;
+    --panel: #ece3cf;
+    --page: #faf5e8;
+    --ink: #2b2419;
+    --ink-soft: #5a4f3c;
+    --ink-faint: #8a7d63;
+    --line: #2b241933;
+    --line-strong: #2b241955;
+    --accent: #7a6a3a;
+    --accent-strong: #9c8240;
+    --red: #8a2a1a;
+
+    /* Heatmap default theme: sage */
+    --heat-1: #e2dcc6;
+    --heat-2: #c8d3b3;
+    --heat-3: #a8bd8d;
+    --heat-4: #82a165;
+    --heat-5: #5a7e3f;
+    --heat-empty: #e8e1cc;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: 'EB Garamond', Georgia, serif;
+    -webkit-font-smoothing: antialiased;
+    height: 100vh;
+    display: grid; grid-template-rows: auto auto 1fr;
+    overflow: hidden;
+  }
+
+  /* Ribbon */
+  .ribbon {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 22px;
+    background: var(--bg-2); border-bottom: 1px solid var(--line);
+  }
+  .ribbon .left { display: flex; align-items: center; gap: 18px; }
+  .back {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    color: var(--ink-soft); text-decoration: none; font-size: 14px;
+    border-bottom: 1px solid transparent; padding-bottom: 2px;
+  }
+  .back:hover { color: var(--ink); border-bottom-color: var(--line-strong); }
+  .place {
+    font-family: 'Cormorant Garamond', serif; font-weight: 400;
+    font-size: 16px; letter-spacing: 0.32em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .ribbon .right { display: flex; gap: 10px; align-items: center; font-style: italic; color: var(--ink-faint); font-size: 13px; }
+
+  /* Section nav (top tabs) */
+  .nav {
+    display: flex; gap: 0;
+    background: var(--bg-2); border-bottom: 1px solid var(--line);
+    padding: 0 22px;
+  }
+  .nav button {
+    background: transparent; border: 0; cursor: pointer;
+    padding: 12px 18px;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 14px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+  .nav button:hover { color: var(--ink-soft); }
+  .nav button.active {
+    color: var(--ink); border-bottom-color: var(--ink);
+  }
+
+  /* Scrollable view */
+  main { overflow: auto; padding: 28px 32px 60px; }
+
+  /* Common panel */
+  .panel {
+    background: var(--page);
+    border: 1px solid var(--line);
+    padding: 22px 26px;
+    margin-bottom: 22px;
+  }
+  .panel-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; margin-bottom: 14px; flex-wrap: wrap;
+  }
+  .panel-head h2 {
+    margin: 0;
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 400; font-size: 22px;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+  }
+  .panel-head .sub {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    color: var(--ink-faint); font-size: 13px;
+    letter-spacing: 0.04em;
+  }
+  .panel-head .controls {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  }
+
+  /* Inner pill tabs (Scripture / Books / Plans inside a section) */
+  .pillbar {
+    display: inline-flex; gap: 2px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    padding: 3px;
+    border-radius: 999px;
+  }
+  .pillbar button {
+    font-family: 'EB Garamond', serif;
+    font-size: 12.5px; letter-spacing: 0.06em;
+    padding: 5px 14px; border: 0; background: transparent;
+    color: var(--ink-soft); cursor: pointer; border-radius: 999px;
+  }
+  .pillbar button.active { background: var(--ink); color: var(--bg); }
+  .pillbar button:hover:not(.active) { color: var(--ink); }
+
+  /* Quiet button */
+  .btn-quiet {
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    background: transparent; border: 1px solid var(--line-strong);
+    color: var(--ink-soft); padding: 5px 12px; cursor: pointer;
+    border-radius: 2px; letter-spacing: 0.04em;
+  }
+  .btn-quiet:hover { color: var(--ink); border-color: var(--ink-soft); }
+  .btn-quiet[aria-pressed="true"], .btn-quiet.active {
+    background: var(--ink); color: var(--bg); border-color: var(--ink);
+  }
+  .btn-solid {
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    background: var(--ink); color: var(--bg); border: 1px solid var(--ink);
+    padding: 6px 14px; cursor: pointer;
+    border-radius: 2px; letter-spacing: 0.04em;
+  }
+  .btn-solid:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+
+  select, input[type="text"], input[type="number"], input[type="date"] {
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    background: var(--bg); border: 1px solid var(--line);
+    color: var(--ink); padding: 4px 10px; border-radius: 2px;
+    outline: none;
+  }
+  select:focus, input:focus { border-color: var(--ink-soft); }
+
+  label.field {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-faint);
+    font-family: 'Cormorant Garamond', serif;
+  }
+  label.field input, label.field select { margin-top: 2px; }
+
+  /* ============ HEATMAP ============ */
+  .heatmap-layout {
+    display: grid; grid-template-columns: 1fr 80px;
+    gap: 24px; align-items: start;
+  }
+  .year-rail {
+    display: flex; flex-direction: column; gap: 4px; padding-top: 30px;
+  }
+  .year-rail button {
+    text-align: left;
+    font-family: 'EB Garamond', serif; font-size: 14px;
+    background: transparent; border: 1px solid transparent;
+    padding: 8px 14px; cursor: pointer; color: var(--ink-soft);
+    border-radius: 4px;
+    letter-spacing: 0.04em;
+  }
+  .year-rail button:hover { border-color: var(--line); color: var(--ink); }
+  .year-rail button.active {
+    background: var(--ink); color: var(--bg);
+  }
+
+  .heatmap-card {
+    background: var(--bg); border: 1px solid var(--line);
+    padding: 20px 24px;
+  }
+  .heatmap-summary {
+    margin-bottom: 14px;
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .heatmap-summary .totals {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 18px; color: var(--ink);
+    letter-spacing: 0.02em;
+  }
+  .heatmap-summary .totals em {
+    color: var(--ink-faint); font-style: italic; font-size: 13px;
+    margin-left: 6px;
+  }
+  .heatmap-grid-wrap { overflow-x: auto; padding-bottom: 6px; }
+  .heatmap-grid {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 6px;
+  }
+  .month-row {
+    grid-column: 2;
+    display: grid; grid-template-columns: repeat(53, 1fr);
+    gap: 0;
+    font-family: 'EB Garamond', serif; font-size: 11px;
+    color: var(--ink-faint);
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+    height: 14px;
+  }
+  .month-row span { white-space: nowrap; }
+  .day-col {
+    grid-column: 1;
+    display: grid; grid-template-rows: repeat(7, 1fr);
+    gap: 3px;
+    font-family: 'EB Garamond', serif; font-size: 10px;
+    color: var(--ink-faint);
+    letter-spacing: 0.04em;
+    padding-top: 2px;
+  }
+  .day-col span { line-height: 12px; }
+  .grid-cells {
+    grid-column: 2;
+    display: grid;
+    grid-template-rows: repeat(7, 12px);
+    grid-auto-flow: column;
+    grid-auto-columns: 12px;
+    gap: 3px;
+  }
+  .cell {
+    width: 12px; height: 12px;
+    background: var(--heat-empty);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: outline 100ms;
+  }
+  .cell.l1 { background: var(--heat-1); }
+  .cell.l2 { background: var(--heat-2); }
+  .cell.l3 { background: var(--heat-3); }
+  .cell.l4 { background: var(--heat-4); }
+  .cell.l5 { background: var(--heat-5); }
+  .cell.future { background: transparent; cursor: default; }
+  .cell:hover { outline: 1.5px solid var(--ink); outline-offset: 1px; }
+
+  .heatmap-legend {
+    margin-top: 12px;
+    display: flex; align-items: center; gap: 10px;
+    font-family: 'EB Garamond', serif; font-style: italic;
+    color: var(--ink-faint); font-size: 12px;
+    justify-content: flex-end;
+  }
+  .heatmap-legend .scale {
+    display: inline-flex; gap: 3px;
+  }
+  .heatmap-legend .scale .cell { width: 12px; height: 12px; cursor: default; }
+  .heatmap-legend .scale .cell:hover { outline: none; }
+
+  /* Theme swatches */
+  .theme-swatches {
+    display: inline-flex; gap: 6px; padding: 3px 4px;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: var(--bg-2);
+  }
+  .theme-swatches button {
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 1px solid var(--line);
+    cursor: pointer; padding: 0;
+  }
+  .theme-swatches button.active {
+    outline: 2px solid var(--ink); outline-offset: 2px;
+  }
+
+  /* Tooltip */
+  .tip {
+    position: fixed; z-index: 80;
+    background: var(--ink); color: var(--bg);
+    padding: 6px 10px; border-radius: 3px;
+    font-family: 'EB Garamond', serif; font-size: 12.5px;
+    pointer-events: none; opacity: 0;
+    transition: opacity 120ms;
+    white-space: nowrap;
+    box-shadow: 0 8px 20px -8px rgba(0,0,0,0.4);
+  }
+  .tip.visible { opacity: 1; }
+  .tip em { font-style: italic; color: rgba(255,255,255,0.7); margin-left: 6px; }
+
+  /* ============ CALENDAR ============ */
+  .cal-layout {
+    display: grid; grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .cal-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+  }
+  .cal-grid .dow {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint); text-align: center;
+    padding: 6px 0;
+  }
+  .cal-day {
+    aspect-ratio: 1.05;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    padding: 6px 8px;
+    display: flex; flex-direction: column;
+    position: relative;
+    cursor: pointer;
+    transition: border-color 150ms, transform 150ms;
+  }
+  .cal-day:hover { border-color: var(--ink-soft); transform: translateY(-1px); }
+  .cal-day.empty { background: transparent; border-color: transparent; cursor: default; pointer-events: none; }
+  .cal-day .num {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 16px; color: var(--ink-soft);
+    line-height: 1;
+  }
+  .cal-day .scripture {
+    margin-top: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--ink);
+    line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .cal-day .scripture.muted { color: var(--ink-faint); }
+  .cal-day .icons {
+    position: absolute; left: 6px; top: 6px;
+    display: flex; gap: 3px;
+  }
+  .cal-day .icons .ic {
+    width: 8px; height: 8px; border-radius: 50%;
+    border: 1px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--line-strong);
+  }
+  /* Sanctuary = circle, dark warm; Timeline = square, cool slate */
+  .cal-day .icons .ic.sanctuary {
+    background: #b8521a;
+    border-radius: 50%;
+  }
+  .cal-day .icons .ic.timeline {
+    background: #3e5a78;
+    border-radius: 0;
+    box-shadow: 0 0 0 1px var(--line-strong);
+    border: 1px solid var(--bg);
+  }
+  .cal-day.today .num { color: var(--ink); font-weight: 500; }
+  .cal-day.today { border-color: var(--ink); }
+  .cal-day.dim .num { color: color-mix(in oklab, var(--ink-faint) 60%, transparent); }
+  .cal-day.has-read { background: color-mix(in oklab, var(--heat-3) 35%, var(--bg)); }
+  .cal-day.has-read.l1 { background: color-mix(in oklab, var(--heat-1) 60%, var(--bg)); }
+  .cal-day.has-read.l2 { background: color-mix(in oklab, var(--heat-2) 70%, var(--bg)); }
+  .cal-day.has-read.l3 { background: color-mix(in oklab, var(--heat-3) 60%, var(--bg)); }
+  .cal-day.has-read.l4 { background: color-mix(in oklab, var(--heat-4) 55%, var(--bg)); }
+  .cal-day.has-read.l5 { background: color-mix(in oklab, var(--heat-5) 50%, var(--bg)); }
+
+  .cal-nav {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 6px;
+  }
+  .cal-nav .month-label {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 500; font-size: 26px;
+    color: var(--ink); letter-spacing: 0.02em;
+    min-width: 220px;
+  }
+  .cal-nav button.arr {
+    width: 32px; height: 32px;
+    border: 1px solid var(--line-strong); background: transparent;
+    color: var(--ink-soft); font-family: 'Cormorant Garamond', serif;
+    font-size: 18px; cursor: pointer; border-radius: 2px;
+  }
+  .cal-nav button.arr:hover { color: var(--ink); border-color: var(--ink); }
+
+  /* ============ Book × Chapter matrix ============ */
+  .matrix-layout {
+    display: grid; grid-template-columns: 220px 1fr;
+    gap: 24px; align-items: start;
+  }
+  .book-list {
+    border: 1px solid var(--line); background: var(--bg);
+    max-height: 70vh; overflow-y: auto;
+  }
+  .book-list .book {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: 'EB Garamond', serif;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .book-list .book:hover { background: var(--bg-3); color: var(--ink); }
+  .book-list .book.active { background: var(--ink); color: var(--bg); }
+  .book-list .book.active .count { color: rgba(255,236,200,0.7); }
+  .book-list .book .count {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--ink-faint);
+  }
+  .book-list .testament-head {
+    padding: 8px 14px;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint);
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 1;
+  }
+
+  .chapter-grid-wrap {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 24px; align-items: start;
+  }
+  .chapter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+    gap: 4px;
+  }
+  .chap {
+    aspect-ratio: 1;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'EB Garamond', serif; font-size: 12px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  .chap.has1 { background: var(--heat-1); }
+  .chap.has2 { background: var(--heat-2); color: var(--ink); }
+  .chap.has3 { background: var(--heat-3); color: var(--ink); }
+  .chap.has4 { background: var(--heat-4); color: var(--page); }
+  .chap.has5 { background: var(--heat-5); color: var(--page); }
+  .chap.selected { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .chap:hover { transform: translateY(-1px); }
+
+  .reads-pane {
+    background: var(--bg);
+    border: 1px solid var(--line);
+    padding: 18px 20px;
+  }
+  .reads-pane .head-line {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 500; font-size: 22px;
+    letter-spacing: 0.02em;
+    margin-bottom: 4px;
+  }
+  .reads-pane .head-sub {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    color: var(--ink-faint); font-size: 13px;
+    margin-bottom: 14px;
+  }
+  .reads-pane ul.reads { list-style: none; padding: 0; margin: 0; }
+  .reads-pane ul.reads li {
+    padding: 8px 0; border-bottom: 1px dashed var(--line);
+    display: flex; gap: 10px; align-items: baseline;
+    font-size: 14px;
+  }
+  .reads-pane ul.reads li:last-child { border-bottom: 0; }
+  .reads-pane ul.reads .when {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 13px; letter-spacing: 0.06em;
+    color: var(--ink); min-width: 110px;
+  }
+  .reads-pane ul.reads .what {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    color: var(--ink-soft);
+  }
+  .reads-pane .empty {
+    color: var(--ink-faint); font-style: italic;
+    padding: 20px 0; text-align: center;
+  }
+
+  /* ============ Stats / charts ============ */
+  .stat-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 18px;
+  }
+  .stat {
+    background: var(--bg); border: 1px solid var(--line);
+    padding: 18px 20px;
+  }
+  .stat h3 {
+    margin: 0 0 12px;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 12px; letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 400;
+  }
+  .stat .big {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 44px; color: var(--ink);
+    line-height: 1; letter-spacing: 0.02em;
+  }
+  .stat .lbl {
+    font-family: 'EB Garamond', serif; font-style: italic;
+    color: var(--ink-faint); font-size: 13px;
+    margin-top: 6px;
+  }
+
+  .barchart .row {
+    display: grid; grid-template-columns: 110px 1fr 50px;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0;
+    font-size: 13px;
+  }
+  .barchart .row .name {
+    font-family: 'EB Garamond', serif; color: var(--ink-soft);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .barchart .row .bar {
+    height: 12px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    position: relative;
+    overflow: hidden;
+  }
+  .barchart .row .bar .fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: var(--heat-4);
+  }
+  .barchart .row .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px; color: var(--ink-faint);
+    text-align: right;
+  }
+
+  /* Vertical bar mini-chart for monthly */
+  .month-bars {
+    display: grid; grid-template-columns: repeat(12, 1fr);
+    gap: 4px; align-items: end;
+    height: 110px;
+  }
+  .month-bars .col { display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; }
+  .month-bars .col .bar {
+    width: 100%; background: var(--heat-4);
+    min-height: 2px;
+  }
+  .month-bars .col .lbl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; color: var(--ink-faint);
+  }
+
+  /* Pie / donut for testament split */
+  .donut {
+    display: grid; grid-template-columns: 120px 1fr;
+    gap: 18px; align-items: center;
+  }
+  .donut svg { width: 120px; height: 120px; }
+  .donut-legend { font-size: 13px; }
+  .donut-legend div { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: var(--ink-soft); }
+  .donut-legend .sw { width: 10px; height: 10px; border-radius: 2px; }
+
+  /* ============ Plans ============ */
+  .plan-layout {
+    display: grid; grid-template-columns: 320px 1fr;
+    gap: 24px;
+  }
+  .plan-form {
+    background: var(--bg); border: 1px solid var(--line); padding: 18px 20px;
+  }
+  .plan-form .row {
+    margin: 12px 0;
+  }
+  .plan-form .checks {
+    display: grid; grid-template-columns: repeat(7, auto);
+    gap: 4px; margin-top: 4px;
+  }
+  .plan-form .day-toggle {
+    width: 30px; height: 30px;
+    border: 1px solid var(--line); background: var(--bg-2);
+    cursor: pointer; border-radius: 2px;
+    font-family: 'Cormorant Garamond', serif; font-size: 11px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .plan-form .day-toggle.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+  .book-pick {
+    max-height: 200px; overflow-y: auto;
+    border: 1px solid var(--line); padding: 4px;
+    background: var(--bg-2);
+  }
+  .book-pick label {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 6px;
+    font-family: 'EB Garamond', serif; font-size: 13px;
+    color: var(--ink-soft); cursor: pointer;
+  }
+  .book-pick label:hover { color: var(--ink); }
+  .book-pick input[type="checkbox"] { accent-color: var(--ink); }
+
+  .plan-output {
+    background: var(--bg); border: 1px solid var(--line);
+    padding: 18px 20px;
+  }
+  .plan-empty {
+    color: var(--ink-faint); font-style: italic; padding: 40px 20px; text-align: center;
+  }
+  .plan-row {
+    display: grid; grid-template-columns: 90px 1fr auto;
+    gap: 12px; align-items: center;
+    padding: 8px 4px; border-bottom: 1px dashed var(--line);
+    font-size: 14px;
+  }
+  .plan-row:last-child { border-bottom: 0; }
+  .plan-row .date {
+    font-family: 'Cormorant Garamond', serif; letter-spacing: 0.06em;
+    color: var(--ink-soft);
+  }
+  .plan-row.past .date { color: var(--ink-faint); }
+  .plan-row .reading {
+    font-family: 'EB Garamond', serif; color: var(--ink);
+  }
+  .plan-row .check {
+    appearance: none;
+    width: 18px; height: 18px;
+    border: 1px solid var(--line-strong); border-radius: 2px;
+    background: var(--bg);
+    cursor: pointer; position: relative;
+  }
+  .plan-row .check:checked {
+    background: var(--ink); border-color: var(--ink);
+  }
+  .plan-row .check:checked::after {
+    content: "✓"; color: var(--bg);
+    position: absolute; left: 2px; top: -3px;
+    font-size: 14px;
+  }
+  .plan-row.done .reading { color: var(--ink-faint); text-decoration: line-through; }
+
+  .plan-summary {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+  }
+  .plan-summary div {
+    display: flex; flex-direction: column;
+    font-family: 'Cormorant Garamond', serif;
+  }
+  .plan-summary div .v { font-size: 24px; color: var(--ink); }
+  .plan-summary div .l {
+    font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-faint); margin-top: 2px;
+  }
+
+  /* Modal */
+  .modal-backdrop {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(43, 36, 25, 0.45);
+    display: none; align-items: center; justify-content: center;
+    backdrop-filter: blur(2px);
+  }
+  .modal-backdrop.open { display: flex; animation: fade 200ms; }
+  .modal {
+    background: var(--page);
+    border: 1px solid var(--ink-soft);
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,0.5);
+    width: min(560px, 92vw);
+    max-height: 88vh; display: flex; flex-direction: column;
+  }
+  .modal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 22px; border-bottom: 1px solid var(--line);
+    background: var(--bg-2);
+  }
+  .modal-head h2 {
+    margin: 0;
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 400; font-size: 24px; letter-spacing: 0.04em;
+    color: var(--ink);
+  }
+  .modal-x {
+    background: transparent; border: 0;
+    font-size: 24px; cursor: pointer; color: var(--ink-soft);
+    line-height: 1; padding: 0 4px;
+  }
+  .modal-x:hover { color: var(--ink); }
+  .modal-body {
+    padding: 22px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .modal-body label.field { font-size: 11px; }
+  .modal-body input[type="text"], .modal-body input[type="number"],
+  .modal-body input[type="date"], .modal-body select, .modal-body textarea {
+    width: 100%; font-size: 14px; padding: 8px 10px;
+    background: var(--bg);
+  }
+  .modal-body textarea {
+    font-family: 'EB Garamond', serif;
+    min-height: 120px; resize: vertical; line-height: 1.5;
+    border: 1px solid var(--line); color: var(--ink);
+    border-radius: 2px; outline: none;
+  }
+  .modal-body textarea:focus { border-color: var(--ink-soft); }
+  .modal-foot {
+    display: flex; justify-content: flex-end; gap: 10px;
+    padding: 14px 22px; border-top: 1px solid var(--line);
+    background: var(--bg-2);
+  }
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row-3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+
+  /* Star rating input */
+  .rating-input {
+    display: inline-flex; gap: 4px; align-items: center;
+    font-size: 28px; line-height: 1;
+    cursor: pointer; user-select: none;
+  }
+  .rating-input span {
+    color: var(--line-strong); transition: color 80ms;
+  }
+  .rating-input span.on { color: var(--red); }
+  .rating-input:hover span { color: var(--line-strong); }
+  .rating-input:hover span.hov { color: var(--red); }
+
+  /* hidden page sections */
+  .view { display: none; }
+  .view.active { display: block; }
+
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  main { animation: fade 700ms ease-out; }
+</style>
+</head>
+<body>
+
+  <header class="ribbon">
+    <div class="left">
+      <a class="back" href="Hallway Wireframes.html">← hallway</a>
+      <span class="place">Data</span>
+    </div>
+    <div class="right" id="ribbon-right">
+      <button class="btn-quiet" id="add-scripture-btn" style="font-style:normal;">+ Scripture</button>
+      <button class="btn-quiet" id="add-book-btn" style="font-style:normal;">+ Book</button>
+    </div>
+  </header>
+
+  <nav class="nav" id="section-nav">
+    <button class="active" data-view="heatmap">Heatmap</button>
+    <button data-view="calendar">Calendar</button>
+    <button data-view="matrix">Book × Chapter</button>
+    <button data-view="stats">Stats</button>
+    <button data-view="plans">Reading plans</button>
+  </nav>
+
+  <main>
+
+    <!-- ============ HEATMAP VIEW ============ -->
+    <section class="view active" id="view-heatmap">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2 id="heat-title">Scripture read in 2026</h2>
+            <div class="sub" id="heat-sub">a year at a glance</div>
+          </div>
+          <div class="controls">
+            <div class="pillbar" id="heat-source">
+              <button class="active" data-src="scripture">Scripture</button>
+              <button data-src="books">Books</button>
+            </div>
+            <div class="pillbar" id="heat-unit">
+              <button class="active" data-unit="verses">Verses</button>
+              <button data-unit="chapters">Chapters</button>
+            </div>
+            <div class="theme-swatches" id="heat-themes" aria-label="Heatmap theme">
+              <button class="active" data-theme="sage"    style="background: linear-gradient(135deg, #c8d3b3, #5a7e3f)" title="Sage"></button>
+              <button data-theme="rose"    style="background: linear-gradient(135deg, #efd1c4, #a85540)" title="Rose"></button>
+              <button data-theme="sky"     style="background: linear-gradient(135deg, #c9d6e1, #4d6b85)" title="Sky"></button>
+              <button data-theme="violet"  style="background: linear-gradient(135deg, #d8cce0, #6b568a)" title="Violet"></button>
+              <button data-theme="saffron" style="background: linear-gradient(135deg, #efe0a8, #b08820)" title="Saffron"></button>
+              <button data-theme="ink"     style="background: linear-gradient(135deg, #c8c1ae, #2b2419)" title="Ink"></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="heatmap-layout">
+          <div class="heatmap-card">
+            <div class="heatmap-summary">
+              <div class="totals" id="heat-totals">— verses across — days</div>
+              <em style="color: var(--ink-faint); font-style: italic; font-size:13px">click a square to see that day</em>
+            </div>
+            <div class="heatmap-grid-wrap">
+              <div class="heatmap-grid">
+                <div class="month-row" id="heat-months"></div>
+                <div class="day-col">
+                  <span></span>
+                  <span>Mon</span>
+                  <span></span>
+                  <span>Wed</span>
+                  <span></span>
+                  <span>Fri</span>
+                  <span></span>
+                </div>
+                <div class="grid-cells" id="heat-cells"></div>
+              </div>
+            </div>
+            <div class="heatmap-legend">
+              <span>Less</span>
+              <div class="scale">
+                <span class="cell"></span>
+                <span class="cell l1"></span>
+                <span class="cell l2"></span>
+                <span class="cell l3"></span>
+                <span class="cell l4"></span>
+                <span class="cell l5"></span>
+              </div>
+              <span>More</span>
+            </div>
+          </div>
+
+          <aside class="year-rail" id="heat-years"></aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CALENDAR VIEW ============ -->
+    <section class="view" id="view-calendar">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Month view</h2>
+            <div class="sub">scripture read · linked Sanctuary · linked Timeline</div>
+          </div>
+          <div class="controls">
+            <div class="pillbar" id="cal-source">
+              <button class="active" data-src="scripture">Scripture</button>
+              <button data-src="books">Books</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="cal-nav">
+          <button class="arr" id="cal-prev">‹</button>
+          <div class="month-label" id="cal-month-label">April 2026</div>
+          <button class="arr" id="cal-next">›</button>
+          <div style="margin-left:auto; display:flex; gap:14px; font-size:12px; font-style:italic; color:var(--ink-faint); align-items:center">
+            <span style="display:flex; align-items:center; gap:6px"><span style="width:9px;height:9px;border-radius:50%;background:#b8521a;box-shadow:0 0 0 1px var(--line-strong);display:inline-block"></span>Sanctuary entry</span>
+            <span style="display:flex; align-items:center; gap:6px"><span style="width:9px;height:9px;background:#3e5a78;box-shadow:0 0 0 1px var(--line-strong);display:inline-block"></span>Timeline entry</span>
+          </div>
+        </div>
+        <div class="cal-grid" id="cal-grid"></div>
+      </div>
+    </section>
+
+    <!-- ============ MATRIX VIEW ============ -->
+    <section class="view" id="view-matrix">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Book × chapter</h2>
+            <div class="sub">click a chapter to see when you read it</div>
+          </div>
+          <div class="controls">
+            <div class="pillbar" id="mx-source">
+              <button class="active" data-src="scripture">Scripture</button>
+              <button data-src="books">Books</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="matrix-layout">
+          <div class="book-list" id="book-list"></div>
+
+          <div class="chapter-grid-wrap">
+            <div>
+              <div style="font-family: 'Cormorant Garamond', serif; font-weight: 500; font-size: 22px; margin-bottom: 8px; letter-spacing: 0.02em;" id="mx-book-title">Esther</div>
+              <div style="font-family: 'EB Garamond', serif; font-style: italic; color: var(--ink-faint); font-size: 13px; margin-bottom: 14px;" id="mx-book-stats">10 chapters · 7 reads in the last year</div>
+              <div class="chapter-grid" id="chapter-grid"></div>
+            </div>
+            <div class="reads-pane" id="reads-pane">
+              <div class="head-line" id="reads-title">Esther 1</div>
+              <div class="head-sub" id="reads-sub">7 readings</div>
+              <ul class="reads" id="reads-list"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ STATS VIEW ============ -->
+    <section class="view" id="view-stats">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>By the numbers</h2>
+            <div class="sub" id="stats-sub">last twelve months</div>
+          </div>
+          <div class="controls">
+            <div class="pillbar" id="stats-source">
+              <button class="active" data-src="scripture">Scripture</button>
+              <button data-src="books">Books</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="stats-scripture">
+          <div class="stat-grid" style="margin-bottom: 18px;">
+            <div class="stat">
+              <h3>Reading days</h3>
+              <div class="big" id="s-days">—</div>
+              <div class="lbl" id="s-days-sub">days you opened the Word</div>
+            </div>
+            <div class="stat">
+              <h3>Verses</h3>
+              <div class="big" id="s-verses">—</div>
+              <div class="lbl">across the year</div>
+            </div>
+            <div class="stat">
+              <h3>Chapters</h3>
+              <div class="big" id="s-chapters">—</div>
+              <div class="lbl">across the year</div>
+            </div>
+            <div class="stat">
+              <h3>Longest streak</h3>
+              <div class="big" id="s-streak">—</div>
+              <div class="lbl">consecutive days</div>
+            </div>
+          </div>
+
+          <div class="stat-grid">
+            <div class="stat">
+              <h3>Top books read</h3>
+              <div class="barchart" id="s-top-books"></div>
+            </div>
+            <div class="stat">
+              <h3>By month</h3>
+              <div class="month-bars" id="s-by-month"></div>
+              <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-faint); margin-top: 6px; font-family: 'JetBrains Mono', monospace;">
+                <span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span><span>Nov</span><span>Dec</span><span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span>
+              </div>
+            </div>
+            <div class="stat">
+              <h3>Old vs. New Testament</h3>
+              <div class="donut">
+                <svg id="s-donut" viewBox="0 0 42 42"></svg>
+                <div class="donut-legend" id="s-donut-legend"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="stats-books" style="display:none">
+          <div class="stat-grid" style="margin-bottom: 18px;">
+            <div class="stat">
+              <h3>Books finished</h3>
+              <div class="big" id="b-books">—</div>
+              <div class="lbl">in the last year</div>
+            </div>
+            <div class="stat">
+              <h3>Pages</h3>
+              <div class="big" id="b-pages">—</div>
+              <div class="lbl">approximate</div>
+            </div>
+            <div class="stat">
+              <h3>Authors</h3>
+              <div class="big" id="b-authors">—</div>
+              <div class="lbl">distinct</div>
+            </div>
+            <div class="stat">
+              <h3>Reading days</h3>
+              <div class="big" id="b-days">—</div>
+              <div class="lbl">at least one page</div>
+            </div>
+          </div>
+          <div class="stat-grid">
+            <div class="stat">
+              <h3>Top authors</h3>
+              <div class="barchart" id="b-top-authors"></div>
+            </div>
+            <div class="stat">
+              <h3>Recently finished</h3>
+              <ul style="list-style:none; padding:0; margin:0; font-size:13.5px;" id="b-recent">
+              </ul>
+            </div>
+          </div>
+
+          <div class="stat" style="margin-top: 18px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 14px;">
+              <h3 style="margin:0">Years in books</h3>
+              <span style="font-family:'EB Garamond',serif; font-style:italic; color:var(--ink-faint); font-size:12px;">click a year to see what you read</span>
+            </div>
+            <div id="b-years"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PLANS VIEW ============ -->
+    <section class="view" id="view-plans">
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Bible reading plans</h2>
+            <div class="sub">pick books, days, and a window — the plan partitions itself</div>
+          </div>
+          <div class="controls">
+            <select id="plan-select"><option value="__new">+ new plan</option></select>
+            <button class="btn-quiet" id="plan-delete" title="Delete this plan">Delete</button>
+          </div>
+        </div>
+
+        <div class="plan-layout">
+          <div class="plan-form">
+            <div class="row">
+              <label class="field" for="plan-name">Name
+                <input type="text" id="plan-name" placeholder="e.g. Lenten gospels" />
+              </label>
+            </div>
+            <div class="row">
+              <div class="field" style="font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:var(--ink-faint); font-family:'Cormorant Garamond', serif;">Books</div>
+              <div class="book-pick" id="plan-books"></div>
+            </div>
+            <div class="row" style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <label class="field">Start
+                <input type="date" id="plan-start" />
+              </label>
+              <label class="field">End
+                <input type="date" id="plan-end" />
+              </label>
+            </div>
+            <div class="row">
+              <div class="field" style="font-size:11px; letter-spacing:0.16em; text-transform:uppercase; color:var(--ink-faint); font-family:'Cormorant Garamond', serif;">Days of the week</div>
+              <div class="checks" id="plan-days"></div>
+            </div>
+            <div class="row" style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <label class="field">Unit
+                <select id="plan-unit">
+                  <option value="chapters">Chapters</option>
+                  <option value="verses">Verses</option>
+                </select>
+              </label>
+              <label class="field">Per session
+                <input type="number" id="plan-per" min="1" max="50" value="3" />
+              </label>
+            </div>
+            <div class="row">
+              <button class="btn-solid" id="plan-build">Build / update plan</button>
+            </div>
+          </div>
+
+          <div class="plan-output" id="plan-output">
+            <div class="plan-empty" id="plan-empty">Pick books and a window — your plan will appear here.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="tip" id="tip"></div>
+
+  <!-- ============ ADD ENTRY MODAL ============ -->
+  <div class="modal-backdrop" id="modal-backdrop">
+    <div class="modal" id="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">Add entry</h2>
+        <button class="modal-x" id="modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-foot">
+        <button class="btn-quiet" id="modal-cancel">Cancel</button>
+        <button class="btn-solid" id="modal-save">Save entry</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ============================================================
+  // DATA — Bible book registry + seed read history
+  // ============================================================
+  // Chapter counts (66 books).
+  const BOOKS_OT = [
+    ['Genesis',50],['Exodus',40],['Leviticus',27],['Numbers',36],['Deuteronomy',34],
+    ['Joshua',24],['Judges',21],['Ruth',4],['1 Samuel',31],['2 Samuel',24],
+    ['1 Kings',22],['2 Kings',25],['1 Chronicles',29],['2 Chronicles',36],['Ezra',10],['Nehemiah',13],['Esther',10],
+    ['Job',42],['Psalms',150],['Proverbs',31],['Ecclesiastes',12],['Song of Songs',8],
+    ['Isaiah',66],['Jeremiah',52],['Lamentations',5],['Ezekiel',48],['Daniel',12],
+    ['Hosea',14],['Joel',3],['Amos',9],['Obadiah',1],['Jonah',4],['Micah',7],
+    ['Nahum',3],['Habakkuk',3],['Zephaniah',3],['Haggai',2],['Zechariah',14],['Malachi',4],
+  ];
+  const BOOKS_NT = [
+    ['Matthew',28],['Mark',16],['Luke',24],['John',21],['Acts',28],
+    ['Romans',16],['1 Corinthians',16],['2 Corinthians',13],['Galatians',6],['Ephesians',6],
+    ['Philippians',4],['Colossians',4],['1 Thessalonians',5],['2 Thessalonians',3],
+    ['1 Timothy',6],['2 Timothy',4],['Titus',3],['Philemon',1],['Hebrews',13],
+    ['James',5],['1 Peter',5],['2 Peter',3],['1 John',5],['2 John',1],['3 John',1],['Jude',1],['Revelation',22],
+  ];
+  const BOOKS = [...BOOKS_OT, ...BOOKS_NT];
+  const BOOK_NAMES = BOOKS.map(b => b[0]);
+  const CHAPTERS_BY_BOOK = Object.fromEntries(BOOKS);
+  const NT_NAMES = new Set(BOOKS_NT.map(b => b[0]));
+
+  // Approximate verses per chapter (for verse stats; rough averages where unknown)
+  const AVG_VERSES_PER_CHAPTER = 25;
+
+  // ---------- Seed reading history ----------
+  // Each read: { date: 'YYYY-MM-DD', book, chapter, verses: [start,end] (optional), source: 'scripture'|'books', kind?, title?, pages? }
+  function seedScriptureReads() {
+    const reads = [];
+    const today = new Date('2026-05-02');
+    // Random-but-deterministic
+    let rng = mulberry32(20260502);
+
+    // Patterns:
+    // - Stronger reading recent months
+    // - Two ~3-month dry spells last summer
+    // - Esther read 7 times, Psalms scattered
+    function add(daysAgo, book, chapter, verses) {
+      const d = new Date(today); d.setDate(d.getDate() - daysAgo);
+      reads.push({
+        date: d.toISOString().slice(0,10), book, chapter, verses,
+        source: 'scripture',
+      });
+    }
+
+    // Seed steady recent reading (last ~120 days)
+    const heavyBook = ['Romans','Psalms','John','Matthew','Genesis','Isaiah','1 Peter','James','Ephesians','Hebrews'];
+    for (let i = 0; i < 130; i++) {
+      // Most days have 1–3 readings, some heavy days 5–9 (Sundays)
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      const isSunday = d.getDay() === 0;
+      const skip = (i > 35 && rng() < 0.18) || (i > 70 && rng() < 0.25);
+      if (skip) continue;
+      const n = isSunday ? 4 + Math.floor(rng()*5) : 1 + Math.floor(rng()*3);
+      for (let k = 0; k < n; k++) {
+        const book = heavyBook[Math.floor(rng()*heavyBook.length)];
+        const ch = 1 + Math.floor(rng() * CHAPTERS_BY_BOOK[book]);
+        const vstart = 1 + Math.floor(rng()*15);
+        const vend = vstart + 4 + Math.floor(rng()*20);
+        add(i, book, ch, [vstart, vend]);
+      }
+    }
+    // Sparse middle (around 130–230 days ago)
+    for (let i = 130; i < 230; i++) {
+      if (rng() < 0.5) continue;
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      const book = ['Proverbs','Psalms','Ecclesiastes','John','Isaiah'][Math.floor(rng()*5)];
+      const ch = 1 + Math.floor(rng() * CHAPTERS_BY_BOOK[book]);
+      add(i, book, ch, [1, 8 + Math.floor(rng()*10)]);
+    }
+    // Quieter older (230–365)
+    for (let i = 230; i < 365; i++) {
+      if (rng() < 0.78) continue;
+      const book = ['Psalms','Proverbs','Genesis','Isaiah','Matthew'][Math.floor(rng()*5)];
+      const ch = 1 + Math.floor(rng() * CHAPTERS_BY_BOOK[book]);
+      add(i, book, ch, [1, 6 + Math.floor(rng()*10)]);
+    }
+
+    // Specifically: read all 10 chapters of Esther; Esther 1 read 7x in the year
+    const esthers = [3, 18, 47, 91, 154, 240, 320]; // days ago for chapter 1
+    esthers.forEach(d => add(d, 'Esther', 1, [1, 22]));
+    for (let ch = 2; ch <= 10; ch++) {
+      add(3 + ch*2, 'Esther', ch, [1, 18]);
+      if (rng() < 0.4) add(60 + ch*4, 'Esther', ch, [1, 12]);
+    }
+
+    return reads;
+  }
+
+  function seedBookReads() {
+    // Books finished + reading-days for the books tab
+    const today = new Date('2026-05-02');
+    const finished = [
+      { date:'2026-04-22', title:'Holy the Firm', author:'Annie Dillard', pages: 80, rating: 5, review: 'Slim, incandescent. The burning of the moth and the burning of the girl held together as one image — I read it twice in a week and still cannot say what it means.' },
+      { date:'2026-04-09', title:'A Severe Mercy', author:'Sheldon Vanauken', pages: 240, rating: 5, review: 'Wept at the Lewis letters. The pagan love, the conversion, the loss — all of it true at once.' },
+      { date:'2026-03-18', title:'Surprised by Joy', author:'C.S. Lewis', pages: 240, rating: 4, review: 'Lewis on his own conversion. The Joy chapters land hardest; the boarding-school chapters less so.' },
+      { date:'2026-02-25', title:'Gilead', author:'Marilynne Robinson', pages: 247, rating: 5, review: 'A father\u2019s letter to a son he will not see grow. Every page slow, every page weighted. The best novel I have read in years.' },
+      { date:'2026-02-04', title:'The Cloud of Unknowing', author:'Anonymous', pages: 132, rating: 4, review: '' },
+      { date:'2026-01-12', title:'The Diary of a Country Priest', author:'Georges Bernanos', pages: 304, rating: 5, review: 'A small French parish, a sick young priest, and somehow the entire weight of grace. \u201CAll is grace.\u201D' },
+      { date:'2025-11-20', title:'Lila', author:'Marilynne Robinson', pages: 261, rating: 5, review: 'Lila\u2019s voice \u2014 wary, watching \u2014 and Boughton\u2019s patient love. Sequel that earns its place.' },
+      { date:'2025-10-30', title:'The Pilgrim\u2019s Regress', author:'C.S. Lewis', pages: 200, rating: 3, review: 'Early Lewis, working it out in allegory. Interesting more than essential.' },
+      { date:'2025-09-14', title:'Mariette in Ecstasy', author:'Ron Hansen', pages: 192, rating: 4, review: 'Stigmata in a small convent. Hansen leaves the question of authenticity entirely open and the book is stronger for it.' },
+      { date:'2025-07-28', title:'The Way of a Pilgrim', author:'Anonymous', pages: 200, rating: 4, review: 'The Jesus Prayer, walked into the bones. I tried it for a week.' },
+      { date:'2025-06-05', title:'Letters to Malcolm', author:'C.S. Lewis', pages: 124, rating: 4, review: 'Lewis on prayer, late, gentle. \u201CWe shall be true Persons only when we have suffered ourselves to be reduced to nothing.\u201D' },
+    ];
+    // Reading days: scatter "at least a few pages" reads
+    let rng = mulberry32(31337);
+    const pageReads = [];
+    for (let i = 0; i < 365; i++) {
+      if (rng() < 0.45) continue;
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      const author = ['Annie Dillard','Marilynne Robinson','C.S. Lewis','Sheldon Vanauken','Georges Bernanos','Ron Hansen','Wendell Berry','Eugene Peterson'][Math.floor(rng()*8)];
+      pageReads.push({
+        date: d.toISOString().slice(0,10),
+        title: '—',
+        author,
+        pages: 8 + Math.floor(rng()*40),
+        source: 'books',
+      });
+    }
+    return { finished, pageReads };
+  }
+
+  // Sanctuary + Timeline link (which dates have entries)
+  function seedSanctuaryTimeline() {
+    const today = new Date('2026-05-02');
+    let rng = mulberry32(424242);
+    const sanctuary = new Set();
+    const timeline = new Set();
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(today); d.setDate(d.getDate() - i);
+      const k = d.toISOString().slice(0,10);
+      if (rng() < 0.35) sanctuary.add(k);
+      if (rng() < 0.55) timeline.add(k); // user keeps timeline daily-ish
+    }
+    return { sanctuary, timeline };
+  }
+
+  function mulberry32(a) {
+    return function() {
+      let t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+  }
+
+  const SCRIPTURE_READS = seedScriptureReads();
+  const BOOKS_DATA = seedBookReads();
+  const ENTRIES = seedSanctuaryTimeline();
+
+  // ---------- Helpers ----------
+  function ymd(d) {
+    if (typeof d === 'string') return d;
+    return d.toISOString().slice(0,10);
+  }
+  function fromYmd(s) { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
+  function fmtDate(s) {
+    const d = fromYmd(s);
+    return d.toLocaleDateString(undefined, { month:'short', day:'numeric', year:'numeric' });
+  }
+  function fmtMonth(d) { return d.toLocaleDateString(undefined, { month:'long', year:'numeric' }); }
+  function vCount(read) {
+    if (!read.verses) return AVG_VERSES_PER_CHAPTER;
+    return Math.max(1, read.verses[1] - read.verses[0] + 1);
+  }
+  function isNT(book) { return NT_NAMES.has(book); }
+
+  // ============================================================
+  // SECTION ROUTER
+  // ============================================================
+  document.querySelectorAll('#section-nav button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('#section-nav button').forEach(x => x.classList.toggle('active', x === b));
+      const v = b.dataset.view;
+      document.querySelectorAll('.view').forEach(s => s.classList.toggle('active', s.id === 'view-' + v));
+      // Lazy-init when first opening
+      if (v === 'calendar') renderCalendar();
+      if (v === 'matrix') renderMatrix();
+      if (v === 'stats') renderStats();
+      if (v === 'plans') renderPlansUI();
+    });
+  });
+
+  // ============================================================
+  // 1. HEATMAP
+  // ============================================================
+  const HEAT_THEMES = {
+    sage:    ['#e2dcc6','#c8d3b3','#a8bd8d','#82a165','#5a7e3f'],
+    rose:    ['#efe1d8','#efd1c4','#e0a895','#c87a5e','#a85540'],
+    sky:     ['#e0e6ec','#c9d6e1','#9bb1c2','#6e8aa3','#4d6b85'],
+    violet:  ['#e6dfe8','#d8cce0','#b69cc4','#8d76a8','#6b568a'],
+    saffron: ['#f0e7c8','#efe0a8','#dec476','#c5a347','#b08820'],
+    ink:     ['#dcd5c2','#c8c1ae','#8e8674','#5a5142','#2b2419'],
+  };
+  const heatState = {
+    year: 2026,
+    source: 'scripture',
+    unit: 'verses',
+    theme: 'sage',
+  };
+  function applyHeatTheme(name) {
+    const r = document.documentElement;
+    const t = HEAT_THEMES[name];
+    r.style.setProperty('--heat-1', t[0]);
+    r.style.setProperty('--heat-2', t[1]);
+    r.style.setProperty('--heat-3', t[2]);
+    r.style.setProperty('--heat-4', t[3]);
+    r.style.setProperty('--heat-5', t[4]);
+  }
+
+  function buildDayBuckets(year, source, unit) {
+    // Bucket value per YYYY-MM-DD for the trailing year ending Dec 31 of `year` (or May 2026 for current year)
+    const buckets = new Map();
+    const reads = source === 'scripture' ? SCRIPTURE_READS : BOOKS_DATA.pageReads;
+    reads.forEach(r => {
+      const y = parseInt(r.date.slice(0,4));
+      if (y !== year) return;
+      const v = source === 'scripture'
+        ? (unit === 'verses' ? vCount(r) : (r.verses ? (vCount(r)/AVG_VERSES_PER_CHAPTER) : 1))
+        : (unit === 'verses' ? r.pages : r.pages / 50); // for books: verses->pages, chapters->"sections"
+      buckets.set(r.date, (buckets.get(r.date) || 0) + v);
+    });
+    return buckets;
+  }
+
+  function levelFor(value, unit) {
+    if (!value) return 0;
+    if (unit === 'chapters') {
+      // Less than a chapter -> palest
+      if (value < 1) return 1;
+      if (value < 2) return 2;
+      if (value < 4) return 3;
+      if (value < 8) return 4;
+      return 5;
+    }
+    // verses (or pages for books)
+    if (value < 5) return 1;
+    if (value < 15) return 2;
+    if (value < 30) return 3;
+    if (value < 60) return 4;
+    return 5;
+  }
+
+  function renderHeatmap() {
+    applyHeatTheme(heatState.theme);
+    const cellsEl = document.getElementById('heat-cells');
+    const monthsEl = document.getElementById('heat-months');
+    cellsEl.innerHTML = ''; monthsEl.innerHTML = '';
+
+    const buckets = buildDayBuckets(heatState.year, heatState.source, heatState.unit);
+    const today = new Date('2026-05-02');
+
+    // Year window: Jan 1 → Dec 31 of selected year, padded so first cell is a Sunday
+    const start = new Date(heatState.year, 0, 1);
+    const end = new Date(heatState.year, 11, 31);
+    // Pad so the grid starts on Sunday
+    const first = new Date(start);
+    first.setDate(first.getDate() - first.getDay()); // back to Sunday
+    const last = new Date(end);
+    last.setDate(last.getDate() + (6 - last.getDay()));
+
+    let totalValue = 0;
+    let dayCount = 0;
+    let monthMarkers = [];
+    let lastMonth = -1;
+    let weekIdx = 0;
+
+    for (let d = new Date(first); d <= last; d.setDate(d.getDate()+1)) {
+      const inYear = d.getFullYear() === heatState.year;
+      const k = ymd(d);
+      const v = inYear ? (buckets.get(k) || 0) : 0;
+      const future = d > today;
+
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      if (future || !inYear) {
+        cell.classList.add('future');
+      } else {
+        const lvl = levelFor(v, heatState.unit);
+        if (lvl) cell.classList.add('l' + lvl);
+        if (v > 0) { totalValue += v; dayCount++; }
+      }
+      cell.dataset.date = k; cell.dataset.value = v.toFixed(2);
+      cell.addEventListener('mousemove', (e) => {
+        if (!inYear || future) return;
+        const tip = document.getElementById('tip');
+        const reads = SCRIPTURE_READS.filter(r => r.date === k);
+        const refs = reads.slice(0,3).map(r => `${r.book} ${r.chapter}`).join(', ');
+        const more = reads.length > 3 ? ` +${reads.length-3} more` : '';
+        const unitLbl = heatState.unit === 'verses' ? 'verses' : 'chapters';
+        const valLbl = heatState.unit === 'verses' ? Math.round(v) : v.toFixed(2).replace(/\.00$/,'');
+        tip.innerHTML = `<strong>${fmtDate(k)}</strong> <em>${valLbl} ${unitLbl}</em>${refs ? '<br/>' + refs + more : ''}`;
+        tip.classList.add('visible');
+        tip.style.left = (e.clientX + 14) + 'px';
+        tip.style.top  = (e.clientY + 14) + 'px';
+      });
+      cell.addEventListener('mouseleave', () => document.getElementById('tip').classList.remove('visible'));
+      cellsEl.appendChild(cell);
+
+      if (d.getDay() === 0 && d.getMonth() !== lastMonth && d >= start) {
+        monthMarkers.push({ col: weekIdx + 1, label: d.toLocaleDateString(undefined,{month:'short'}) });
+        lastMonth = d.getMonth();
+      }
+      if (d.getDay() === 6) weekIdx++;
+    }
+
+    // Render month labels
+    const totalWeeks = Math.ceil((last - first) / (7 * 86400000)) + 1;
+    monthsEl.style.gridTemplateColumns = `repeat(${totalWeeks}, 12px)`;
+    monthsEl.style.gap = '3px';
+    cellsEl.style.gridAutoColumns = '12px';
+
+    monthMarkers.forEach(m => {
+      const span = document.createElement('span');
+      span.style.gridColumn = m.col;
+      span.textContent = m.label;
+      monthsEl.appendChild(span);
+    });
+
+    // Title + totals
+    const sourceLabel = heatState.source === 'scripture' ? 'Scripture' : 'Books';
+    const unitLabel = heatState.unit === 'verses'
+      ? (heatState.source === 'scripture' ? 'verses' : 'pages')
+      : (heatState.source === 'scripture' ? 'chapters' : 'sections');
+    document.getElementById('heat-title').textContent = `${sourceLabel} read in ${heatState.year}`;
+    document.getElementById('heat-totals').innerHTML = `${Math.round(totalValue).toLocaleString()} ${unitLabel} <em>across ${dayCount} day${dayCount===1?'':'s'}</em>`;
+  }
+
+  function renderYearRail() {
+    const el = document.getElementById('heat-years');
+    el.innerHTML = '';
+    [2026, 2025, 2024, 2023].forEach(y => {
+      const b = document.createElement('button');
+      b.textContent = y;
+      b.className = (y === heatState.year ? 'active' : '');
+      b.onclick = () => { heatState.year = y; renderYearRail(); renderHeatmap(); };
+      el.appendChild(b);
+    });
+  }
+
+  // Wire heatmap controls
+  document.querySelectorAll('#heat-source button').forEach(b => {
+    b.addEventListener('click', () => {
+      heatState.source = b.dataset.src;
+      document.querySelectorAll('#heat-source button').forEach(x => x.classList.toggle('active', x === b));
+      renderHeatmap();
+    });
+  });
+  document.querySelectorAll('#heat-unit button').forEach(b => {
+    b.addEventListener('click', () => {
+      heatState.unit = b.dataset.unit;
+      document.querySelectorAll('#heat-unit button').forEach(x => x.classList.toggle('active', x === b));
+      // Update unit label dynamically
+      if (heatState.source === 'books') {
+        b.textContent = b.dataset.unit === 'verses' ? 'Pages' : 'Sections';
+      }
+      renderHeatmap();
+    });
+  });
+  document.querySelectorAll('#heat-themes button').forEach(b => {
+    b.addEventListener('click', () => {
+      heatState.theme = b.dataset.theme;
+      document.querySelectorAll('#heat-themes button').forEach(x => x.classList.toggle('active', x === b));
+      applyHeatTheme(heatState.theme);
+      // Calendar/matrix also use same theme vars — refresh
+      if (document.getElementById('view-calendar').classList.contains('active')) renderCalendar();
+      if (document.getElementById('view-matrix').classList.contains('active')) renderMatrix();
+    });
+  });
+
+  renderYearRail();
+  renderHeatmap();
+
+  // ============================================================
+  // 2. CALENDAR
+  // ============================================================
+  const calState = { y: 2026, m: 3, source: 'scripture' }; // April 2026 (m is 0-indexed)
+
+  function renderCalendar() {
+    const grid = document.getElementById('cal-grid');
+    grid.innerHTML = '';
+    const dows = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    dows.forEach(n => {
+      const d = document.createElement('div'); d.className = 'dow'; d.textContent = n; grid.appendChild(d);
+    });
+    document.getElementById('cal-month-label').textContent = fmtMonth(new Date(calState.y, calState.m, 1));
+
+    const first = new Date(calState.y, calState.m, 1);
+    const last  = new Date(calState.y, calState.m + 1, 0);
+    const startDow = first.getDay();
+    // pad before
+    for (let i = 0; i < startDow; i++) {
+      const e = document.createElement('div'); e.className = 'cal-day empty'; grid.appendChild(e);
+    }
+    const today = new Date('2026-05-02');
+    const reads = calState.source === 'scripture' ? SCRIPTURE_READS : BOOKS_DATA.pageReads;
+    for (let d = 1; d <= last.getDate(); d++) {
+      const date = new Date(calState.y, calState.m, d);
+      const k = ymd(date);
+      const todays = reads.filter(r => r.date === k);
+
+      const cell = document.createElement('div'); cell.className = 'cal-day';
+      if (k === ymd(today)) cell.classList.add('today');
+      if (date > today) cell.classList.add('dim');
+
+      // shading by amount
+      let value;
+      if (calState.source === 'scripture') {
+        value = todays.reduce((s,r) => s + vCount(r), 0);
+      } else {
+        value = todays.reduce((s,r) => s + (r.pages || 0), 0);
+      }
+      if (value > 0) {
+        const lvl = levelFor(calState.source === 'scripture' ? value : value, 'verses');
+        cell.classList.add('has-read', 'l' + lvl);
+      }
+
+      // icons
+      const ic = document.createElement('div'); ic.className = 'icons';
+      if (ENTRIES.sanctuary.has(k)) {
+        const s = document.createElement('span'); s.className = 'ic sanctuary'; s.title = 'Sanctuary entry';
+        ic.appendChild(s);
+      }
+      if (ENTRIES.timeline.has(k)) {
+        const s = document.createElement('span'); s.className = 'ic timeline'; s.title = 'Timeline entry';
+        ic.appendChild(s);
+      }
+      if (ic.children.length) cell.appendChild(ic);
+
+      const num = document.createElement('div'); num.className = 'num'; num.textContent = d;
+      cell.appendChild(num);
+
+      const sc = document.createElement('div'); sc.className = 'scripture' + (todays.length ? '' : ' muted');
+      if (calState.source === 'scripture') {
+        if (todays.length) {
+          const refs = todays.slice(0,3).map(r => `${r.book.replace(/\b(\w)\w+\b/g, (m, _, off) => off === 0 && r.book.match(/^[1-3]/) ? r.book.split(' ')[0] + ' ' + r.book.split(' ')[1].slice(0,3) : m).slice(0,12)} ${r.chapter}`);
+          // Simpler: just show first 2 refs
+          const simple = todays.slice(0,2).map(r => `${r.book} ${r.chapter}`);
+          sc.textContent = simple.join(' · ') + (todays.length > 2 ? ` +${todays.length-2}` : '');
+        }
+      } else {
+        if (todays.length) sc.textContent = todays.length + ' pages · ' + (todays[0].author || '—');
+      }
+      cell.appendChild(sc);
+
+      cell.title = todays.length
+        ? `${k} — ${calState.source === 'scripture' ? Math.round(value)+' verses' : Math.round(value)+' pages'}`
+        : k;
+      grid.appendChild(cell);
+    }
+    // pad after to complete week
+    const total = startDow + last.getDate();
+    const remaining = (7 - (total % 7)) % 7;
+    for (let i = 0; i < remaining; i++) {
+      const e = document.createElement('div'); e.className = 'cal-day empty'; grid.appendChild(e);
+    }
+  }
+  document.getElementById('cal-prev').onclick = () => {
+    calState.m--; if (calState.m < 0) { calState.m = 11; calState.y--; }
+    renderCalendar();
+  };
+  document.getElementById('cal-next').onclick = () => {
+    calState.m++; if (calState.m > 11) { calState.m = 0; calState.y++; }
+    renderCalendar();
+  };
+  document.querySelectorAll('#cal-source button').forEach(b => {
+    b.addEventListener('click', () => {
+      calState.source = b.dataset.src;
+      document.querySelectorAll('#cal-source button').forEach(x => x.classList.toggle('active', x === b));
+      renderCalendar();
+    });
+  });
+
+  // ============================================================
+  // 3. BOOK × CHAPTER MATRIX
+  // ============================================================
+  const matrixState = { source: 'scripture', book: 'Esther', chapter: 1 };
+
+  function renderMatrix() {
+    if (matrixState.source !== 'scripture') {
+      // Books mode: list authors / titles instead of Bible books
+      renderMatrixBooks();
+      return;
+    }
+    // Book list
+    const list = document.getElementById('book-list');
+    list.innerHTML = '';
+    const otHead = document.createElement('div'); otHead.className = 'testament-head'; otHead.textContent = 'Old Testament';
+    list.appendChild(otHead);
+    BOOKS_OT.forEach(([n,c]) => list.appendChild(bookRow(n)));
+    const ntHead = document.createElement('div'); ntHead.className = 'testament-head'; ntHead.textContent = 'New Testament';
+    list.appendChild(ntHead);
+    BOOKS_NT.forEach(([n,c]) => list.appendChild(bookRow(n)));
+
+    function bookRow(name) {
+      const r = document.createElement('div');
+      r.className = 'book' + (matrixState.book === name ? ' active' : '');
+      const reads = SCRIPTURE_READS.filter(x => x.book === name);
+      r.innerHTML = `<span>${name}</span><span class="count">${reads.length}</span>`;
+      r.onclick = () => { matrixState.book = name; matrixState.chapter = 1; renderMatrix(); };
+      return r;
+    }
+
+    // Chapter grid
+    const grid = document.getElementById('chapter-grid');
+    grid.innerHTML = '';
+    const total = CHAPTERS_BY_BOOK[matrixState.book];
+    const reads = SCRIPTURE_READS.filter(r => r.book === matrixState.book);
+    const counts = new Map();
+    reads.forEach(r => counts.set(r.chapter, (counts.get(r.chapter) || 0) + 1));
+    document.getElementById('mx-book-title').textContent = matrixState.book;
+    document.getElementById('mx-book-stats').textContent = `${total} chapter${total===1?'':'s'} · ${reads.length} reading${reads.length===1?'':'s'} in the last year`;
+
+    for (let i = 1; i <= total; i++) {
+      const c = document.createElement('div');
+      c.className = 'chap';
+      const n = counts.get(i) || 0;
+      if (n === 1) c.classList.add('has1');
+      else if (n === 2) c.classList.add('has2');
+      else if (n === 3) c.classList.add('has3');
+      else if (n === 4) c.classList.add('has4');
+      else if (n >= 5) c.classList.add('has5');
+      if (i === matrixState.chapter) c.classList.add('selected');
+      c.textContent = i;
+      c.title = n === 0 ? 'Not read in the last year' : (n + ' read' + (n===1?'':'s'));
+      c.onclick = () => { matrixState.chapter = i; renderMatrix(); };
+      grid.appendChild(c);
+    }
+
+    // Reads pane
+    const ch = matrixState.chapter;
+    const chReads = reads.filter(r => r.chapter === ch).sort((a,b) => b.date.localeCompare(a.date));
+    document.getElementById('reads-title').textContent = `${matrixState.book} ${ch}`;
+    document.getElementById('reads-sub').textContent = chReads.length + ' reading' + (chReads.length===1?'':'s');
+    const ul = document.getElementById('reads-list');
+    ul.innerHTML = '';
+    if (chReads.length === 0) {
+      ul.innerHTML = '<div class="empty">No reads recorded in the last year.</div>';
+    } else {
+      chReads.forEach(r => {
+        const li = document.createElement('li');
+        const verses = r.verses ? `verses ${r.verses[0]}–${r.verses[1]}` : 'whole chapter';
+        li.innerHTML = `<span class="when">${fmtDate(r.date)}</span><span class="what">${verses}</span>`;
+        ul.appendChild(li);
+      });
+    }
+  }
+
+  function renderMatrixBooks() {
+    const list = document.getElementById('book-list');
+    list.innerHTML = '';
+    const head = document.createElement('div'); head.className = 'testament-head'; head.textContent = 'Authors';
+    list.appendChild(head);
+    const byAuthor = {};
+    BOOKS_DATA.finished.forEach(b => { (byAuthor[b.author] ||= []).push(b); });
+    Object.keys(byAuthor).sort().forEach(a => {
+      const r = document.createElement('div');
+      const isActive = matrixState.book === a;
+      r.className = 'book' + (isActive ? ' active' : '');
+      r.innerHTML = `<span>${a}</span><span class="count">${byAuthor[a].length}</span>`;
+      r.onclick = () => { matrixState.book = a; matrixState.chapter = 1; renderMatrix(); };
+      list.appendChild(r);
+    });
+    if (!byAuthor[matrixState.book]) matrixState.book = Object.keys(byAuthor).sort()[0];
+
+    // Right: list of titles by author with reading dates
+    document.getElementById('chapter-grid').innerHTML = '';
+    document.getElementById('mx-book-title').textContent = matrixState.book;
+    const author = matrixState.book;
+    const titles = byAuthor[author] || [];
+    document.getElementById('mx-book-stats').textContent = titles.length + ' book' + (titles.length===1?'':'s') + ' read';
+
+    document.getElementById('reads-title').textContent = author;
+    document.getElementById('reads-sub').textContent = titles.length + ' finished';
+    const ul = document.getElementById('reads-list');
+    ul.innerHTML = '';
+    titles.sort((a,b) => b.date.localeCompare(a.date)).forEach(t => {
+      const li = document.createElement('li');
+      li.style.cssText = 'flex-direction: column; align-items: stretch; gap: 6px;';
+      const stars = (n) => '<span style="color:var(--red); letter-spacing: 1px;">' + '★'.repeat(n) + '<span style="color:var(--line-strong)">' + '★'.repeat(5-n) + '</span></span>';
+      const r = t.rating || 4;
+      const review = t.review || '';
+      const tid = 'rev-' + (t.title + t.date).replace(/[^a-z0-9]/gi,'');
+      li.innerHTML = `
+        <div style="display:flex; gap: 10px; align-items: baseline; justify-content: space-between;">
+          <div style="display:flex; gap: 10px; align-items: baseline; flex: 1; min-width: 0;">
+            <span class="when">${fmtDate(t.date)}</span>
+            <span class="what" style="overflow: hidden; text-overflow: ellipsis;">${t.title} <span style="color:var(--ink-faint); font-size: 12px;">· ${t.pages} pp</span></span>
+          </div>
+          <div style="display:flex; gap: 8px; align-items: center;">
+            <span style="font-size: 12px;">${stars(r)}</span>
+            ${review ? `<button class="btn-quiet" data-rev="${tid}" style="font-size: 11px; padding: 2px 8px;">review</button>` : '<span style="color:var(--ink-faint); font-style: italic; font-size: 11px;">no review</span>'}
+          </div>
+        </div>
+        ${review ? `<div id="${tid}" style="display:none; padding: 10px 12px; background: var(--bg-2); border-left: 3px solid var(--heat-4); font-family:'EB Garamond',serif; font-size: 13.5px; line-height: 1.5; color: var(--ink); font-style: italic;">${review}</div>` : ''}
+      `;
+      ul.appendChild(li);
+    });
+    // Wire review toggles
+    ul.querySelectorAll('[data-rev]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const el = document.getElementById(btn.dataset.rev);
+        if (!el) return;
+        const open = el.style.display === 'block';
+        el.style.display = open ? 'none' : 'block';
+        btn.textContent = open ? 'review' : 'hide';
+      });
+    });
+  }
+
+  document.querySelectorAll('#mx-source button').forEach(b => {
+    b.addEventListener('click', () => {
+      matrixState.source = b.dataset.src;
+      document.querySelectorAll('#mx-source button').forEach(x => x.classList.toggle('active', x === b));
+      if (matrixState.source === 'books') matrixState.book = Object.keys(BOOKS_DATA.finished.reduce((a,b)=>(a[b.author]=1,a),{})).sort()[0] || '';
+      else matrixState.book = 'Esther';
+      renderMatrix();
+    });
+  });
+
+  // ============================================================
+  // 4. STATS
+  // ============================================================
+  function renderStats() {
+    const isBooks = document.querySelector('#stats-source button.active').dataset.src === 'books';
+    document.getElementById('stats-scripture').style.display = isBooks ? 'none' : '';
+    document.getElementById('stats-books').style.display = isBooks ? '' : 'none';
+
+    if (!isBooks) {
+      const reads = SCRIPTURE_READS;
+      const days = new Set(reads.map(r => r.date));
+      const verses = reads.reduce((s,r) => s + vCount(r), 0);
+      const chaptersSet = new Set(reads.map(r => `${r.book}|${r.chapter}|${r.date}`));
+      document.getElementById('s-days').textContent = days.size;
+      document.getElementById('s-verses').textContent = verses.toLocaleString();
+      document.getElementById('s-chapters').textContent = chaptersSet.size.toLocaleString();
+      document.getElementById('s-streak').textContent = longestStreak(days);
+
+      // Top books
+      const counts = {};
+      reads.forEach(r => counts[r.book] = (counts[r.book]||0)+1);
+      const top = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8);
+      const max = top[0]?.[1] || 1;
+      const tb = document.getElementById('s-top-books'); tb.innerHTML = '';
+      top.forEach(([n,c]) => {
+        const row = document.createElement('div'); row.className = 'row';
+        row.innerHTML = `<div class="name">${n}</div><div class="bar"><div class="fill" style="width:${(c/max*100).toFixed(0)}%"></div></div><div class="num">${c}</div>`;
+        tb.appendChild(row);
+      });
+
+      // By month (last 12 months)
+      const today = new Date('2026-05-02');
+      const byMonth = new Array(12).fill(0);
+      reads.forEach(r => {
+        const d = fromYmd(r.date);
+        const monthsAgo = (today.getFullYear()-d.getFullYear())*12 + (today.getMonth()-d.getMonth());
+        if (monthsAgo >= 0 && monthsAgo < 12) byMonth[11-monthsAgo] += vCount(r);
+      });
+      const mb = document.getElementById('s-by-month'); mb.innerHTML = '';
+      const mmax = Math.max(...byMonth, 1);
+      byMonth.forEach(v => {
+        const col = document.createElement('div'); col.className = 'col';
+        const bar = document.createElement('div'); bar.className = 'bar';
+        bar.style.height = (v/mmax*100).toFixed(0) + '%';
+        col.appendChild(bar);
+        mb.appendChild(col);
+      });
+
+      // Donut: OT vs NT
+      const otV = reads.filter(r => !isNT(r.book)).reduce((s,r)=>s+vCount(r),0);
+      const ntV = verses - otV;
+      const total = otV + ntV || 1;
+      const otPct = otV/total*100;
+      const svg = document.getElementById('s-donut');
+      svg.innerHTML = `
+        <circle cx="21" cy="21" r="15.91549" fill="transparent" stroke="${HEAT_THEMES[heatState.theme][1]}" stroke-width="6" stroke-dasharray="${otPct} ${100-otPct}" stroke-dashoffset="25" />
+        <circle cx="21" cy="21" r="15.91549" fill="transparent" stroke="${HEAT_THEMES[heatState.theme][4]}" stroke-width="6" stroke-dasharray="${100-otPct} ${otPct}" stroke-dashoffset="${25-otPct}" />
+        <text x="21" y="22" text-anchor="middle" font-family="Cormorant Garamond" font-size="6" fill="#2b2419">${Math.round(otPct)}/${Math.round(100-otPct)}</text>
+      `;
+      document.getElementById('s-donut-legend').innerHTML = `
+        <div><span class="sw" style="background:${HEAT_THEMES[heatState.theme][1]}"></span> Old Testament · ${otV.toLocaleString()} verses</div>
+        <div><span class="sw" style="background:${HEAT_THEMES[heatState.theme][4]}"></span> New Testament · ${ntV.toLocaleString()} verses</div>
+      `;
+    } else {
+      // Books stats
+      const fin = BOOKS_DATA.finished;
+      document.getElementById('b-books').textContent = fin.length;
+      document.getElementById('b-pages').textContent = fin.reduce((s,b)=>s+b.pages,0).toLocaleString();
+      document.getElementById('b-authors').textContent = new Set(fin.map(b=>b.author)).size;
+      document.getElementById('b-days').textContent = new Set(BOOKS_DATA.pageReads.map(r=>r.date)).size;
+
+      const counts = {};
+      fin.forEach(b => counts[b.author] = (counts[b.author]||0)+1);
+      const top = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8);
+      const max = top[0]?.[1] || 1;
+      const tb = document.getElementById('b-top-authors'); tb.innerHTML = '';
+      top.forEach(([n,c]) => {
+        const row = document.createElement('div'); row.className = 'row';
+        row.innerHTML = `<div class="name">${n}</div><div class="bar"><div class="fill" style="width:${(c/max*100).toFixed(0)}%"></div></div><div class="num">${c}</div>`;
+        tb.appendChild(row);
+      });
+
+      const recent = document.getElementById('b-recent'); recent.innerHTML = '';
+      fin.slice(0, 6).forEach(b => {
+        const li = document.createElement('li');
+        li.style.cssText = 'padding: 6px 0; border-bottom: 1px dashed var(--line);';
+        li.innerHTML = `<div style="font-family:'Cormorant Garamond',serif; font-size:15px;">${b.title}</div><div style="font-style:italic; color:var(--ink-faint); font-size:12px;">${b.author} · ${fmtDate(b.date)} · ${b.pages} pp</div>`;
+        recent.appendChild(li);
+      });
+
+      renderYearsInBooks();
+    }
+  }
+
+  // ---- Years in books (Goodreads-style) ----
+  // Augment the seeded finished list with older years so the retrospective is interesting.
+  const HISTORICAL_FINISHED = [
+    ...BOOKS_DATA.finished.map(b => ({...b, rating: 4 + (b.pages > 200 ? 1 : 0), year: parseInt(b.date.slice(0,4))})),
+    // 2025
+    { date:'2025-05-12', title:'The Wind in the Willows', author:'Kenneth Grahame', pages: 256, rating: 5, year: 2025 },
+    { date:'2025-04-04', title:'The Brothers Karamazov', author:'Fyodor Dostoevsky', pages: 796, rating: 5, year: 2025 },
+    { date:'2025-03-22', title:'Confessions', author:'Augustine of Hippo', pages: 460, rating: 5, year: 2025 },
+    { date:'2025-03-01', title:'The Practice of the Presence of God', author:'Brother Lawrence', pages: 96, rating: 4, year: 2025 },
+    { date:'2025-02-14', title:'A Canticle for Leibowitz', author:'Walter M. Miller Jr.', pages: 368, rating: 4, year: 2025 },
+    { date:'2025-01-20', title:'Death Comes for the Archbishop', author:'Willa Cather', pages: 297, rating: 5, year: 2025 },
+    // 2024
+    { date:'2024-12-30', title:'Silence', author:'Shūsaku Endō', pages: 304, rating: 5, year: 2024 },
+    { date:'2024-11-15', title:'The Sabbath', author:'Abraham Joshua Heschel', pages: 144, rating: 5, year: 2024 },
+    { date:'2024-10-02', title:'Home', author:'Marilynne Robinson', pages: 325, rating: 4, year: 2024 },
+    { date:'2024-08-22', title:'Orthodoxy', author:'G.K. Chesterton', pages: 240, rating: 5, year: 2024 },
+    { date:'2024-07-10', title:'Wendell Berry: Essays 1969–1990', author:'Wendell Berry', pages: 752, rating: 5, year: 2024 },
+    { date:'2024-06-18', title:'The Imitation of Christ', author:'Thomas à Kempis', pages: 224, rating: 4, year: 2024 },
+    { date:'2024-05-04', title:'Pilgrim at Tinker Creek', author:'Annie Dillard', pages: 290, rating: 5, year: 2024 },
+    { date:'2024-03-12', title:'The Long Loneliness', author:'Dorothy Day', pages: 288, rating: 4, year: 2024 },
+    { date:'2024-02-01', title:'Hannah Coulter', author:'Wendell Berry', pages: 192, rating: 5, year: 2024 },
+    // 2023
+    { date:'2023-12-08', title:'The Fellowship of the Ring', author:'J.R.R. Tolkien', pages: 423, rating: 5, year: 2023 },
+    { date:'2023-11-30', title:'The Two Towers', author:'J.R.R. Tolkien', pages: 352, rating: 5, year: 2023 },
+    { date:'2023-11-12', title:'The Return of the King', author:'J.R.R. Tolkien', pages: 416, rating: 5, year: 2023 },
+    { date:'2023-09-22', title:'Walking on Water', author:'Madeleine L’Engle', pages: 256, rating: 4, year: 2023 },
+    { date:'2023-08-14', title:'The Screwtape Letters', author:'C.S. Lewis', pages: 209, rating: 5, year: 2023 },
+    { date:'2023-07-01', title:'Jayber Crow', author:'Wendell Berry', pages: 363, rating: 5, year: 2023 },
+    { date:'2023-05-15', title:'Letters from the Desert', author:'Carlo Carretto', pages: 168, rating: 4, year: 2023 },
+    // 2022
+    { date:'2022-11-20', title:'Till We Have Faces', author:'C.S. Lewis', pages: 313, rating: 5, year: 2022 },
+    { date:'2022-09-10', title:'East of Eden', author:'John Steinbeck', pages: 601, rating: 5, year: 2022 },
+    { date:'2022-07-04', title:'My Ántonia', author:'Willa Cather', pages: 175, rating: 4, year: 2022 },
+    { date:'2022-05-18', title:'The Road', author:'Cormac McCarthy', pages: 287, rating: 4, year: 2022 },
+    { date:'2022-03-22', title:'A Tree Grows in Brooklyn', author:'Betty Smith', pages: 493, rating: 4, year: 2022 },
+    // 2021
+    { date:'2021-12-12', title:'Mere Christianity', author:'C.S. Lewis', pages: 227, rating: 5, year: 2021 },
+    { date:'2021-10-08', title:'The Great Divorce', author:'C.S. Lewis', pages: 146, rating: 5, year: 2021 },
+    { date:'2021-07-22', title:'Crime and Punishment', author:'Fyodor Dostoevsky', pages: 671, rating: 5, year: 2021 },
+    // 2020
+    { date:'2020-08-04', title:'A Wrinkle in Time', author:'Madeleine L’Engle', pages: 218, rating: 4, year: 2020 },
+    { date:'2020-05-19', title:'Out of the Silent Planet', author:'C.S. Lewis', pages: 158, rating: 4, year: 2020 },
+  ];
+
+  let yearOpen = 2026; // default expanded year
+
+  function renderYearsInBooks() {
+    const el = document.getElementById('b-years');
+    if (!el) return;
+    el.innerHTML = '';
+
+    // Bucket by year
+    const byYear = {};
+    HISTORICAL_FINISHED.forEach(b => { (byYear[b.year] ||= []).push(b); });
+    const years = Object.keys(byYear).map(Number).sort((a,b) => b - a);
+    const max = Math.max(...years.map(y => byYear[y].length), 1);
+
+    // Sidebar with longest / shortest across all
+    const all = HISTORICAL_FINISHED;
+    const longest  = [...all].sort((a,b)=>b.pages-a.pages)[0];
+    const shortest = [...all].sort((a,b)=>a.pages-b.pages)[0];
+
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:grid; grid-template-columns: 1fr 240px; gap: 24px; align-items: start;';
+
+    const rows = document.createElement('div');
+    rows.style.cssText = 'display:flex; flex-direction:column; gap: 4px;';
+
+    years.forEach(y => {
+      const items = byYear[y];
+      const row = document.createElement('div');
+      row.style.cssText = 'display:grid; grid-template-columns: 56px 1fr auto; gap: 14px; align-items: center; padding: 4px 0;';
+      row.innerHTML = `
+        <div style="font-family:'Cormorant Garamond',serif; font-size: 26px; color: var(--ink); letter-spacing: 0.02em;">${y}</div>
+        <div style="position:relative; height: 28px; background: var(--bg-2); border:1px solid var(--line);">
+          <div style="position:absolute; left:0; top:0; bottom:0; width:${(items.length/max*100).toFixed(1)}%; background: var(--heat-4); display:flex; align-items:center; padding-left:10px; color: var(--page); font-family:'JetBrains Mono', monospace; font-size: 12px; font-weight: 500;">${items.length}</div>
+        </div>
+        <button class="btn-quiet yib-toggle" data-y="${y}" style="min-width: 88px;">${yearOpen === y ? 'hide' : 'details'}</button>
+      `;
+      rows.appendChild(row);
+
+      if (yearOpen === y) {
+        const exp = document.createElement('div');
+        exp.style.cssText = 'background: var(--bg); border: 1px solid var(--line); padding: 14px 18px; margin: 4px 0 10px; border-left: 3px solid var(--heat-4);';
+        // Group by rating
+        const byR = {};
+        items.forEach(it => { (byR[it.rating] ||= []).push(it); });
+        const ratings = [5,4,3,2,1].filter(r => byR[r]);
+        if (!ratings.length) {
+          exp.innerHTML = '<div style="color:var(--ink-faint); font-style:italic;">No ratings.</div>';
+        } else {
+          ratings.forEach(r => {
+            const stars = '★'.repeat(r) + '<span style="color:var(--line-strong)">' + '★'.repeat(5-r) + '</span>';
+            const rrow = document.createElement('div');
+            rrow.style.cssText = 'display:grid; grid-template-columns: 90px 1fr; gap: 14px; padding: 8px 0; border-bottom: 1px dashed var(--line); align-items: start;';
+            rrow.innerHTML = `
+              <div style="color: var(--red); letter-spacing: 1px; font-size: 13px;">${stars}</div>
+              <div style="display:flex; flex-wrap: wrap; gap: 6px;">
+                ${byR[r].map(b => `
+                  <div title="${b.title.replace(/"/g,'&quot;')} — ${b.author}" style="font-family:'EB Garamond', serif; font-size: 13px; padding: 3px 9px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 2px; color: var(--ink); white-space: nowrap; max-width: 280px; overflow: hidden; text-overflow: ellipsis;"><em style="color:var(--ink-soft); font-style: italic;">${b.title}</em> <span style="color: var(--ink-faint); font-size: 11px;">· ${b.author.split(' ').slice(-1)[0]}</span></div>
+                `).join('')}
+              </div>
+            `;
+            exp.appendChild(rrow);
+          });
+          // Year-specific longest / shortest
+          const yLong = [...items].sort((a,b)=>b.pages-a.pages)[0];
+          const yShort = [...items].sort((a,b)=>a.pages-b.pages)[0];
+          const totals = items.reduce((s,b)=>s+b.pages,0);
+          const summary = document.createElement('div');
+          summary.style.cssText = 'margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display:grid; grid-template-columns: repeat(4, 1fr); gap: 12px; font-family:\'EB Garamond\',serif; font-size: 12px;';
+          summary.innerHTML = `
+            <div><div style="font-family:'Cormorant Garamond',serif; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint);">Books</div><div style="font-size: 18px;">${items.length}</div></div>
+            <div><div style="font-family:'Cormorant Garamond',serif; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint);">Pages</div><div style="font-size: 18px;">${totals.toLocaleString()}</div></div>
+            <div><div style="font-family:'Cormorant Garamond',serif; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint);">Longest</div><div style="font-style:italic; color: var(--ink-soft);" title="${yLong.author}">${yLong.title} <span style="color: var(--ink-faint);">· ${yLong.pages}pp</span></div></div>
+            <div><div style="font-family:'Cormorant Garamond',serif; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint);">Shortest</div><div style="font-style:italic; color: var(--ink-soft);" title="${yShort.author}">${yShort.title} <span style="color: var(--ink-faint);">· ${yShort.pages}pp</span></div></div>
+          `;
+          exp.appendChild(summary);
+        }
+        rows.appendChild(exp);
+      }
+    });
+
+    const side = document.createElement('div');
+    side.style.cssText = 'background: var(--bg-2); border: 1px solid var(--line); padding: 14px 16px; align-self: start;';
+    side.innerHTML = `
+      <div style="font-family:'Cormorant Garamond',serif; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 4px;">Longest</div>
+      <div style="font-family:'Cormorant Garamond',serif; font-size: 16px; line-height:1.2; color: var(--ink); margin-bottom: 2px;">${longest.title}</div>
+      <div style="font-family:'EB Garamond',serif; font-style: italic; font-size: 13px; color: var(--ink-soft);">by ${longest.author}</div>
+      <div style="font-family:'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-faint); margin-top: 2px;">${longest.pages.toLocaleString()} pages</div>
+      <hr style="border: 0; border-top: 1px dashed var(--line); margin: 14px 0;" />
+      <div style="font-family:'Cormorant Garamond',serif; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 4px;">Shortest</div>
+      <div style="font-family:'Cormorant Garamond',serif; font-size: 16px; line-height:1.2; color: var(--ink); margin-bottom: 2px;">${shortest.title}</div>
+      <div style="font-family:'EB Garamond',serif; font-style: italic; font-size: 13px; color: var(--ink-soft);">by ${shortest.author}</div>
+      <div style="font-family:'JetBrains Mono', monospace; font-size: 11px; color: var(--ink-faint); margin-top: 2px;">${shortest.pages} pages</div>
+    `;
+
+    wrap.appendChild(rows);
+    wrap.appendChild(side);
+    el.appendChild(wrap);
+
+    // Wire toggle
+    el.querySelectorAll('.yib-toggle').forEach(b => {
+      b.addEventListener('click', () => {
+        const y = parseInt(b.dataset.y);
+        yearOpen = (yearOpen === y ? null : y);
+        renderYearsInBooks();
+      });
+    });
+  }
+
+  function longestStreak(daysSet) {
+    const dates = [...daysSet].sort();
+    let best = 0, cur = 0, prev = null;
+    for (const d of dates) {
+      const dt = fromYmd(d);
+      if (prev) {
+        const diff = (dt - prev) / 86400000;
+        if (diff === 1) cur++;
+        else cur = 1;
+      } else cur = 1;
+      best = Math.max(best, cur);
+      prev = dt;
+    }
+    return best;
+  }
+  document.querySelectorAll('#stats-source button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('#stats-source button').forEach(x => x.classList.toggle('active', x === b));
+      renderStats();
+    });
+  });
+
+  // ============================================================
+  // 5. PLANS
+  // ============================================================
+  const PLANS = [
+    {
+      id: 'p1',
+      name: 'Lenten gospels',
+      books: ['Matthew','Mark','Luke','John'],
+      start: '2026-02-18',
+      end:   '2026-04-04',
+      days: [1,2,3,4,5,6,0],
+      unit: 'chapters',
+      per: 2,
+      done: { 'Matthew|1': true, 'Matthew|2': true, 'Matthew|3': true, 'Matthew|4': true, 'Matthew|5': true },
+    },
+  ];
+  let planActive = 'p1';
+
+  function buildBookPicker() {
+    const el = document.getElementById('plan-books');
+    el.innerHTML = '';
+    BOOKS.forEach(([name]) => {
+      const lbl = document.createElement('label');
+      lbl.innerHTML = `<input type="checkbox" data-book="${name}" /> ${name}`;
+      el.appendChild(lbl);
+    });
+  }
+  function buildDayToggles() {
+    const el = document.getElementById('plan-days');
+    el.innerHTML = '';
+    ['S','M','T','W','T','F','S'].forEach((d,i) => {
+      const b = document.createElement('button'); b.type = 'button';
+      b.className = 'day-toggle';
+      b.dataset.dow = i;
+      b.textContent = d;
+      b.onclick = () => b.classList.toggle('on');
+      el.appendChild(b);
+    });
+  }
+
+  function loadPlanIntoForm(plan) {
+    if (!plan) {
+      document.getElementById('plan-name').value = '';
+      document.getElementById('plan-start').value = '';
+      document.getElementById('plan-end').value = '';
+      document.getElementById('plan-unit').value = 'chapters';
+      document.getElementById('plan-per').value = 3;
+      document.querySelectorAll('#plan-books input').forEach(x => x.checked = false);
+      document.querySelectorAll('#plan-days .day-toggle').forEach(x => x.classList.remove('on'));
+      document.getElementById('plan-output').innerHTML = '<div class="plan-empty">Pick books and a window — your plan will appear here.</div>';
+      return;
+    }
+    document.getElementById('plan-name').value = plan.name;
+    document.getElementById('plan-start').value = plan.start;
+    document.getElementById('plan-end').value = plan.end;
+    document.getElementById('plan-unit').value = plan.unit;
+    document.getElementById('plan-per').value = plan.per;
+    document.querySelectorAll('#plan-books input').forEach(x => x.checked = plan.books.includes(x.dataset.book));
+    document.querySelectorAll('#plan-days .day-toggle').forEach(x => x.classList.toggle('on', plan.days.includes(parseInt(x.dataset.dow))));
+    renderPlanOutput(plan);
+  }
+
+  function renderPlansUI() {
+    const sel = document.getElementById('plan-select');
+    sel.innerHTML = '<option value="__new">+ new plan</option>';
+    PLANS.forEach(p => {
+      const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o);
+    });
+    sel.value = planActive || '__new';
+    if (!document.getElementById('plan-books').children.length) buildBookPicker();
+    if (!document.getElementById('plan-days').children.length) buildDayToggles();
+    const cur = PLANS.find(p => p.id === planActive);
+    loadPlanIntoForm(cur);
+  }
+
+  document.getElementById('plan-select').addEventListener('change', (e) => {
+    if (e.target.value === '__new') { planActive = null; loadPlanIntoForm(null); }
+    else { planActive = e.target.value; loadPlanIntoForm(PLANS.find(p=>p.id===planActive)); }
+  });
+
+  document.getElementById('plan-build').addEventListener('click', () => {
+    const name = document.getElementById('plan-name').value.trim() || 'Untitled plan';
+    const start = document.getElementById('plan-start').value;
+    const end = document.getElementById('plan-end').value;
+    const unit = document.getElementById('plan-unit').value;
+    const per = parseInt(document.getElementById('plan-per').value) || 3;
+    const books = [...document.querySelectorAll('#plan-books input:checked')].map(x => x.dataset.book);
+    const days = [...document.querySelectorAll('#plan-days .day-toggle.on')].map(x => parseInt(x.dataset.dow));
+
+    if (!books.length || !start || !end || !days.length) {
+      alert('Please pick books, a date window, and at least one day of the week.');
+      return;
+    }
+
+    let plan;
+    if (planActive) {
+      plan = PLANS.find(p => p.id === planActive);
+      Object.assign(plan, { name, books, start, end, unit, per, days });
+    } else {
+      plan = { id: 'p' + (PLANS.length + 1), name, books, start, end, unit, per, days, done: {} };
+      PLANS.push(plan);
+      planActive = plan.id;
+    }
+    renderPlansUI();
+  });
+
+  document.getElementById('plan-delete').addEventListener('click', () => {
+    if (!planActive) return;
+    if (!confirm('Delete this plan?')) return;
+    const i = PLANS.findIndex(p => p.id === planActive);
+    if (i >= 0) PLANS.splice(i, 1);
+    planActive = PLANS[0]?.id || null;
+    renderPlansUI();
+  });
+
+  function partitionPlan(plan) {
+    // Build the list of "units" (chapter or verse-chunks). For chapters: each chapter = 1 unit.
+    // For verses: each chapter contributes ceil(avg_verses / per) units? simpler: chapters only for now.
+    const units = [];
+    plan.books.forEach(b => {
+      const total = CHAPTERS_BY_BOOK[b];
+      for (let c = 1; c <= total; c++) {
+        units.push({ ref: `${b} ${c}`, book: b, chapter: c });
+      }
+    });
+    // Build the list of date slots within the window matching the day-of-week filter
+    const slots = [];
+    for (let d = fromYmd(plan.start); d <= fromYmd(plan.end); d.setDate(d.getDate()+1)) {
+      if (plan.days.includes(d.getDay())) slots.push(ymd(d));
+    }
+    if (!slots.length) return [];
+    // Assign units to slots, `per` units per slot
+    const rows = [];
+    let u = 0;
+    for (const s of slots) {
+      const chunk = [];
+      for (let i = 0; i < plan.per && u < units.length; i++) chunk.push(units[u++]);
+      if (chunk.length) rows.push({ date: s, items: chunk });
+      if (u >= units.length) break;
+    }
+    return rows;
+  }
+
+  function renderPlanOutput(plan) {
+    const out = document.getElementById('plan-output');
+    if (!plan) { out.innerHTML = '<div class="plan-empty">Pick books and a window — your plan will appear here.</div>'; return; }
+    const rows = partitionPlan(plan);
+    if (!rows.length) { out.innerHTML = '<div class="plan-empty">Add at least one day of the week to schedule.</div>'; return; }
+    out.innerHTML = '';
+    // summary
+    const summary = document.createElement('div'); summary.className = 'plan-summary';
+    const totalUnits = rows.reduce((s,r) => s + r.items.length, 0);
+    const doneUnits = rows.reduce((s,r) => s + r.items.filter(it => plan.done[it.book + '|' + it.chapter]).length, 0);
+    const today = new Date('2026-05-02');
+    summary.innerHTML = `
+      <div><span class="v">${rows.length}</span><span class="l">Sessions</span></div>
+      <div><span class="v">${totalUnits}</span><span class="l">${plan.unit === 'chapters' ? 'Chapters' : 'Verses'}</span></div>
+      <div><span class="v">${doneUnits}</span><span class="l">Completed</span></div>
+      <div><span class="v">${Math.round(doneUnits/totalUnits*100)||0}%</span><span class="l">Progress</span></div>
+    `;
+    out.appendChild(summary);
+
+    // rows
+    rows.forEach(r => {
+      const itemDiv = document.createElement('div');
+      r.items.forEach(it => {
+        const row = document.createElement('div');
+        row.className = 'plan-row';
+        const past = fromYmd(r.date) < today; if (past) row.classList.add('past');
+        const isDone = !!plan.done[it.book + '|' + it.chapter];
+        if (isDone) row.classList.add('done');
+        row.innerHTML = `
+          <span class="date">${fmtDate(r.date)}</span>
+          <span class="reading">${it.ref}</span>
+        `;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.className = 'check'; cb.checked = isDone;
+        cb.onchange = () => {
+          plan.done[it.book + '|' + it.chapter] = cb.checked;
+          row.classList.toggle('done', cb.checked);
+          // refresh summary
+          renderPlanOutput(plan);
+        };
+        row.appendChild(cb);
+        out.appendChild(row);
+      });
+    });
+  }
+
+  // ============================================================
+  // ADD ENTRY MODAL
+  // ============================================================
+  const modalBackdrop = document.getElementById('modal-backdrop');
+  const modalTitle = document.getElementById('modal-title');
+  const modalBody = document.getElementById('modal-body');
+  let modalKind = 'scripture';
+
+  function openModal(kind) {
+    modalKind = kind;
+    if (kind === 'scripture') {
+      modalTitle.textContent = 'Add Scripture entry';
+      const today = new Date('2026-05-02').toISOString().slice(0,10);
+      const bookOpts = BOOK_NAMES.map(n => `<option value="${n}">${n}</option>`).join('');
+      modalBody.innerHTML = `
+        <label class="field">Date<input type="date" id="m-date" value="${today}" /></label>
+        <div class="row-3">
+          <label class="field">Book
+            <select id="m-book">${bookOpts}</select>
+          </label>
+          <label class="field">Chapter
+            <input type="number" id="m-chap" min="1" value="1" />
+          </label>
+          <label class="field">How much
+            <select id="m-extent">
+              <option value="whole">Whole chapter</option>
+              <option value="partial">Verses…</option>
+            </select>
+          </label>
+        </div>
+        <div class="row-2" id="m-verses-row" style="display:none;">
+          <label class="field">From verse <input type="number" id="m-vstart" min="1" value="1" /></label>
+          <label class="field">To verse <input type="number" id="m-vend" min="1" value="10" /></label>
+        </div>
+        <label class="field">Note (optional)
+          <textarea id="m-note" placeholder="What stood out?"></textarea>
+        </label>
+      `;
+      // Toggle verses row
+      const ext = document.getElementById('m-extent');
+      const vrow = document.getElementById('m-verses-row');
+      ext.addEventListener('change', () => { vrow.style.display = ext.value === 'partial' ? 'grid' : 'none'; });
+    } else {
+      modalTitle.textContent = 'Add Book entry';
+      const today = new Date('2026-05-02').toISOString().slice(0,10);
+      modalBody.innerHTML = `
+        <div class="row-2">
+          <label class="field">Date finished<input type="date" id="m-date" value="${today}" /></label>
+          <label class="field">Pages<input type="number" id="m-pages" min="1" value="240" /></label>
+        </div>
+        <label class="field">Title<input type="text" id="m-title" placeholder="e.g. Gilead" /></label>
+        <label class="field">Author<input type="text" id="m-author" placeholder="e.g. Marilynne Robinson" /></label>
+        <label class="field">Rating
+          <div class="rating-input" id="m-rating" data-rating="0" tabindex="0">
+            <span data-i="1">★</span><span data-i="2">★</span><span data-i="3">★</span><span data-i="4">★</span><span data-i="5">★</span>
+          </div>
+        </label>
+        <label class="field">Review
+          <textarea id="m-review" placeholder="What did you make of it?"></textarea>
+        </label>
+      `;
+      // Star rating wiring
+      const rate = document.getElementById('m-rating');
+      const stars = rate.querySelectorAll('span');
+      function paint(n) {
+        stars.forEach((s, i) => s.classList.toggle('on', i < n));
+      }
+      stars.forEach((s, i) => {
+        s.addEventListener('mouseenter', () => stars.forEach((x, j) => x.classList.toggle('hov', j <= i)));
+        s.addEventListener('mouseleave', () => stars.forEach(x => x.classList.remove('hov')));
+        s.addEventListener('click', () => { rate.dataset.rating = (i + 1); paint(i + 1); });
+      });
+    }
+    modalBackdrop.classList.add('open');
+  }
+  function closeModal() { modalBackdrop.classList.remove('open'); }
+
+  document.getElementById('add-scripture-btn').addEventListener('click', () => openModal('scripture'));
+  document.getElementById('add-book-btn').addEventListener('click', () => openModal('book'));
+  document.getElementById('modal-close').addEventListener('click', closeModal);
+  document.getElementById('modal-cancel').addEventListener('click', closeModal);
+  modalBackdrop.addEventListener('click', (e) => { if (e.target === modalBackdrop) closeModal(); });
+
+  document.getElementById('modal-save').addEventListener('click', () => {
+    if (modalKind === 'scripture') {
+      const date = document.getElementById('m-date').value;
+      const book = document.getElementById('m-book').value;
+      const chap = parseInt(document.getElementById('m-chap').value) || 1;
+      const ext = document.getElementById('m-extent').value;
+      const vstart = parseInt(document.getElementById('m-vstart')?.value);
+      const vend = parseInt(document.getElementById('m-vend')?.value);
+      if (!date || !book || !chap) { alert('Please fill in date, book, and chapter.'); return; }
+      const entry = { date, book, chapter: chap, source: 'scripture' };
+      if (ext === 'partial' && vstart && vend) entry.verses = [vstart, vend];
+      SCRIPTURE_READS.unshift(entry);
+    } else {
+      const date = document.getElementById('m-date').value;
+      const title = document.getElementById('m-title').value.trim();
+      const author = document.getElementById('m-author').value.trim();
+      const pages = parseInt(document.getElementById('m-pages').value) || 0;
+      const rating = parseInt(document.getElementById('m-rating').dataset.rating) || 0;
+      const review = document.getElementById('m-review').value.trim();
+      if (!title || !author || !date) { alert('Title, author, and date are required.'); return; }
+      BOOKS_DATA.finished.unshift({ date, title, author, pages, rating, review });
+    }
+    closeModal();
+    // Refresh whichever views are mounted
+    renderHeatmap();
+    if (document.getElementById('view-calendar').classList.contains('active')) renderCalendar();
+    if (document.getElementById('view-matrix').classList.contains('active')) renderMatrix();
+    if (document.getElementById('view-stats').classList.contains('active')) renderStats();
+  });
+
+  // Initial year + heatmap already rendered above
+</script>
+</body>
+</html>

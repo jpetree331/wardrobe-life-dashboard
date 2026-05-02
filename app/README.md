@@ -28,7 +28,8 @@ You'll be redirected to `/login` — enter your email, click the link in the ema
 3. Run `supabase/migrations/0002_build2.sql`. Adds the `timeline_with_sanctuary` join view.
 4. Run `supabase/migrations/0003_relax_timeline_unique.sql`. Drops the one-per-day index — the Timeline now allows multiple distinct events per date, and the importer skips only exact-text duplicates.
 5. Run `supabase/migrations/0004_notes.sql`. Adds the Notes room: three new tables (`notes_boards`, `notes_cards`, `notes_trash`) with RLS scoped to the calling user.
-6. Confirm under Authentication → Providers that **Email** is enabled (it is, by default — magic links are on by default).
+6. Run `supabase/migrations/0005_data.sql`. Adds the Data room: five tables (`data_scripture_reads`, `data_book_reads`, `data_daily_page_reads`, `data_reading_plans`, `data_plan_completions`) with RLS.
+7. Confirm under Authentication → Providers that **Email** is enabled (it is, by default — magic links are on by default).
 
 ## Environment variables
 
