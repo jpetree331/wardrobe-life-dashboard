@@ -313,6 +313,315 @@ export function aggregateBooksByAuthor<T extends BookReadLike>(
   return out;
 }
 
+// ── Stats view helpers ────────────────────────────────────────────────
+//
+// Pure aggregation for the Stats panel. Each helper takes raw reads + a
+// year filter and returns a compact answer the renderer can drop into
+// place. Streaks, monthly columns, OT/NT split, top-books, and the all-
+// time year-by-year retrospective.
+
+/** Year-bound summary used by the KPI row at the top of the Stats panel. */
+export type YearStats = {
+  scripture: {
+    verses: number;
+    chapters: number;       // each scripture-read row counts as 1 chapter
+    days: number;            // distinct read_dates with any scripture
+    booksTouched: number;    // distinct Bible books with at least one read
+    distinctChapters: number; // distinct (book, chapter) pairs
+  };
+  books: {
+    finished: number;
+    pages: number;           // pages from completions + daily-page logs
+    days: number;            // distinct dates with any books reading
+    authors: number;         // distinct authors who finished
+  };
+  combined: {
+    days: number;            // distinct dates with ANY reading (scripture, book, daily)
+    streakCurrent: number;   // consecutive days with any reading, ending today/yesterday
+    streakLongest: number;   // longest run inside [Jan 1 .. min(Dec 31, today)]
+  };
+};
+
+/** Minimal shape of a daily-pages log used by stats helpers. */
+export type DailyPageLike = {
+  read_date: string;
+  pages: number;
+};
+
+export function computeYearStats<S extends ScriptureReadLike, B extends BookReadLike>(opts: {
+  year: number;
+  scriptureReads: S[];
+  bookReads: B[];
+  dailyPages: DailyPageLike[];
+  versesFor: (r: S) => number;
+  today: Date;
+}): YearStats {
+  const { year, scriptureReads, bookReads, dailyPages, versesFor, today } = opts;
+  const yearPrefix = `${year}-`;
+
+  // Scripture
+  let verses = 0;
+  let chapters = 0;
+  const scriptureDays = new Set<string>();
+  const booksTouched = new Set<string>();
+  const distinctChapters = new Set<string>();
+  for (const r of scriptureReads) {
+    if (!r.read_date.startsWith(yearPrefix)) continue;
+    const v = versesFor(r);
+    if (Number.isFinite(v) && v > 0) verses += v;
+    chapters++;
+    scriptureDays.add(r.read_date);
+    if (r.book) booksTouched.add(r.book);
+    if (r.book && r.chapter > 0) distinctChapters.add(`${r.book}|${r.chapter}`);
+  }
+
+  // Books — both completions and daily-page logs contribute pages and days.
+  let pages = 0;
+  let finished = 0;
+  const booksDays = new Set<string>();
+  const authors = new Set<string>();
+  for (const b of bookReads) {
+    if (!b.finished_on.startsWith(yearPrefix)) continue;
+    finished++;
+    pages += Math.max(0, b.pages || 0);
+    booksDays.add(b.finished_on);
+    const a = (b.author || '').trim();
+    if (a) authors.add(a.toLowerCase());
+  }
+  for (const d of dailyPages) {
+    if (!d.read_date.startsWith(yearPrefix)) continue;
+    pages += Math.max(0, d.pages || 0);
+    booksDays.add(d.read_date);
+  }
+
+  // Combined day-set + streaks.
+  const combinedDays = new Set<string>([...scriptureDays, ...booksDays]);
+
+  // Compute streaks across the year [Jan 1 .. min(Dec 31, today)] using a
+  // single-pass walk over consecutive calendar days. This is simpler and
+  // safer than sorting + diffing dates.
+  const yearStart = new Date(year, 0, 1);
+  const yearEnd = new Date(year, 11, 31);
+  const todayKey = formatLocalDate(today);
+  const yearEndKey = formatLocalDate(yearEnd);
+  // Walk only as far as today (or year end, whichever is earlier).
+  const stopKey = todayKey < yearEndKey ? todayKey : yearEndKey;
+
+  let streakLongest = 0;
+  let run = 0;
+  let streakCurrent = 0;
+  for (
+    const d = new Date(yearStart);
+    formatLocalDate(d) <= stopKey;
+    d.setDate(d.getDate() + 1)
+  ) {
+    const key = formatLocalDate(d);
+    if (combinedDays.has(key)) {
+      run++;
+      if (run > streakLongest) streakLongest = run;
+    } else {
+      run = 0;
+    }
+  }
+  // streakCurrent: only valid if the run ended on the stop day (today/year-end).
+  // If today has a read, we want today's run. If today doesn't but yesterday
+  // does, we still report yesterday's run as "current" (1-day grace), matching
+  // how Strava/Duolingo treat streaks.
+  if (combinedDays.has(stopKey)) {
+    streakCurrent = run;
+  } else {
+    // Try yesterday.
+    const yest = new Date(today);
+    yest.setDate(yest.getDate() - 1);
+    const yKey = formatLocalDate(yest);
+    if (yKey >= `${year}-01-01` && yKey <= yearEndKey && combinedDays.has(yKey)) {
+      // Walk backward from yesterday to find the run length.
+      let yRun = 0;
+      const cursor = new Date(yest);
+      while (true) {
+        const k = formatLocalDate(cursor);
+        if (k < `${year}-01-01`) break;
+        if (!combinedDays.has(k)) break;
+        yRun++;
+        cursor.setDate(cursor.getDate() - 1);
+      }
+      streakCurrent = yRun;
+    }
+  }
+
+  return {
+    scripture: {
+      verses,
+      chapters,
+      days: scriptureDays.size,
+      booksTouched: booksTouched.size,
+      distinctChapters: distinctChapters.size,
+    },
+    books: {
+      finished,
+      pages,
+      days: booksDays.size,
+      authors: authors.size,
+    },
+    combined: {
+      days: combinedDays.size,
+      streakCurrent,
+      streakLongest,
+    },
+  };
+}
+
+/**
+ * 12-element array of per-month totals from a date→count map. Index 0 =
+ * January, index 11 = December. Days outside `year` are ignored.
+ */
+export function monthlyTotalsForYear(year: number, byDate: Map<string, number>): number[] {
+  const out = new Array(12).fill(0);
+  const yearPrefix = `${year}-`;
+  for (const [dateKey, count] of byDate) {
+    if (!dateKey.startsWith(yearPrefix)) continue;
+    if (!Number.isFinite(count) || count <= 0) continue;
+    const month = parseInt(dateKey.slice(5, 7), 10) - 1;
+    if (month < 0 || month > 11) continue;
+    out[month] += count;
+  }
+  return out;
+}
+
+/**
+ * Old-Testament vs New-Testament split for a year, measured in verses.
+ * Caller supplies the OT predicate (the canonical OT/NT membership lives
+ * in `bibleVerseCounts.ts`, which we deliberately don't depend on here).
+ */
+export function otNtVerseSplit<S extends ScriptureReadLike>(opts: {
+  year: number;
+  reads: S[];
+  versesFor: (r: S) => number;
+  isOldTestament: (book: string) => boolean;
+}): { ot: number; nt: number } {
+  const { year, reads, versesFor, isOldTestament } = opts;
+  const yearPrefix = `${year}-`;
+  let ot = 0;
+  let nt = 0;
+  for (const r of reads) {
+    if (!r.read_date.startsWith(yearPrefix)) continue;
+    if (!r.book) continue;
+    const v = versesFor(r);
+    if (!Number.isFinite(v) || v <= 0) continue;
+    if (isOldTestament(r.book)) ot += v;
+    else nt += v;
+  }
+  return { ot, nt };
+}
+
+/**
+ * Top-N Bible books for the year (or all-time if year is null), ranked by
+ * cumulative verses read. Books with zero verses are dropped. Stable tie
+ * break by book name.
+ */
+export function topBooksByVerses<S extends ScriptureReadLike>(opts: {
+  year: number | null;
+  n: number;
+  reads: S[];
+  versesFor: (r: S) => number;
+}): Array<{ book: string; verses: number; reads: number }> {
+  const { year, n, reads, versesFor } = opts;
+  const yearPrefix = year !== null ? `${year}-` : null;
+  const totals = new Map<string, { verses: number; reads: number }>();
+  for (const r of reads) {
+    if (yearPrefix && !r.read_date.startsWith(yearPrefix)) continue;
+    if (!r.book) continue;
+    const v = versesFor(r);
+    let row = totals.get(r.book);
+    if (!row) { row = { verses: 0, reads: 0 }; totals.set(r.book, row); }
+    if (Number.isFinite(v) && v > 0) row.verses += v;
+    row.reads++;
+  }
+  const arr: Array<{ book: string; verses: number; reads: number }> = [];
+  for (const [book, row] of totals) {
+    if (row.verses <= 0 && row.reads <= 0) continue;
+    arr.push({ book, verses: row.verses, reads: row.reads });
+  }
+  arr.sort((a, b) => b.verses - a.verses || a.book.localeCompare(b.book));
+  return arr.slice(0, Math.max(0, n));
+}
+
+/** One row in the Years-in-Books retrospective. */
+export type YearRetrospective = {
+  year: number;
+  verses: number;
+  chapters: number;       // count of scripture-read rows
+  pages: number;
+  books: number;          // finished books
+  days: number;           // distinct days with any reading
+};
+
+/**
+ * All years that show up in the data, descending. Each row carries the
+ * year's headline totals — the same numbers `computeYearStats` gives, but
+ * cheap to compute in bulk and shaped for table rendering.
+ */
+export function yearsInBooksRetro<S extends ScriptureReadLike, B extends BookReadLike>(opts: {
+  scriptureReads: S[];
+  bookReads: B[];
+  dailyPages: DailyPageLike[];
+  versesFor: (r: S) => number;
+}): YearRetrospective[] {
+  const { scriptureReads, bookReads, dailyPages, versesFor } = opts;
+  const byYear = new Map<number, {
+    verses: number;
+    chapters: number;
+    pages: number;
+    books: number;
+    days: Set<string>;
+  }>();
+  function ensure(year: number) {
+    let row = byYear.get(year);
+    if (!row) {
+      row = { verses: 0, chapters: 0, pages: 0, books: 0, days: new Set() };
+      byYear.set(year, row);
+    }
+    return row;
+  }
+  function yearOf(dateKey: string): number | null {
+    const y = parseInt(dateKey.slice(0, 4), 10);
+    return Number.isFinite(y) ? y : null;
+  }
+
+  for (const r of scriptureReads) {
+    const y = yearOf(r.read_date); if (y === null) continue;
+    const row = ensure(y);
+    const v = versesFor(r);
+    if (Number.isFinite(v) && v > 0) row.verses += v;
+    row.chapters++;
+    row.days.add(r.read_date);
+  }
+  for (const b of bookReads) {
+    const y = yearOf(b.finished_on); if (y === null) continue;
+    const row = ensure(y);
+    row.books++;
+    row.pages += Math.max(0, b.pages || 0);
+    row.days.add(b.finished_on);
+  }
+  for (const d of dailyPages) {
+    const y = yearOf(d.read_date); if (y === null) continue;
+    const row = ensure(y);
+    row.pages += Math.max(0, d.pages || 0);
+    row.days.add(d.read_date);
+  }
+
+  return Array.from(byYear.entries())
+    .map(([year, r]) => ({
+      year,
+      verses: r.verses,
+      chapters: r.chapters,
+      pages: r.pages,
+      books: r.books,
+      days: r.days.size,
+    }))
+    .sort((a, b) => b.year - a.year);
+}
+
 /** Format a Date as 'YYYY-MM-DD' in local time (no UTC drift). */
 export function formatLocalDate(d: Date): string {
   const y = d.getFullYear();

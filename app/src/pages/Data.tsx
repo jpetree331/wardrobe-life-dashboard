@@ -21,10 +21,15 @@ import {
   bucketLevel,
   buildCalendarGrid,
   buildHeatGrid,
+  computeYearStats,
   formatLocalDate,
   MONTH_NAMES,
   MONTH_SHORT,
+  monthlyTotalsForYear,
+  otNtVerseSplit,
   sumByDate,
+  topBooksByVerses,
+  yearsInBooksRetro,
   type HeatLevel,
   type Source,
   type Unit,
@@ -34,6 +39,7 @@ import {
   NEW_TESTAMENT,
   OLD_TESTAMENT,
   chapterCount,
+  isOldTestament,
   verseCount,
 } from '../lib/bibleVerseCounts';
 import { localToday } from '../lib/dates';
@@ -135,7 +141,7 @@ export default function Data() {
         <TabButton current={tab} value="heatmap"  setTab={setTab}>Heatmap</TabButton>
         <TabButton current={tab} value="calendar" setTab={setTab}>Calendar</TabButton>
         <TabButton current={tab} value="matrix"   setTab={setTab}>Book × Chapter</TabButton>
-        <TabButton current={tab} value="stats"    setTab={setTab} disabled comingIn="Build 2">Stats</TabButton>
+        <TabButton current={tab} value="stats"    setTab={setTab}>Stats</TabButton>
         <TabButton current={tab} value="plans"    setTab={setTab} disabled comingIn="Build 3">Plans</TabButton>
       </nav>
 
@@ -163,10 +169,17 @@ export default function Data() {
             scriptureReads={scriptureReads}
             bookReads={bookReads}
           />
+        ) : tab === 'stats' ? (
+          <StatsView
+            scriptureReads={scriptureReads}
+            bookReads={bookReads}
+            dailyPages={dailyPages}
+            theme={theme}
+          />
         ) : (
           <div className="dt-coming-soon">
-            <p>Coming in Build 2 (Stats) and Build 3 (Reading Plans).</p>
-            <p className="hint">Heatmap, Calendar, and Book × Chapter are live now.</p>
+            <p>Reading Plans coming in Build 3.</p>
+            <p className="hint">Heatmap, Calendar, Book × Chapter, and Stats are live now.</p>
           </div>
         )}
       </main>
@@ -952,6 +965,341 @@ function BookCard({ book }: { book: BookRead }) {
         </div>
       )}
     </li>
+  );
+}
+
+// ── Stats view ───────────────────────────────────────────────────────
+
+function StatsView({
+  scriptureReads,
+  bookReads,
+  dailyPages,
+  theme,
+}: {
+  scriptureReads: ScriptureRead[];
+  bookReads: BookRead[];
+  dailyPages: DailyPageRead[];
+  theme: Theme;
+}) {
+  const today = useMemo(() => new Date(), []);
+  const [year, setYear] = useState(today.getFullYear());
+  const yearOptions = useMemo(
+    () => Array.from({ length: 5 }, (_, i) => today.getFullYear() - i),
+    [today],
+  );
+
+  // Year-bound KPIs.
+  const stats = useMemo(
+    () => computeYearStats({
+      year,
+      scriptureReads,
+      bookReads,
+      dailyPages,
+      versesFor: (r) => versesInRead(r),
+      today,
+    }),
+    [year, scriptureReads, bookReads, dailyPages, today],
+  );
+
+  // Monthly columns — switch between scripture verses and book pages.
+  const [monthlySource, setMonthlySource] = useState<Source>('scripture');
+  const monthlyTotals = useMemo(() => {
+    if (monthlySource === 'scripture') {
+      const map = sumByDate(scriptureReads, (r) => r.read_date, (r) => versesInRead(r));
+      return monthlyTotalsForYear(year, map);
+    }
+    const merged = new Map<string, number>();
+    for (const b of bookReads) {
+      if (!b.finished_on) continue;
+      merged.set(b.finished_on, (merged.get(b.finished_on) || 0) + (b.pages || 0));
+    }
+    for (const d of dailyPages) {
+      merged.set(d.read_date, (merged.get(d.read_date) || 0) + (d.pages || 0));
+    }
+    return monthlyTotalsForYear(year, merged);
+  }, [monthlySource, year, scriptureReads, bookReads, dailyPages]);
+  const monthlyMax = Math.max(1, ...monthlyTotals);
+  const monthlyUnitLabel = monthlySource === 'scripture' ? 'verses' : 'pages';
+  const monthlyTotal = monthlyTotals.reduce((a, b) => a + b, 0);
+
+  // OT/NT split for the year.
+  const otNt = useMemo(
+    () => otNtVerseSplit({
+      year,
+      reads: scriptureReads,
+      versesFor: (r) => versesInRead(r),
+      isOldTestament,
+    }),
+    [year, scriptureReads],
+  );
+
+  // Top-N books for the year — passes in versesInRead so the helper stays
+  // schema-agnostic.
+  const top10 = useMemo(
+    () => topBooksByVerses({ year, n: 10, reads: scriptureReads, versesFor: (r) => versesInRead(r) }),
+    [year, scriptureReads],
+  );
+
+  // Years-in-Books retrospective — all-time.
+  const retro = useMemo(
+    () => yearsInBooksRetro({
+      scriptureReads,
+      bookReads,
+      dailyPages,
+      versesFor: (r) => versesInRead(r),
+    }),
+    [scriptureReads, bookReads, dailyPages],
+  );
+
+  const hasAnyData = retro.length > 0;
+
+  return (
+    <div className="dt-stats-wrap">
+      <div className="dt-stats-head">
+        <div>
+          <h2 className="stats-title">{year}</h2>
+          <div className="stats-sub">
+            {stats.combined.days > 0
+              ? `${stats.combined.days} day${stats.combined.days === 1 ? '' : 's'} of reading · longest streak ${stats.combined.streakLongest}`
+              : 'No reading recorded for this year yet.'}
+          </div>
+        </div>
+        <div className="stats-year-rail">
+          {yearOptions.map((y) => (
+            <button
+              key={y}
+              className={`year${year === y ? ' active' : ''}`}
+              onClick={() => setYear(y)}
+            >
+              {y}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="kpi-row">
+        <KpiCard label="Verses" value={stats.scripture.verses.toLocaleString()} hint={`${stats.scripture.chapters} chapter reads`} />
+        <KpiCard label="Distinct chapters" value={stats.scripture.distinctChapters.toLocaleString()} hint={`across ${stats.scripture.booksTouched} of 66 books`} />
+        <KpiCard label="Books finished" value={stats.books.finished.toLocaleString()} hint={`${stats.books.authors} author${stats.books.authors === 1 ? '' : 's'}`} />
+        <KpiCard label="Pages read" value={stats.books.pages.toLocaleString()} hint={`across ${stats.books.days} day${stats.books.days === 1 ? '' : 's'}`} />
+        <KpiCard label="Current streak" value={`${stats.combined.streakCurrent} day${stats.combined.streakCurrent === 1 ? '' : 's'}`} hint={`longest ${stats.combined.streakLongest}`} />
+      </div>
+
+      {/* Monthly columns + OT/NT donut side by side */}
+      <div className="stats-row">
+        <div className="panel stats-panel">
+          <div className="panel-head">
+            <div>
+              <h3 className="stats-h3">Monthly</h3>
+              <div className="sub">
+                {monthlyTotal.toLocaleString()} {monthlyUnitLabel} across {year}
+              </div>
+            </div>
+            <Pillbar
+              value={monthlySource}
+              options={[
+                { value: 'scripture', label: 'Verses' },
+                { value: 'books', label: 'Pages' },
+              ]}
+              onChange={(v) => setMonthlySource(v as Source)}
+            />
+          </div>
+          <MonthlyBars totals={monthlyTotals} max={monthlyMax} unit={monthlyUnitLabel} />
+        </div>
+
+        <div className="panel stats-panel donut-panel">
+          <div className="panel-head">
+            <div>
+              <h3 className="stats-h3">Old / New</h3>
+              <div className="sub">verses by testament</div>
+            </div>
+          </div>
+          <OtNtDonut ot={otNt.ot} nt={otNt.nt} theme={theme} />
+        </div>
+      </div>
+
+      {/* Top books */}
+      <div className="panel stats-panel">
+        <div className="panel-head">
+          <div>
+            <h3 className="stats-h3">Top books · {year}</h3>
+            <div className="sub">most-read by verses</div>
+          </div>
+        </div>
+        {top10.length === 0 ? (
+          <div className="reads-empty"><em>No Scripture reads recorded for {year}.</em></div>
+        ) : (
+          <TopBooksBar rows={top10} />
+        )}
+      </div>
+
+      {/* Years-in-books retrospective — all-time */}
+      <div className="panel stats-panel">
+        <div className="panel-head">
+          <div>
+            <h3 className="stats-h3">Years-in-Books</h3>
+            <div className="sub">a long view of your reading life</div>
+          </div>
+        </div>
+        {!hasAnyData ? (
+          <div className="reads-empty"><em>Nothing logged yet. Add a Scripture read or finished book to begin building this picture.</em></div>
+        ) : (
+          <RetroTable rows={retro} onPickYear={setYear} activeYear={year} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KpiCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="kpi-card">
+      <div className="kpi-label">{label}</div>
+      <div className="kpi-value">{value}</div>
+      {hint && <div className="kpi-hint">{hint}</div>}
+    </div>
+  );
+}
+
+function MonthlyBars({ totals, max, unit }: { totals: number[]; max: number; unit: string }) {
+  return (
+    <div className="monthly-chart">
+      <div className="monthly-bars">
+        {totals.map((v, i) => {
+          const pct = max > 0 ? (v / max) * 100 : 0;
+          const level = bucketLevelForBar(v, max);
+          return (
+            <div key={i} className="monthly-col" title={`${MONTH_NAMES[i]}: ${v.toLocaleString()} ${unit}`}>
+              <div className="monthly-bar-track">
+                <div className={`monthly-bar l${level}`} style={{ height: `${pct}%` }} />
+              </div>
+              <div className="monthly-label">{MONTH_SHORT[i]}</div>
+              <div className="monthly-value">{v > 0 ? v.toLocaleString() : '·'}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Map a bar value (0..max) to a heat level 1..5. Empty = level 0. */
+function bucketLevelForBar(value: number, max: number): HeatLevel {
+  if (value <= 0 || max <= 0) return 0;
+  const pct = value / max;
+  if (pct < 0.2) return 1;
+  if (pct < 0.45) return 2;
+  if (pct < 0.7) return 3;
+  if (pct < 0.9) return 4;
+  return 5;
+}
+
+function OtNtDonut({ ot, nt, theme: _theme }: { ot: number; nt: number; theme: Theme }) {
+  const total = ot + nt;
+  if (total === 0) {
+    return <div className="reads-empty"><em>No Scripture verses logged for this year.</em></div>;
+  }
+  const otPct = ot / total;
+  const ntPct = nt / total;
+
+  // SVG donut math: r=46, c=2πr ≈ 289.0
+  const r = 46;
+  const c = 2 * Math.PI * r;
+  const otLen = c * otPct;
+
+  return (
+    <div className="donut-wrap">
+      <svg viewBox="0 0 120 120" className="donut-svg" aria-label={`Old Testament ${Math.round(otPct * 100)} percent, New Testament ${Math.round(ntPct * 100)} percent`}>
+        <circle cx="60" cy="60" r={r} fill="none" stroke="var(--heat-2)" strokeWidth="14" />
+        <circle
+          cx="60" cy="60" r={r}
+          fill="none"
+          stroke="var(--heat-5)"
+          strokeWidth="14"
+          strokeDasharray={`${otLen} ${c - otLen}`}
+          strokeDashoffset={c / 4}
+          transform="rotate(-90 60 60)"
+        />
+        <text x="60" y="58" textAnchor="middle" className="donut-pct">
+          {Math.round(otPct * 100)}%
+        </text>
+        <text x="60" y="74" textAnchor="middle" className="donut-label">
+          OT
+        </text>
+      </svg>
+      <ul className="donut-legend">
+        <li>
+          <span className="dot" style={{ background: 'var(--heat-5)' }} />
+          OT · {ot.toLocaleString()} verses
+        </li>
+        <li>
+          <span className="dot" style={{ background: 'var(--heat-2)' }} />
+          NT · {nt.toLocaleString()} verses
+        </li>
+      </ul>
+    </div>
+  );
+}
+
+function TopBooksBar({ rows }: { rows: Array<{ book: string; verses: number; reads: number }> }) {
+  const max = Math.max(1, ...rows.map((r) => r.verses));
+  return (
+    <ul className="topbooks-list">
+      {rows.map((r) => {
+        const pct = (r.verses / max) * 100;
+        const level = bucketLevelForBar(r.verses, max);
+        return (
+          <li key={r.book} className="topbooks-row">
+            <span className="topbooks-name">{r.book}</span>
+            <div className="topbooks-track">
+              <div className={`topbooks-bar l${level}`} style={{ width: `${pct}%` }} />
+            </div>
+            <span className="topbooks-num">{r.verses.toLocaleString()}</span>
+            <span className="topbooks-meta">{r.reads}× read</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function RetroTable({
+  rows, activeYear, onPickYear,
+}: {
+  rows: ReturnType<typeof yearsInBooksRetro>;
+  activeYear: number;
+  onPickYear: (y: number) => void;
+}) {
+  return (
+    <table className="retro-table">
+      <thead>
+        <tr>
+          <th>Year</th>
+          <th className="num">Verses</th>
+          <th className="num">Chapter reads</th>
+          <th className="num">Books</th>
+          <th className="num">Pages</th>
+          <th className="num">Days</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr
+            key={r.year}
+            className={r.year === activeYear ? 'active' : ''}
+            onClick={() => onPickYear(r.year)}
+          >
+            <td>{r.year}</td>
+            <td className="num">{r.verses.toLocaleString()}</td>
+            <td className="num">{r.chapters.toLocaleString()}</td>
+            <td className="num">{r.books.toLocaleString()}</td>
+            <td className="num">{r.pages.toLocaleString()}</td>
+            <td className="num">{r.days.toLocaleString()}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

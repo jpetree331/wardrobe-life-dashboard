@@ -6,8 +6,13 @@ import {
   bucketLevel,
   buildCalendarGrid,
   buildHeatGrid,
+  computeYearStats,
   formatLocalDate,
+  monthlyTotalsForYear,
+  otNtVerseSplit,
   sumByDate,
+  topBooksByVerses,
+  yearsInBooksRetro,
 } from '../src/lib/dataAggregation';
 
 describe('bucketLevel: chapters scale', () => {
@@ -275,6 +280,181 @@ describe('aggregateBooksByAuthor', () => {
     const agg = aggregateBooksByAuthor(books);
     const unknown = agg.get('Unknown author')!;
     expect(unknown.books.map((b) => b.finished_on)).toEqual(['2026-03-15', '2026-01-01']);
+  });
+});
+
+describe('computeYearStats', () => {
+  const scriptureReads = [
+    { read_date: '2026-01-05', book: 'Genesis', chapter: 1, verse_from: null, verse_to: null }, // 31 verses
+    { read_date: '2026-01-06', book: 'Genesis', chapter: 2, verse_from: null, verse_to: null }, // 25 verses
+    { read_date: '2026-01-07', book: 'Matthew', chapter: 1, verse_from: 1, verse_to: 10 },     // 10 verses
+    { read_date: '2025-12-31', book: 'Genesis', chapter: 50, verse_from: null, verse_to: null }, // out of year
+  ];
+  const bookReads = [
+    { finished_on: '2026-02-12', title: 'A', author: 'Tolkien', pages: 400, rating: 5, review: null },
+    { finished_on: '2026-04-12', title: 'B', author: 'Lewis',   pages: 250, rating: 4, review: null },
+    { finished_on: '2025-11-01', title: 'old', author: 'Lewis', pages: 200, rating: 4, review: null }, // out of year
+  ];
+  const dailyPages = [
+    { read_date: '2026-01-05', pages: 30 },
+    { read_date: '2026-01-08', pages: 50 },
+  ];
+  const versesFor = (r: typeof scriptureReads[number]) => {
+    if (r.verse_from !== null && r.verse_to !== null) return r.verse_to - r.verse_from + 1;
+    if (r.book === 'Genesis' && r.chapter === 1) return 31;
+    if (r.book === 'Genesis' && r.chapter === 2) return 25;
+    if (r.book === 'Genesis' && r.chapter === 50) return 26;
+    return 0;
+  };
+
+  it('totals scripture, books, and combined days correctly', () => {
+    const stats = computeYearStats({
+      year: 2026, scriptureReads, bookReads, dailyPages, versesFor,
+      today: new Date(2026, 4, 1),
+    });
+    expect(stats.scripture.verses).toBe(31 + 25 + 10);   // 66
+    expect(stats.scripture.chapters).toBe(3);
+    expect(stats.scripture.days).toBe(3);                 // Jan 5, 6, 7
+    expect(stats.scripture.booksTouched).toBe(2);         // Genesis, Matthew
+    expect(stats.scripture.distinctChapters).toBe(3);     // Gen 1, Gen 2, Matt 1
+
+    expect(stats.books.finished).toBe(2);
+    expect(stats.books.pages).toBe(400 + 250 + 30 + 50);  // 730
+    expect(stats.books.days).toBe(4);                     // Feb 12, Apr 12, Jan 5, Jan 8
+    expect(stats.books.authors).toBe(2);                  // Tolkien, Lewis (case-insensitive)
+
+    expect(stats.combined.days).toBe(6);                  // Jan 5, 6, 7, 8, Feb 12, Apr 12
+  });
+
+  it('streak: counts the current run when today is on a reading day', () => {
+    // Reading on Jan 5, 6, 7, 8 — 4-day run. Today is Jan 8.
+    const stats = computeYearStats({
+      year: 2026, scriptureReads, bookReads, dailyPages, versesFor,
+      today: new Date(2026, 0, 8),
+    });
+    expect(stats.combined.streakLongest).toBe(4);
+    expect(stats.combined.streakCurrent).toBe(4);
+  });
+
+  it('streak: gives a 1-day grace window when today has no reading', () => {
+    const stats = computeYearStats({
+      year: 2026, scriptureReads, bookReads, dailyPages, versesFor,
+      today: new Date(2026, 0, 9),
+    });
+    // Yesterday (Jan 8) had reading, so the current streak counts back from there.
+    expect(stats.combined.streakCurrent).toBe(4);
+  });
+
+  it('streak: zero when both today and yesterday have no reading', () => {
+    const stats = computeYearStats({
+      year: 2026, scriptureReads, bookReads, dailyPages, versesFor,
+      today: new Date(2026, 0, 15),
+    });
+    expect(stats.combined.streakCurrent).toBe(0);
+    expect(stats.combined.streakLongest).toBe(4);
+  });
+});
+
+describe('monthlyTotalsForYear', () => {
+  it('buckets a date map into 12 months', () => {
+    const map = new Map<string, number>([
+      ['2026-01-05', 10], ['2026-01-20', 5],   // Jan: 15
+      ['2026-03-01', 7],                         // Mar: 7
+      ['2025-12-31', 99],                        // out of year
+      ['2026-12-31', 12],                        // Dec
+    ]);
+    const out = monthlyTotalsForYear(2026, map);
+    expect(out).toHaveLength(12);
+    expect(out[0]).toBe(15);
+    expect(out[1]).toBe(0);
+    expect(out[2]).toBe(7);
+    expect(out[11]).toBe(12);
+  });
+
+  it('skips zero/negative/non-finite counts', () => {
+    const map = new Map<string, number>([
+      ['2026-04-01', 0],
+      ['2026-04-02', -5],
+      ['2026-04-03', NaN],
+      ['2026-04-04', 8],
+    ]);
+    const out = monthlyTotalsForYear(2026, map);
+    expect(out[3]).toBe(8);
+  });
+});
+
+describe('otNtVerseSplit', () => {
+  const reads = [
+    { read_date: '2026-01-05', book: 'Genesis', chapter: 1, verse_from: null, verse_to: null }, // OT, 31
+    { read_date: '2026-01-06', book: 'Matthew', chapter: 1, verse_from: null, verse_to: null }, // NT, 25
+    { read_date: '2025-01-01', book: 'Genesis', chapter: 1, verse_from: null, verse_to: null }, // out
+  ];
+  const versesFor = (r: typeof reads[number]) => {
+    if (r.book === 'Genesis' && r.chapter === 1) return 31;
+    if (r.book === 'Matthew' && r.chapter === 1) return 25;
+    return 0;
+  };
+  const isOldTestament = (book: string) => book === 'Genesis';
+
+  it('splits by testament for the year', () => {
+    const out = otNtVerseSplit({ year: 2026, reads, versesFor, isOldTestament });
+    expect(out.ot).toBe(31);
+    expect(out.nt).toBe(25);
+  });
+});
+
+describe('topBooksByVerses', () => {
+  const reads = [
+    { read_date: '2026-01-05', book: 'Psalms',   chapter: 1, verse_from: null, verse_to: null },
+    { read_date: '2026-02-05', book: 'Psalms',   chapter: 23, verse_from: null, verse_to: null },
+    { read_date: '2026-02-06', book: 'Genesis',  chapter: 1, verse_from: null, verse_to: null },
+    { read_date: '2026-03-06', book: 'John',     chapter: 3, verse_from: null, verse_to: null },
+  ];
+  const versesFor = (r: typeof reads[number]) => {
+    if (r.book === 'Psalms' && r.chapter === 1) return 6;
+    if (r.book === 'Psalms' && r.chapter === 23) return 6;
+    if (r.book === 'Genesis' && r.chapter === 1) return 31;
+    if (r.book === 'John' && r.chapter === 3) return 36;
+    return 0;
+  };
+
+  it('ranks by total verses, slices to N, drops zero-verse books', () => {
+    const top = topBooksByVerses({ year: 2026, n: 2, reads, versesFor });
+    expect(top).toHaveLength(2);
+    expect(top[0].book).toBe('John');
+    expect(top[0].verses).toBe(36);
+    expect(top[1].book).toBe('Genesis');
+    expect(top[1].verses).toBe(31);
+  });
+
+  it('all-time when year is null', () => {
+    const top = topBooksByVerses({ year: null, n: 4, reads, versesFor });
+    expect(top.map((t) => t.book)).toEqual(['John', 'Genesis', 'Psalms']);
+    // Psalms has 2 reads totaling 12 verses
+    const psalms = top.find((t) => t.book === 'Psalms')!;
+    expect(psalms.verses).toBe(12);
+    expect(psalms.reads).toBe(2);
+  });
+});
+
+describe('yearsInBooksRetro', () => {
+  it('groups by year and sorts descending', () => {
+    const scripture = [
+      { read_date: '2026-01-05', book: 'Genesis', chapter: 1, verse_from: null, verse_to: null },
+      { read_date: '2024-06-12', book: 'Genesis', chapter: 1, verse_from: null, verse_to: null },
+    ];
+    const books = [
+      { finished_on: '2026-04-12', title: 'A', author: 'X', pages: 200, rating: 4, review: null },
+      { finished_on: '2025-04-12', title: 'B', author: 'Y', pages: 100, rating: 3, review: null },
+    ];
+    const daily = [{ read_date: '2024-06-13', pages: 10 }];
+    const out = yearsInBooksRetro({
+      scriptureReads: scripture, bookReads: books, dailyPages: daily, versesFor: () => 31,
+    });
+    expect(out.map((r) => r.year)).toEqual([2026, 2025, 2024]);
+    expect(out.find((r) => r.year === 2026)!.books).toBe(1);
+    expect(out.find((r) => r.year === 2024)!.days).toBe(2); // Jun 12 + Jun 13
+    expect(out.find((r) => r.year === 2024)!.pages).toBe(10);
   });
 });
 
