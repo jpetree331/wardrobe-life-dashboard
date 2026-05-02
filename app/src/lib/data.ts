@@ -392,7 +392,15 @@ export async function listAllPlanCompletions(): Promise<PlanCompletion[]> {
   return (data || []) as PlanCompletion[];
 }
 
-/** Toggle: if (plan, book, chapter) already exists, delete it; else insert. */
+/**
+ * Toggle: if (plan, book, chapter) already exists, delete it; else insert.
+ *
+ * Concurrency: SELECT-then-INSERT is racy if the user double-taps. The
+ * schema's `unique (plan_id, book, chapter)` constraint means the DB
+ * rejects the second insert with code 23505; we treat that as success
+ * ("already created by the prior call") rather than re-throwing, which
+ * keeps the UI consistent with what the user sees.
+ */
 export async function togglePlanCompletion(
   planId: string,
   book: string,
@@ -419,7 +427,14 @@ export async function togglePlanCompletion(
   const { error } = await supabase
     .from('data_plan_completions')
     .insert({ user_id: userId, plan_id: planId, book, chapter });
-  if (error) throw error;
+  if (error) {
+    // Postgres unique-violation = the row exists from a concurrent insert.
+    // Treat as success — the UI will show it as completed either way.
+    if ((error as { code?: string })?.code === '23505') {
+      return { created: true };
+    }
+    throw error;
+  }
   return { created: true };
 }
 

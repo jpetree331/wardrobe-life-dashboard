@@ -2,6 +2,11 @@
    Heatmap + Calendar + add modals. Scoped under .data-page. */
 
 .data-page {
+  /* Empty heat cell — a soft parchment that reads as "nothing here" but
+     stays distinct from the page background. Theme-independent; the
+     active heat ramp (--heat-1..--heat-5) is set inline by JS. */
+  --heat-empty: #e8e1cc;
+
   background: var(--bg);
   color: var(--ink);
   font-family: 'EB Garamond', Georgia, serif;
@@ -10,6 +15,31 @@
   display: grid;
   grid-template-rows: auto auto 1fr auto;
   overflow: hidden;
+}
+
+/* Visible keyboard focus rings — restore the affordance for keyboard
+   users without affecting mouse interaction. Targets all interactive
+   elements inside the room. */
+.data-page :focus-visible {
+  outline: 2px solid var(--ink-soft);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.data-page .heat-cell:focus-visible,
+.data-page .chap-tile:focus-visible,
+.data-page .plan-chap:focus-visible {
+  /* Tighter inset rings for the dense grids — the 2px offset would
+     overlap neighboring tiles. */
+  outline-offset: 0;
+  outline-width: 2px;
+}
+
+/* Pace pill — give the glyph a faint visual weight without coloring
+   it. The glyph + label combination is what makes the state non-color. */
+.plan-pace .pace-glyph {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  font-style: normal;
 }
 
 /* Ribbon */
@@ -222,20 +252,26 @@
 }
 .dt-legend .muted { letter-spacing: 0.08em; }
 
-.dt-year-rail {
-  display: flex; flex-direction: column;
+/* Year rail — vertical (next to the heatmap) and horizontal (next to
+   the stats title) layouts share the same button rules; only the
+   container's flex direction and padding differ. */
+.year-rail {
+  display: flex;
   gap: 4px;
 }
-.dt-year-rail .year {
+.year-rail.vertical { flex-direction: column; }
+.year-rail.horizontal { flex-direction: row; }
+.year-rail .year {
   background: transparent; border: 1px solid var(--line);
   cursor: pointer;
-  padding: 8px 0;
   font-family: 'Cormorant Garamond', serif;
   font-size: 14px; letter-spacing: 0.12em;
   color: var(--ink-soft);
 }
-.dt-year-rail .year:hover { color: var(--ink); border-color: var(--ink-soft); }
-.dt-year-rail .year.active {
+.year-rail.vertical .year { padding: 8px 0; }
+.year-rail.horizontal .year { padding: 6px 14px; }
+.year-rail .year:hover { color: var(--ink); border-color: var(--ink-soft); }
+.year-rail .year.active {
   background: var(--ink); color: var(--bg); border-color: var(--ink);
 }
 
@@ -589,22 +625,6 @@
   color: var(--ink-faint); font-size: 13px;
   margin-top: 4px;
 }
-.stats-year-rail {
-  display: inline-flex; gap: 4px;
-}
-.stats-year-rail .year {
-  background: transparent; border: 1px solid var(--line);
-  padding: 6px 14px;
-  cursor: pointer;
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 14px; letter-spacing: 0.12em;
-  color: var(--ink-soft);
-}
-.stats-year-rail .year:hover { color: var(--ink); border-color: var(--ink-soft); }
-.stats-year-rail .year.active {
-  background: var(--ink); color: var(--bg); border-color: var(--ink);
-}
-
 /* KPI row */
 .kpi-row {
   display: grid;
@@ -1243,7 +1263,6 @@
 }
 .dt-modal-actions {
   display: flex; gap: 10px; justify-content: flex-end;
-  padding-top: 8px;
   margin-top: 4px;
   border-top: 1px solid var(--line);
   padding-top: 14px;

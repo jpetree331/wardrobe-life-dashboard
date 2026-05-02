@@ -50,6 +50,24 @@ export function bucketLevel(count: number, scale: 'chapters' | 'verses-or-pages'
 }
 
 /**
+ * Merge two date→count maps additively into a new map. Used wherever
+ * we combine independent reading sources for a single per-day total
+ * (book completions + daily-page logs, scripture manual + sanctuary).
+ */
+export function mergeByDate(
+  ...maps: Array<Map<string, number>>
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const m of maps) {
+    for (const [k, v] of m) {
+      if (!Number.isFinite(v) || v <= 0) continue;
+      out.set(k, (out.get(k) || 0) + v);
+    }
+  }
+  return out;
+}
+
+/**
  * Sum values into a date→count map. Generic so it works for verses,
  * chapters, pages, sessions, etc.
  */

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   createBookRead,
@@ -13,7 +13,6 @@ import {
   listEntryDatesByRoom,
   listReadingPlans,
   togglePlanCompletion,
-  updateReadingPlan,
   versesInRead,
   chapterFractionInRead,
   type BookRead,
@@ -26,18 +25,17 @@ import {
   aggregateBooksByAuthor,
   aggregateScriptureByBookChapter,
   bucketChapterReads,
-  bucketLevel,
   buildCalendarGrid,
   buildHeatGrid,
   computeYearStats,
   formatLocalDate,
   MONTH_NAMES,
   MONTH_SHORT,
+  mergeByDate,
   monthlyTotalsForYear,
   otNtVerseSplit,
   planChapterSequence,
   planPaceStatus,
-  planTotalChapters,
   sumByDate,
   topBooksByVerses,
   yearsInBooksRetro,
@@ -72,7 +70,9 @@ const THEMES: Record<Theme, [string, string, string, string, string]> = {
   ink:     ['#dcd5c2', '#c8c1ae', '#8e8674', '#5a5142', '#2b2419'],
 };
 
-const HEAT_EMPTY = '#e8e1cc';
+// Cross-room calendar markers. These two colors are also used in the
+// Heatmap source-tag legends; keeping them as named constants avoids
+// drift between the JSX and the CSS where they appear.
 const SANCTUARY_MARKER = '#b8521a';
 const TIMELINE_MARKER = '#3e5a78';
 
@@ -94,7 +94,8 @@ export default function Data() {
 
   const [modal, setModal] = useState<'scripture' | 'book' | 'daily-pages' | null>(null);
 
-  // Apply selected heatmap theme as CSS custom properties on the page root.
+  // Apply selected heatmap theme as CSS custom properties on the page
+  // root. --heat-empty is theme-independent and lives in Data.css.
   const [theme, setTheme] = useState<Theme>('sage');
   const pageStyle: CSSProperties = useMemo(() => {
     const ramp = THEMES[theme];
@@ -104,7 +105,6 @@ export default function Data() {
       ['--heat-3' as any]: ramp[2],
       ['--heat-4' as any]: ramp[3],
       ['--heat-5' as any]: ramp[4],
-      ['--heat-empty' as any]: HEAT_EMPTY,
     };
   }, [theme]);
 
@@ -191,7 +191,6 @@ export default function Data() {
             scriptureReads={scriptureReads}
             bookReads={bookReads}
             dailyPages={dailyPages}
-            theme={theme}
           />
         ) : tab === 'plans' ? (
           <PlansView
@@ -296,18 +295,16 @@ function HeatmapView({
     // still light up. Same date appearing on both sides correctly adds.
     if (unit === 'verses') {
       // "Verses" pillbar means "Pages" when source=books
-      const fromCompletions = sumByDate(bookReads, (r) => r.finished_on, (r) => r.pages);
-      const fromDaily = sumByDate(dailyPages, (r) => r.read_date, (r) => r.pages);
-      const merged = new Map<string, number>(fromCompletions);
-      for (const [k, v] of fromDaily) merged.set(k, (merged.get(k) || 0) + v);
-      return merged;
+      return mergeByDate(
+        sumByDate(bookReads, (r) => r.finished_on, (r) => r.pages),
+        sumByDate(dailyPages, (r) => r.read_date, (r) => r.pages),
+      );
     }
     // "Chapters" pillbar means "Sections" when source=books — sections = pages / 50.
-    const fromCompletions = sumByDate(bookReads, (r) => r.finished_on, (r) => (r.pages > 0 ? r.pages / 50 : 0));
-    const fromDaily = sumByDate(dailyPages, (r) => r.read_date, (r) => (r.pages > 0 ? r.pages / 50 : 0));
-    const merged = new Map<string, number>(fromCompletions);
-    for (const [k, v] of fromDaily) merged.set(k, (merged.get(k) || 0) + v);
-    return merged;
+    return mergeByDate(
+      sumByDate(bookReads, (r) => r.finished_on, (r) => (r.pages > 0 ? r.pages / 50 : 0)),
+      sumByDate(dailyPages, (r) => r.read_date, (r) => (r.pages > 0 ? r.pages / 50 : 0)),
+    );
   }, [scriptureReads, bookReads, dailyPages, source, unit]);
 
   const grid = useMemo(
@@ -402,19 +399,38 @@ function HeatmapView({
         </div>
       </div>
 
-      <aside className="dt-year-rail">
-        {yearOptions.map((y) => (
-          <button
-            key={y}
-            className={`year${year === y ? ' active' : ''}`}
-            onClick={() => setYear(y)}
-          >
-            {y}
-          </button>
-        ))}
-      </aside>
+      <YearRail layout="vertical" options={yearOptions} value={year} onChange={setYear} />
 
       {tip && <div className="dt-tooltip" style={{ left: tip.x + 14, top: tip.y + 14 }}>{tip.text}</div>}
+    </div>
+  );
+}
+
+/**
+ * The "pick a year" rail used by Heatmap and Stats. Vertical orientation
+ * puts it next to a wide content area; horizontal (used by Stats) puts it
+ * inline next to the year title.
+ */
+function YearRail({
+  options, value, onChange, layout,
+}: {
+  options: number[];
+  value: number;
+  onChange: (y: number) => void;
+  layout: 'vertical' | 'horizontal';
+}) {
+  return (
+    <div className={`year-rail ${layout}`} role="radiogroup" aria-label="Year">
+      {options.map((y) => (
+        <button
+          key={y}
+          className={`year${value === y ? ' active' : ''}`}
+          onClick={() => onChange(y)}
+          aria-pressed={value === y}
+        >
+          {y}
+        </button>
+      ))}
     </div>
   );
 }
@@ -434,10 +450,13 @@ function HeatGrid({
   const maxWeek = cells.length === 0 ? 0 : Math.max(...cells.map((c) => c.weekIndex));
   const weeks = maxWeek + 1;
 
-  // Month labels at the appropriate week-column.
+  // Month labels at the appropriate week-column. Skip out-of-year cells
+  // so the leading prior-year overflow (e.g. Dec 28-31 in a 2026 grid)
+  // doesn't emit a spurious "Dec" label before the year's "Jan."
   const monthLabels: Array<{ month: number; col: number }> = [];
   let lastMonth = -1;
   for (const c of cells) {
+    if (!c.inYear) continue;
     const m = new Date(c.date + 'T00:00:00').getMonth();
     if (m !== lastMonth) {
       monthLabels.push({ month: m, col: c.weekIndex });
@@ -544,14 +563,10 @@ function CalendarView({
       return sumByDate(scriptureReads, (r) => r.read_date, (r) => versesInRead(r));
     }
     // Books mode — merge completions + daily pages.
-    const merged = new Map<string, number>();
-    for (const b of bookReads) {
-      merged.set(b.finished_on, (merged.get(b.finished_on) || 0) + b.pages);
-    }
-    for (const d of dailyPages) {
-      merged.set(d.read_date, (merged.get(d.read_date) || 0) + d.pages);
-    }
-    return merged;
+    return mergeByDate(
+      sumByDate(bookReads, (r) => r.finished_on, (r) => r.pages),
+      sumByDate(dailyPages, (r) => r.read_date, (r) => r.pages),
+    );
   }, [scriptureReads, bookReads, dailyPages, source]);
 
   const refsByDate = useMemo(() => {
@@ -730,8 +745,7 @@ function ScriptureMatrix({ scriptureReads }: { scriptureReads: ScriptureRead[] }
   // Reset whenever the underlying reads change and the selection vanishes.
   useEffect(() => {
     if (!aggregate.has(selectedBook) && initialBook) setSelectedBook(initialBook);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aggregate]);
+  }, [aggregate, initialBook, selectedBook]);
 
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
   // Clear chapter filter when we switch books.
@@ -902,8 +916,7 @@ function BookByAuthor({ bookReads }: { bookReads: BookRead[] }) {
     } else if (!selectedAuthor && authors[0]) {
       setSelectedAuthor(authors[0]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aggregate]);
+  }, [aggregate, authors, selectedAuthor]);
 
   if (authors.length === 0) {
     return (
@@ -992,12 +1005,10 @@ function StatsView({
   scriptureReads,
   bookReads,
   dailyPages,
-  theme,
 }: {
   scriptureReads: ScriptureRead[];
   bookReads: BookRead[];
   dailyPages: DailyPageRead[];
-  theme: Theme;
 }) {
   const today = useMemo(() => new Date(), []);
   const [year, setYear] = useState(today.getFullYear());
@@ -1026,15 +1037,10 @@ function StatsView({
       const map = sumByDate(scriptureReads, (r) => r.read_date, (r) => versesInRead(r));
       return monthlyTotalsForYear(year, map);
     }
-    const merged = new Map<string, number>();
-    for (const b of bookReads) {
-      if (!b.finished_on) continue;
-      merged.set(b.finished_on, (merged.get(b.finished_on) || 0) + (b.pages || 0));
-    }
-    for (const d of dailyPages) {
-      merged.set(d.read_date, (merged.get(d.read_date) || 0) + (d.pages || 0));
-    }
-    return monthlyTotalsForYear(year, merged);
+    return monthlyTotalsForYear(year, mergeByDate(
+      sumByDate(bookReads, (r) => r.finished_on, (r) => r.pages),
+      sumByDate(dailyPages, (r) => r.read_date, (r) => r.pages),
+    ));
   }, [monthlySource, year, scriptureReads, bookReads, dailyPages]);
   const monthlyMax = Math.max(1, ...monthlyTotals);
   const monthlyUnitLabel = monthlySource === 'scripture' ? 'verses' : 'pages';
@@ -1082,17 +1088,7 @@ function StatsView({
               : 'No reading recorded for this year yet.'}
           </div>
         </div>
-        <div className="stats-year-rail">
-          {yearOptions.map((y) => (
-            <button
-              key={y}
-              className={`year${year === y ? ' active' : ''}`}
-              onClick={() => setYear(y)}
-            >
-              {y}
-            </button>
-          ))}
-        </div>
+        <YearRail layout="horizontal" options={yearOptions} value={year} onChange={setYear} />
       </div>
 
       {/* KPIs */}
@@ -1133,7 +1129,7 @@ function StatsView({
               <div className="sub">verses by testament</div>
             </div>
           </div>
-          <OtNtDonut ot={otNt.ot} nt={otNt.nt} theme={theme} />
+          <OtNtDonut ot={otNt.ot} nt={otNt.nt} />
         </div>
       </div>
 
@@ -1213,7 +1209,7 @@ function bucketLevelForBar(value: number, max: number): HeatLevel {
   return 5;
 }
 
-function OtNtDonut({ ot, nt, theme: _theme }: { ot: number; nt: number; theme: Theme }) {
+function OtNtDonut({ ot, nt }: { ot: number; nt: number }) {
   const total = ot + nt;
   if (total === 0) {
     return <div className="reads-empty"><em>No Scripture verses logged for this year.</em></div>;
@@ -1324,6 +1320,41 @@ function RetroTable({
 // ── Plans view ────────────────────────────────────────────────────────
 
 const DAY_NAMES_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+/**
+ * Translate a `PaceStatus` into the user-facing pill text. `verbose=true`
+ * adds the word "session(s)" for the detail view; the card view just
+ * shows "ahead by 2" so the pills stay compact in the list grid.
+ *
+ * The leading glyph (↑ / ↓ / →) is what makes the state legible without
+ * relying on color alone — a colorblind user reads "↑ ahead by 2" the
+ * same way a sighted user does.
+ */
+function paceInfo(pace: import('../lib/dataAggregation').PaceStatus, verbose: boolean) {
+  const delta = Math.abs(Math.round(pace.sessionDelta));
+  const unit = verbose ? ` session${delta === 1 ? '' : 's'}` : '';
+  if (pace.state === 1) {
+    return { glyph: '↑', label: `ahead by ${delta}${unit}`, cls: 'ahead' };
+  }
+  if (pace.state === -1) {
+    return { glyph: '↓', label: `behind by ${delta}${unit}`, cls: 'behind' };
+  }
+  return { glyph: '→', label: 'on pace', cls: 'on' };
+}
+
+function PacePill({
+  pace, verbose = false,
+}: {
+  pace: import('../lib/dataAggregation').PaceStatus;
+  verbose?: boolean;
+}) {
+  const { glyph, label, cls } = paceInfo(pace, verbose);
+  return (
+    <span className={`plan-pace ${cls}`} aria-label={`${label} (${cls === 'ahead' ? 'ahead of pace' : cls === 'behind' ? 'behind pace' : 'on pace'})`}>
+      <span className="pace-glyph" aria-hidden="true">{glyph}</span>{' '}{label}
+    </span>
+  );
+}
 
 type PlanPreset = {
   key: string;
@@ -1516,17 +1547,11 @@ function PlanCard({
     [plan, completions.length, today],
   );
 
-  const paceLabel =
-    pace.state === 1 ? `ahead by ${Math.abs(Math.round(pace.sessionDelta))}` :
-    pace.state === -1 ? `behind by ${Math.abs(Math.round(pace.sessionDelta))}` :
-    'on pace';
-  const paceClass = pace.state === 1 ? 'ahead' : pace.state === -1 ? 'behind' : 'on';
-
   return (
     <button className="plan-card" onClick={onClick}>
       <div className="plan-card-head">
         <h3 className="plan-name">{plan.name}</h3>
-        <span className={`plan-pace ${paceClass}`}>{paceLabel}</span>
+        <PacePill pace={pace} />
       </div>
       <div className="plan-card-meta">
         {plan.start_date} → {plan.end_date} · {plan.books.length} book{plan.books.length === 1 ? '' : 's'} · {pace.total} chapters
@@ -1613,12 +1638,6 @@ function PlanDetail({
     return out;
   }, [sequence]);
 
-  const paceLabel =
-    pace.state === 1 ? `ahead by ${Math.abs(Math.round(pace.sessionDelta))} session${Math.abs(pace.sessionDelta) === 1 ? '' : 's'}` :
-    pace.state === -1 ? `behind by ${Math.abs(Math.round(pace.sessionDelta))} session${Math.abs(pace.sessionDelta) === 1 ? '' : 's'}` :
-    'on pace';
-  const paceClass = pace.state === 1 ? 'ahead' : pace.state === -1 ? 'behind' : 'on';
-
   return (
     <div className="dt-plan-detail">
       <div className="plan-detail-head">
@@ -1629,7 +1648,7 @@ function PlanDetail({
       <div className="panel">
         <div className="plan-detail-title-row">
           <h2 className="plan-name large">{plan.name}</h2>
-          <span className={`plan-pace ${paceClass}`}>{paceLabel}</span>
+          <PacePill pace={pace} verbose />
         </div>
         <div className="plan-detail-meta">
           {plan.start_date} → {plan.end_date} · {plan.books.length} book{plan.books.length === 1 ? '' : 's'} ·

@@ -8,6 +8,7 @@ import {
   buildHeatGrid,
   computeYearStats,
   formatLocalDate,
+  mergeByDate,
   monthlyTotalsForYear,
   otNtVerseSplit,
   planChapterSequence,
@@ -76,6 +77,31 @@ describe('sumByDate', () => {
     ];
     const out = sumByDate(items, (it) => it.d, (it) => it.n);
     expect(out.get('2026-04-19')).toBe(5);
+  });
+});
+
+describe('mergeByDate', () => {
+  it('adds values from each map at matching keys', () => {
+    const a = new Map([['2026-01-01', 5], ['2026-01-02', 3]]);
+    const b = new Map([['2026-01-02', 7], ['2026-01-03', 4]]);
+    const out = mergeByDate(a, b);
+    expect(out.get('2026-01-01')).toBe(5);
+    expect(out.get('2026-01-02')).toBe(10);
+    expect(out.get('2026-01-03')).toBe(4);
+    expect(out.size).toBe(3);
+  });
+
+  it('skips zero/negative/NaN values from any input', () => {
+    const a = new Map([['2026-01-01', 5]]);
+    const b = new Map([['2026-01-01', 0], ['2026-01-02', -1], ['2026-01-03', NaN]]);
+    const out = mergeByDate(a, b);
+    expect(out.get('2026-01-01')).toBe(5);
+    expect(out.has('2026-01-02')).toBe(false);
+    expect(out.has('2026-01-03')).toBe(false);
+  });
+
+  it('returns an empty map when given no inputs', () => {
+    expect(mergeByDate().size).toBe(0);
   });
 });
 
