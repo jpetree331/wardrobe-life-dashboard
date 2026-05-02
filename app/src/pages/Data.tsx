@@ -3,15 +3,23 @@ import { Link } from 'react-router-dom';
 import {
   createBookRead,
   createDailyPageRead,
+  createReadingPlan,
   createScriptureRead,
+  deleteReadingPlan,
+  listAllPlanCompletions,
   listAllScriptureReads,
   listBookReads,
   listDailyPageReads,
   listEntryDatesByRoom,
+  listReadingPlans,
+  togglePlanCompletion,
+  updateReadingPlan,
   versesInRead,
   chapterFractionInRead,
   type BookRead,
   type DailyPageRead,
+  type PlanCompletion,
+  type ReadingPlan,
   type ScriptureRead,
 } from '../lib/data';
 import {
@@ -27,6 +35,9 @@ import {
   MONTH_SHORT,
   monthlyTotalsForYear,
   otNtVerseSplit,
+  planChapterSequence,
+  planPaceStatus,
+  planTotalChapters,
   sumByDate,
   topBooksByVerses,
   yearsInBooksRetro,
@@ -74,6 +85,8 @@ export default function Data() {
   const [scriptureReads, setScriptureReads] = useState<ScriptureRead[]>([]);
   const [bookReads, setBookReads] = useState<BookRead[]>([]);
   const [dailyPages, setDailyPages] = useState<DailyPageRead[]>([]);
+  const [plans, setPlans] = useState<ReadingPlan[]>([]);
+  const [planCompletions, setPlanCompletions] = useState<PlanCompletion[]>([]);
   const [sanctuaryDates, setSanctuaryDates] = useState<Set<string>>(new Set());
   const [timelineDates, setTimelineDates] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
@@ -97,22 +110,26 @@ export default function Data() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, b, dp, sd, td] = await Promise.all([
+      const [s, b, dp, p, pc, sd, td] = await Promise.all([
         listAllScriptureReads(),
         listBookReads(),
         listDailyPageReads(),
+        listReadingPlans(),
+        listAllPlanCompletions(),
         listEntryDatesByRoom('sanctuary'),
         listEntryDatesByRoom('timeline'),
       ]);
       setScriptureReads(s);
       setBookReads(b);
       setDailyPages(dp);
+      setPlans(p);
+      setPlanCompletions(pc);
       setSanctuaryDates(sd);
       setTimelineDates(td);
       setLoaded(true);
       const dpPagesTotal = dp.reduce((sum, r) => sum + r.pages, 0);
       setStatusMsg(
-        `${s.length} Scripture read${s.length === 1 ? '' : 's'} · ${b.length} book${b.length === 1 ? '' : 's'} finished${dpPagesTotal ? ` · ${dpPagesTotal} pages logged` : ''}`,
+        `${s.length} Scripture read${s.length === 1 ? '' : 's'} · ${b.length} book${b.length === 1 ? '' : 's'} finished${dpPagesTotal ? ` · ${dpPagesTotal} pages logged` : ''}${p.length ? ` · ${p.length} plan${p.length === 1 ? '' : 's'}` : ''}`,
       );
     } catch (err) {
       console.error(err);
@@ -142,7 +159,7 @@ export default function Data() {
         <TabButton current={tab} value="calendar" setTab={setTab}>Calendar</TabButton>
         <TabButton current={tab} value="matrix"   setTab={setTab}>Book × Chapter</TabButton>
         <TabButton current={tab} value="stats"    setTab={setTab}>Stats</TabButton>
-        <TabButton current={tab} value="plans"    setTab={setTab} disabled comingIn="Build 3">Plans</TabButton>
+        <TabButton current={tab} value="plans"    setTab={setTab}>Plans</TabButton>
       </nav>
 
       <main className="dt-main">
@@ -176,12 +193,13 @@ export default function Data() {
             dailyPages={dailyPages}
             theme={theme}
           />
-        ) : (
-          <div className="dt-coming-soon">
-            <p>Reading Plans coming in Build 3.</p>
-            <p className="hint">Heatmap, Calendar, Book × Chapter, and Stats are live now.</p>
-          </div>
-        )}
+        ) : tab === 'plans' ? (
+          <PlansView
+            plans={plans}
+            completions={planCompletions}
+            onChanged={refresh}
+          />
+        ) : null}
       </main>
 
       <footer className="dt-status">{statusMsg}</footer>
@@ -1300,6 +1318,558 @@ function RetroTable({
         ))}
       </tbody>
     </table>
+  );
+}
+
+// ── Plans view ────────────────────────────────────────────────────────
+
+const DAY_NAMES_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+type PlanPreset = {
+  key: string;
+  name: string;
+  description: string;
+  build: (today: Date) => {
+    name: string;
+    books: string[];
+    start_date: string;
+    end_date: string;
+    days_of_week: number[];
+    per_session: number;
+  };
+};
+
+function dayOffset(d: Date, days: number): Date {
+  const out = new Date(d);
+  out.setDate(out.getDate() + days);
+  return out;
+}
+
+const PLAN_PRESETS: PlanPreset[] = [
+  {
+    key: 'bible-in-a-year',
+    name: 'Bible in a Year',
+    description: 'All 66 books, ~3-4 chapters/day, finishing Dec 31.',
+    build: (today) => {
+      const startKey = `${today.getFullYear()}-01-01`;
+      const endKey = `${today.getFullYear()}-12-31`;
+      return {
+        name: 'Bible in a Year',
+        books: [...BIBLE_BOOKS],
+        start_date: startKey,
+        end_date: endKey,
+        days_of_week: [0, 1, 2, 3, 4, 5, 6],
+        per_session: 4,
+      };
+    },
+  },
+  {
+    key: 'nt-in-90',
+    name: 'New Testament in 90 Days',
+    description: 'Matthew through Revelation, ~3 chapters/day for 90 days.',
+    build: (today) => ({
+      name: 'New Testament in 90 Days',
+      books: [...NEW_TESTAMENT],
+      start_date: formatLocalDate(today),
+      end_date: formatLocalDate(dayOffset(today, 89)),
+      days_of_week: [0, 1, 2, 3, 4, 5, 6],
+      per_session: 3,
+    }),
+  },
+  {
+    key: 'gospels-30',
+    name: 'Gospels in 30 Days',
+    description: 'Matthew, Mark, Luke, John — 89 chapters across 30 days.',
+    build: (today) => ({
+      name: 'Gospels in 30 Days',
+      books: ['Matthew', 'Mark', 'Luke', 'John'],
+      start_date: formatLocalDate(today),
+      end_date: formatLocalDate(dayOffset(today, 29)),
+      days_of_week: [0, 1, 2, 3, 4, 5, 6],
+      per_session: 3,
+    }),
+  },
+  {
+    key: 'psalms-30',
+    name: 'Psalms in a Month',
+    description: 'Psalms 1–150, five per day for 30 days.',
+    build: (today) => ({
+      name: 'Psalms in a Month',
+      books: ['Psalms'],
+      start_date: formatLocalDate(today),
+      end_date: formatLocalDate(dayOffset(today, 29)),
+      days_of_week: [0, 1, 2, 3, 4, 5, 6],
+      per_session: 5,
+    }),
+  },
+];
+
+function PlansView({
+  plans,
+  completions,
+  onChanged,
+}: {
+  plans: ReadingPlan[];
+  completions: PlanCompletion[];
+  onChanged: () => Promise<void> | void;
+}) {
+  const today = useMemo(() => new Date(), []);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  // Group completions by plan_id for fast lookup.
+  const completionsByPlan = useMemo(() => {
+    const out = new Map<string, PlanCompletion[]>();
+    for (const c of completions) {
+      if (!out.has(c.plan_id)) out.set(c.plan_id, []);
+      out.get(c.plan_id)!.push(c);
+    }
+    return out;
+  }, [completions]);
+
+  const selectedPlan = selectedId ? plans.find((p) => p.id === selectedId) : null;
+
+  if (selectedPlan) {
+    return (
+      <PlanDetail
+        plan={selectedPlan}
+        completions={completionsByPlan.get(selectedPlan.id) || []}
+        today={today}
+        onBack={() => setSelectedId(null)}
+        onChanged={onChanged}
+      />
+    );
+  }
+
+  return (
+    <div className="dt-plans-wrap">
+      <div className="plans-head">
+        <div>
+          <h2 className="plans-title">Reading Plans</h2>
+          <div className="plans-sub">
+            {plans.length === 0
+              ? 'No saved plans yet. Pick a preset or build your own.'
+              : `${plans.length} saved plan${plans.length === 1 ? '' : 's'}`}
+          </div>
+        </div>
+        <button className="btn-quiet" onClick={() => setCreating(true)}>+ New plan</button>
+      </div>
+
+      {plans.length === 0 ? (
+        <div className="presets-grid">
+          {PLAN_PRESETS.map((preset) => (
+            <button
+              key={preset.key}
+              className="preset-card"
+              onClick={() => setCreating(true)}
+              title={`Start a ${preset.name} plan`}
+            >
+              <div className="preset-name">{preset.name}</div>
+              <div className="preset-desc">{preset.description}</div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="plans-grid">
+          {plans.map((p) => (
+            <PlanCard
+              key={p.id}
+              plan={p}
+              completions={completionsByPlan.get(p.id) || []}
+              today={today}
+              onClick={() => setSelectedId(p.id)}
+            />
+          ))}
+        </div>
+      )}
+
+      {creating && (
+        <PlanCreateModal
+          today={today}
+          onClose={() => setCreating(false)}
+          onSaved={async (newId) => {
+            setCreating(false);
+            await onChanged();
+            setSelectedId(newId);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function PlanCard({
+  plan, completions, today, onClick,
+}: {
+  plan: ReadingPlan;
+  completions: PlanCompletion[];
+  today: Date;
+  onClick: () => void;
+}) {
+  const pace = useMemo(
+    () => planPaceStatus({
+      plan,
+      completionsCount: completions.length,
+      today,
+      chapterCountFor: chapterCount,
+    }),
+    [plan, completions.length, today],
+  );
+
+  const paceLabel =
+    pace.state === 1 ? `ahead by ${Math.abs(Math.round(pace.sessionDelta))}` :
+    pace.state === -1 ? `behind by ${Math.abs(Math.round(pace.sessionDelta))}` :
+    'on pace';
+  const paceClass = pace.state === 1 ? 'ahead' : pace.state === -1 ? 'behind' : 'on';
+
+  return (
+    <button className="plan-card" onClick={onClick}>
+      <div className="plan-card-head">
+        <h3 className="plan-name">{plan.name}</h3>
+        <span className={`plan-pace ${paceClass}`}>{paceLabel}</span>
+      </div>
+      <div className="plan-card-meta">
+        {plan.start_date} → {plan.end_date} · {plan.books.length} book{plan.books.length === 1 ? '' : 's'} · {pace.total} chapters
+      </div>
+      <div className="plan-progress-track">
+        <div className="plan-progress-fill" style={{ width: `${(pace.pctComplete * 100).toFixed(1)}%` }} />
+      </div>
+      <div className="plan-card-foot">
+        <span>{pace.completed} / {pace.total} chapters</span>
+        <span className="muted">{Math.round(pace.pctComplete * 100)}%</span>
+      </div>
+    </button>
+  );
+}
+
+function PlanDetail({
+  plan, completions, today, onBack, onChanged,
+}: {
+  plan: ReadingPlan;
+  completions: PlanCompletion[];
+  today: Date;
+  onBack: () => void;
+  onChanged: () => Promise<void> | void;
+}) {
+  const pace = useMemo(
+    () => planPaceStatus({
+      plan,
+      completionsCount: completions.length,
+      today,
+      chapterCountFor: chapterCount,
+    }),
+    [plan, completions.length, today],
+  );
+
+  const sequence = useMemo(
+    () => planChapterSequence({ books: plan.books }, chapterCount),
+    [plan.books],
+  );
+
+  const completionSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of completions) s.add(`${c.book}|${c.chapter}`);
+    return s;
+  }, [completions]);
+
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function toggle(book: string, chapter: number) {
+    const key = `${book}|${chapter}`;
+    if (busy) return;
+    setBusy(key);
+    try {
+      await togglePlanCompletion(plan.id, book, chapter);
+      await onChanged();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onDelete() {
+    if (!confirm(`Delete "${plan.name}"? This removes its completion history too.`)) return;
+    try {
+      await deleteReadingPlan(plan.id);
+      onBack();
+      await onChanged();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // Group sequence by book for the per-book matrix rendering.
+  const bookGroups = useMemo(() => {
+    const out: Array<{ book: string; chapters: number[] }> = [];
+    let current: { book: string; chapters: number[] } | null = null;
+    for (const cell of sequence) {
+      if (!current || current.book !== cell.book) {
+        current = { book: cell.book, chapters: [] };
+        out.push(current);
+      }
+      current.chapters.push(cell.chapter);
+    }
+    return out;
+  }, [sequence]);
+
+  const paceLabel =
+    pace.state === 1 ? `ahead by ${Math.abs(Math.round(pace.sessionDelta))} session${Math.abs(pace.sessionDelta) === 1 ? '' : 's'}` :
+    pace.state === -1 ? `behind by ${Math.abs(Math.round(pace.sessionDelta))} session${Math.abs(pace.sessionDelta) === 1 ? '' : 's'}` :
+    'on pace';
+  const paceClass = pace.state === 1 ? 'ahead' : pace.state === -1 ? 'behind' : 'on';
+
+  return (
+    <div className="dt-plan-detail">
+      <div className="plan-detail-head">
+        <button className="back-btn" onClick={onBack}>← all plans</button>
+        <button className="btn-quiet danger" onClick={onDelete}>Delete plan</button>
+      </div>
+
+      <div className="panel">
+        <div className="plan-detail-title-row">
+          <h2 className="plan-name large">{plan.name}</h2>
+          <span className={`plan-pace ${paceClass}`}>{paceLabel}</span>
+        </div>
+        <div className="plan-detail-meta">
+          {plan.start_date} → {plan.end_date} · {plan.books.length} book{plan.books.length === 1 ? '' : 's'} ·
+          {' '}{plan.per_session} {plan.unit}/session ·
+          {' '}{plan.days_of_week.map((d) => DAY_NAMES_SHORT[d]).join(' ')}
+        </div>
+
+        <div className="plan-progress-track lg">
+          <div className="plan-progress-fill" style={{ width: `${(pace.pctComplete * 100).toFixed(1)}%` }} />
+        </div>
+        <div className="plan-detail-totals">
+          <span><strong>{pace.completed}</strong> of {pace.total} chapters complete</span>
+          <span className="muted">expected by today: {pace.expected}</span>
+          <span className="muted">{Math.round(pace.pctComplete * 100)}% done</span>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3 className="stats-h3">Chapters</h3>
+        <p className="dt-form-hint" style={{ marginTop: 4 }}>
+          Click a chapter to mark it complete. Click again to undo.
+        </p>
+        <div className="plan-books-list">
+          {bookGroups.map((g) => {
+            const total = g.chapters.length;
+            const done = g.chapters.filter((c) => completionSet.has(`${g.book}|${c}`)).length;
+            return (
+              <div key={g.book} className="plan-book-row">
+                <div className="plan-book-name">
+                  <span className="bn">{g.book}</span>
+                  <span className="bc">{done}/{total}</span>
+                </div>
+                <div className="plan-chapter-grid">
+                  {g.chapters.map((c) => {
+                    const key = `${g.book}|${c}`;
+                    const done = completionSet.has(key);
+                    const isBusy = busy === key;
+                    return (
+                      <button
+                        key={c}
+                        className={`plan-chap${done ? ' done' : ''}${isBusy ? ' busy' : ''}`}
+                        onClick={() => toggle(g.book, c)}
+                        disabled={isBusy}
+                      >
+                        {c}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── + Plan modal ──────────────────────────────────────────────────────
+
+function PlanCreateModal({
+  today,
+  onClose,
+  onSaved,
+}: {
+  today: Date;
+  onClose: () => void;
+  onSaved: (newId: string) => void;
+}) {
+  // Default to the Bible-in-a-Year preset's shape.
+  const initial = PLAN_PRESETS[0].build(today);
+  const [name, setName] = useState(initial.name);
+  const [books, setBooks] = useState<Set<string>>(new Set(initial.books));
+  const [startDate, setStartDate] = useState(initial.start_date);
+  const [endDate, setEndDate] = useState(initial.end_date);
+  const [daysOfWeek, setDaysOfWeek] = useState<Set<number>>(new Set(initial.days_of_week));
+  const [perSession, setPerSession] = useState(initial.per_session);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function applyPreset(p: PlanPreset) {
+    const built = p.build(today);
+    setName(built.name);
+    setBooks(new Set(built.books));
+    setStartDate(built.start_date);
+    setEndDate(built.end_date);
+    setDaysOfWeek(new Set(built.days_of_week));
+    setPerSession(built.per_session);
+  }
+
+  function toggleBook(book: string) {
+    setBooks((prev) => {
+      const next = new Set(prev);
+      if (next.has(book)) next.delete(book);
+      else next.add(book);
+      return next;
+    });
+  }
+
+  function toggleDow(dow: number) {
+    setDaysOfWeek((prev) => {
+      const next = new Set(prev);
+      if (next.has(dow)) next.delete(dow);
+      else next.add(dow);
+      return next;
+    });
+  }
+
+  // Total chapters preview.
+  const totalChapters = useMemo(() => {
+    let t = 0;
+    for (const b of books) t += chapterCount(b);
+    return t;
+  }, [books]);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (saving) return;
+    setErr(null);
+    if (!name.trim()) { setErr('Name required.'); return; }
+    if (books.size === 0) { setErr('Pick at least one book.'); return; }
+    if (daysOfWeek.size === 0) { setErr('Pick at least one day of the week.'); return; }
+    if (endDate < startDate) { setErr('End date must be on or after start date.'); return; }
+    setSaving(true);
+    try {
+      const created = await createReadingPlan({
+        name: name.trim(),
+        books: BIBLE_BOOKS.filter((b) => books.has(b)), // canonical order
+        start_date: startDate,
+        end_date: endDate,
+        days_of_week: Array.from(daysOfWeek).sort((a, b) => a - b),
+        unit: 'chapters',
+        per_session: perSession,
+      });
+      onSaved(created.id);
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || 'Could not save.');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="+ Reading plan" onClose={onClose}>
+      <form className="dt-form" onSubmit={onSubmit}>
+        <div className="preset-strip">
+          {PLAN_PRESETS.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              className="preset-chip"
+              onClick={() => applyPreset(p)}
+              title={p.description}
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+
+        <label>
+          Name
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} required />
+        </label>
+
+        <div className="row">
+          <label>
+            Start date
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required />
+          </label>
+          <label>
+            End date
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required />
+          </label>
+        </div>
+
+        <label>
+          Days of the week
+          <div className="dow-row">
+            {DAY_NAMES_SHORT.map((d, i) => (
+              <button
+                key={d}
+                type="button"
+                className={`dow-btn${daysOfWeek.has(i) ? ' active' : ''}`}
+                onClick={() => toggleDow(i)}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        </label>
+
+        <label>
+          Chapters per session
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={perSession}
+            onChange={(e) => setPerSession(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+            required
+          />
+        </label>
+
+        <label>
+          Books
+          <div className="books-picker-toolbar">
+            <button type="button" onClick={() => setBooks(new Set(OLD_TESTAMENT))}>OT only</button>
+            <button type="button" onClick={() => setBooks(new Set(NEW_TESTAMENT))}>NT only</button>
+            <button type="button" onClick={() => setBooks(new Set(BIBLE_BOOKS))}>All 66</button>
+            <button type="button" onClick={() => setBooks(new Set())}>Clear</button>
+            <span className="picker-meta">
+              {books.size} book{books.size === 1 ? '' : 's'} · {totalChapters} chapter{totalChapters === 1 ? '' : 's'}
+            </span>
+          </div>
+          <div className="books-picker">
+            <div className="picker-col">
+              <div className="picker-head">Old Testament</div>
+              {OLD_TESTAMENT.map((b) => (
+                <label key={b} className="picker-item">
+                  <input type="checkbox" checked={books.has(b)} onChange={() => toggleBook(b)} />
+                  {b}
+                </label>
+              ))}
+            </div>
+            <div className="picker-col">
+              <div className="picker-head">New Testament</div>
+              {NEW_TESTAMENT.map((b) => (
+                <label key={b} className="picker-item">
+                  <input type="checkbox" checked={books.has(b)} onChange={() => toggleBook(b)} />
+                  {b}
+                </label>
+              ))}
+            </div>
+          </div>
+        </label>
+
+        {err && <div className="dt-form-err">{err}</div>}
+        <ModalActions onCancel={onClose} saving={saving} />
+      </form>
+    </Modal>
   );
 }
 

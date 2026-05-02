@@ -622,6 +622,142 @@ export function yearsInBooksRetro<S extends ScriptureReadLike, B extends BookRea
     .sort((a, b) => b.year - a.year);
 }
 
+// ── Reading plans ─────────────────────────────────────────────────────
+//
+// Pure helpers for the Plans tab: total chapters in a plan, expected
+// position by today, ahead/behind pace, ordered chapter list.
+
+/** Minimal shape of a reading plan used by aggregation. */
+export type ReadingPlanLike = {
+  books: string[];
+  start_date: string;
+  end_date: string;
+  days_of_week: number[];   // 0..6, 0 = Sunday
+  unit: 'chapters' | 'verses';
+  per_session: number;
+};
+
+/** Minimal shape of a plan completion used by aggregation. */
+export type PlanCompletionLike = {
+  book: string;
+  chapter: number;
+};
+
+/**
+ * Generate the ordered list of (book, chapter) pairs for a plan, in the
+ * order they should be read. Books traverse in the order given by
+ * `plan.books`; within each book, chapters go 1 → N.
+ *
+ * `chapterCountFor` is injected so the helper stays decoupled from the
+ * verse-count manifest.
+ */
+export function planChapterSequence(
+  plan: Pick<ReadingPlanLike, 'books'>,
+  chapterCountFor: (book: string) => number,
+): Array<{ book: string; chapter: number }> {
+  const out: Array<{ book: string; chapter: number }> = [];
+  for (const book of plan.books) {
+    const n = chapterCountFor(book);
+    for (let c = 1; c <= n; c++) out.push({ book, chapter: c });
+  }
+  return out;
+}
+
+/** Total chapters in a plan (sum of chapter counts across selected books). */
+export function planTotalChapters(
+  plan: Pick<ReadingPlanLike, 'books'>,
+  chapterCountFor: (book: string) => number,
+): number {
+  let total = 0;
+  for (const book of plan.books) total += Math.max(0, chapterCountFor(book));
+  return total;
+}
+
+/**
+ * How many sessions fall between [start_date .. dateKey] inclusive,
+ * counting only the weekdays in `days_of_week`. Calendar arithmetic only;
+ * DST-immune.
+ */
+export function sessionsThroughDate(
+  plan: Pick<ReadingPlanLike, 'start_date' | 'end_date' | 'days_of_week'>,
+  dateKey: string,
+): number {
+  const startKey = plan.start_date;
+  const endKey = plan.end_date;
+  const stopKey = dateKey < startKey ? null
+                : dateKey > endKey   ? endKey
+                : dateKey;
+  if (stopKey === null) return 0;
+  const dowSet = new Set(plan.days_of_week);
+  if (dowSet.size === 0) return 0;
+
+  // Walk start → stop.
+  const start = parseLocalDate(startKey);
+  const stop = parseLocalDate(stopKey);
+  let count = 0;
+  for (
+    const d = new Date(start);
+    d <= stop;
+    d.setDate(d.getDate() + 1)
+  ) {
+    if (dowSet.has(d.getDay())) count++;
+  }
+  return count;
+}
+
+/** Total session days across the whole plan duration. */
+export function planTotalSessions(
+  plan: Pick<ReadingPlanLike, 'start_date' | 'end_date' | 'days_of_week'>,
+): number {
+  return sessionsThroughDate(plan, plan.end_date);
+}
+
+/**
+ * Pace status as of a given date. "Expected" = sessions × per_session.
+ * "ahead" if completed exceeds expected; "behind" if under.
+ *
+ * `dayDelta` reads in the unit of "days you'd need to do/skip a normal
+ * session at the current pace to catch up": positive = ahead by that many
+ * sessions, negative = behind by that many.
+ */
+export type PaceStatus = {
+  expected: number;
+  completed: number;
+  total: number;
+  /** -1 / 0 / 1 — convenience for tinting. */
+  state: -1 | 0 | 1;
+  /** session-day delta vs. expected. */
+  sessionDelta: number;
+  pctComplete: number; // 0..1
+};
+
+export function planPaceStatus(opts: {
+  plan: Pick<ReadingPlanLike, 'books' | 'start_date' | 'end_date' | 'days_of_week' | 'per_session'>;
+  completionsCount: number;
+  today: Date;
+  chapterCountFor: (book: string) => number;
+}): PaceStatus {
+  const { plan, completionsCount, today, chapterCountFor } = opts;
+  const todayKey = formatLocalDate(today);
+  const sessions = sessionsThroughDate(plan, todayKey);
+  const expected = sessions * Math.max(1, plan.per_session);
+  const total = planTotalChapters(plan, chapterCountFor);
+  const completed = Math.min(completionsCount, total);
+  const diff = completed - expected;
+  let state: -1 | 0 | 1 = 0;
+  if (diff > 0) state = 1;
+  else if (diff < 0) state = -1;
+  const sessionDelta = plan.per_session > 0 ? diff / plan.per_session : 0;
+  const pctComplete = total > 0 ? completed / total : 0;
+  return { expected, completed, total, state, sessionDelta, pctComplete };
+}
+
+/** Parse 'YYYY-MM-DD' as a local-time Date (midnight). No UTC drift. */
+function parseLocalDate(key: string): Date {
+  const [y, m, d] = key.split('-').map((s) => parseInt(s, 10));
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
 /** Format a Date as 'YYYY-MM-DD' in local time (no UTC drift). */
 export function formatLocalDate(d: Date): string {
   const y = d.getFullYear();

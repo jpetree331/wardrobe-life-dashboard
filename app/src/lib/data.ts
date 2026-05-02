@@ -301,7 +301,7 @@ export async function createDailyPageRead(input: {
   return data as DailyPageRead;
 }
 
-// ── Reading plans (Build 3 will surface these in UI; CRUD ready now) ──
+// ── Reading plans ─────────────────────────────────────────────────────
 
 export async function listReadingPlans(): Promise<ReadingPlan[]> {
   const { data, error } = await supabase
@@ -312,6 +312,69 @@ export async function listReadingPlans(): Promise<ReadingPlan[]> {
   return (data || []) as ReadingPlan[];
 }
 
+export async function createReadingPlan(input: {
+  name: string;
+  books: string[];
+  start_date: string;
+  end_date: string;
+  days_of_week: number[];
+  unit?: 'chapters' | 'verses';
+  per_session?: number;
+}): Promise<ReadingPlan> {
+  const userId = await currentUserId();
+  const { data, error } = await supabase
+    .from('data_reading_plans')
+    .insert({
+      user_id: userId,
+      name: input.name,
+      books: input.books,
+      start_date: input.start_date,
+      end_date: input.end_date,
+      days_of_week: input.days_of_week,
+      unit: input.unit ?? 'chapters',
+      per_session: input.per_session ?? 1,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as ReadingPlan;
+}
+
+export async function updateReadingPlan(
+  id: string,
+  patch: Partial<{
+    name: string;
+    books: string[];
+    start_date: string;
+    end_date: string;
+    days_of_week: number[];
+    unit: 'chapters' | 'verses';
+    per_session: number;
+  }>,
+): Promise<ReadingPlan> {
+  const { data, error } = await supabase
+    .from('data_reading_plans')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as ReadingPlan;
+}
+
+export async function deleteReadingPlan(id: string): Promise<void> {
+  // Cascade in the schema deletes completions automatically.
+  const { error } = await supabase.from('data_reading_plans').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ── Plan completions ──────────────────────────────────────────────────
+//
+// Per the schema, completions are SEPARATE from data_scripture_reads —
+// completing a plan session does NOT log a Scripture read and vice versa.
+// They serve different purposes: completions track plan progress; reads
+// track lived study.
+
 export async function listPlanCompletions(planId: string): Promise<PlanCompletion[]> {
   const { data, error } = await supabase
     .from('data_plan_completions')
@@ -319,6 +382,45 @@ export async function listPlanCompletions(planId: string): Promise<PlanCompletio
     .eq('plan_id', planId);
   if (error) throw error;
   return (data || []) as PlanCompletion[];
+}
+
+export async function listAllPlanCompletions(): Promise<PlanCompletion[]> {
+  const { data, error } = await supabase
+    .from('data_plan_completions')
+    .select('*');
+  if (error) throw error;
+  return (data || []) as PlanCompletion[];
+}
+
+/** Toggle: if (plan, book, chapter) already exists, delete it; else insert. */
+export async function togglePlanCompletion(
+  planId: string,
+  book: string,
+  chapter: number,
+): Promise<{ created: boolean }> {
+  const userId = await currentUserId();
+  // Find existing.
+  const { data: existing, error: selErr } = await supabase
+    .from('data_plan_completions')
+    .select('id')
+    .eq('plan_id', planId)
+    .eq('book', book)
+    .eq('chapter', chapter)
+    .maybeSingle();
+  if (selErr) throw selErr;
+  if (existing) {
+    const { error } = await supabase
+      .from('data_plan_completions')
+      .delete()
+      .eq('id', existing.id);
+    if (error) throw error;
+    return { created: false };
+  }
+  const { error } = await supabase
+    .from('data_plan_completions')
+    .insert({ user_id: userId, plan_id: planId, book, chapter });
+  if (error) throw error;
+  return { created: true };
 }
 
 // ── Cross-room calendar markers ──────────────────────────────────────

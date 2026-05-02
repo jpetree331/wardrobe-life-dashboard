@@ -10,6 +10,11 @@ import {
   formatLocalDate,
   monthlyTotalsForYear,
   otNtVerseSplit,
+  planChapterSequence,
+  planPaceStatus,
+  planTotalChapters,
+  planTotalSessions,
+  sessionsThroughDate,
   sumByDate,
   topBooksByVerses,
   yearsInBooksRetro,
@@ -455,6 +460,140 @@ describe('yearsInBooksRetro', () => {
     expect(out.find((r) => r.year === 2026)!.books).toBe(1);
     expect(out.find((r) => r.year === 2024)!.days).toBe(2); // Jun 12 + Jun 13
     expect(out.find((r) => r.year === 2024)!.pages).toBe(10);
+  });
+});
+
+describe('reading plan helpers', () => {
+  // Tiny chapter-count fake. Only knows about the books used in tests.
+  const COUNTS: Record<string, number> = {
+    Matthew: 28, Mark: 16, Luke: 24, John: 21,
+    'Genesis': 50,
+  };
+  const chapterCountFor = (book: string) => COUNTS[book] || 0;
+
+  const everyDay = [0, 1, 2, 3, 4, 5, 6];
+
+  describe('planChapterSequence', () => {
+    it('produces (book, chapter) pairs in book then chapter order', () => {
+      const seq = planChapterSequence({ books: ['Mark', 'Matthew'] }, chapterCountFor);
+      expect(seq.length).toBe(16 + 28);
+      expect(seq[0]).toEqual({ book: 'Mark', chapter: 1 });
+      expect(seq[15]).toEqual({ book: 'Mark', chapter: 16 });
+      expect(seq[16]).toEqual({ book: 'Matthew', chapter: 1 });
+      expect(seq[seq.length - 1]).toEqual({ book: 'Matthew', chapter: 28 });
+    });
+  });
+
+  describe('planTotalChapters', () => {
+    it('sums chapter counts across selected books', () => {
+      expect(planTotalChapters({ books: ['Matthew', 'Mark', 'Luke', 'John'] }, chapterCountFor))
+        .toBe(28 + 16 + 24 + 21); // 89
+    });
+
+    it('handles unknown books as zero (defensive)', () => {
+      expect(planTotalChapters({ books: ['Sirach'] }, chapterCountFor)).toBe(0);
+    });
+  });
+
+  describe('sessionsThroughDate', () => {
+    it('counts only days-of-week inside [start..date]', () => {
+      // 2026-01-01 is Thursday, 2026-01-07 is Wednesday
+      const plan = { start_date: '2026-01-01', end_date: '2026-01-31', days_of_week: [1, 3, 5] }; // M/W/F
+      // Jan 1 (Thu), Jan 2 (Fri), Jan 5 (Mon), Jan 7 (Wed) → 3 sessions through Jan 7
+      expect(sessionsThroughDate(plan, '2026-01-07')).toBe(3); // Jan 2 (F), Jan 5 (M), Jan 7 (W)
+    });
+
+    it('returns 0 if date is before start', () => {
+      const plan = { start_date: '2026-02-01', end_date: '2026-02-28', days_of_week: everyDay };
+      expect(sessionsThroughDate(plan, '2026-01-15')).toBe(0);
+    });
+
+    it('caps at end_date if date is past it', () => {
+      const plan = { start_date: '2026-01-01', end_date: '2026-01-07', days_of_week: everyDay };
+      expect(sessionsThroughDate(plan, '2026-12-31')).toBe(7);
+    });
+
+    it('returns 0 if days_of_week is empty', () => {
+      const plan = { start_date: '2026-01-01', end_date: '2026-12-31', days_of_week: [] };
+      expect(sessionsThroughDate(plan, '2026-06-01')).toBe(0);
+    });
+  });
+
+  describe('planTotalSessions', () => {
+    it('counts sessions across full plan duration', () => {
+      // Jan 1 - Jan 7 2026, every day → 7 sessions.
+      const plan = { start_date: '2026-01-01', end_date: '2026-01-07', days_of_week: everyDay };
+      expect(planTotalSessions(plan)).toBe(7);
+    });
+  });
+
+  describe('planPaceStatus', () => {
+    const plan = {
+      books: ['Mark', 'Matthew'],          // 16 + 28 = 44 chapters total
+      start_date: '2026-01-01',
+      end_date: '2026-02-13',              // 44 days, daily, per_session=1 → exactly 44 sessions
+      days_of_week: everyDay,
+      per_session: 1,
+    };
+
+    it('on-pace when completed equals expected', () => {
+      // 5 days in (Jan 1-5), expected 5; user completed 5.
+      const out = planPaceStatus({
+        plan, completionsCount: 5,
+        today: new Date(2026, 0, 5),
+        chapterCountFor,
+      });
+      expect(out.expected).toBe(5);
+      expect(out.completed).toBe(5);
+      expect(out.total).toBe(44);
+      expect(out.state).toBe(0);
+      expect(out.sessionDelta).toBe(0);
+    });
+
+    it('ahead when completed exceeds expected', () => {
+      const out = planPaceStatus({
+        plan, completionsCount: 10,
+        today: new Date(2026, 0, 5),
+        chapterCountFor,
+      });
+      expect(out.state).toBe(1);
+      expect(out.sessionDelta).toBe(5);
+    });
+
+    it('behind when completed is under expected', () => {
+      const out = planPaceStatus({
+        plan, completionsCount: 2,
+        today: new Date(2026, 0, 10),
+        chapterCountFor,
+      });
+      expect(out.expected).toBe(10);
+      expect(out.completed).toBe(2);
+      expect(out.state).toBe(-1);
+      expect(out.sessionDelta).toBe(-8);
+    });
+
+    it('caps completed at total (no double-counting)', () => {
+      const out = planPaceStatus({
+        plan, completionsCount: 99,
+        today: new Date(2026, 1, 13),
+        chapterCountFor,
+      });
+      expect(out.completed).toBe(44);
+      expect(out.pctComplete).toBe(1);
+    });
+
+    it('handles per_session > 1 correctly', () => {
+      const fast = { ...plan, per_session: 4, end_date: '2026-01-11' }; // 11 days * 4 = 44 chapters
+      const out = planPaceStatus({
+        plan: fast, completionsCount: 16,
+        today: new Date(2026, 0, 5),
+        chapterCountFor,
+      });
+      // 5 sessions × 4 per session = 20 expected, completed 16 → behind by 1 session
+      expect(out.expected).toBe(20);
+      expect(out.completed).toBe(16);
+      expect(out.sessionDelta).toBe(-1);
+    });
   });
 });
 
