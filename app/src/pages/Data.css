@@ -58,8 +58,23 @@
 .dt-tabs .tab:hover { color: var(--ink-soft); }
 .dt-tabs .tab.active { color: var(--ink); border-bottom-color: var(--ink); }
 .dt-tabs .tab.disabled {
-  opacity: 0.4;
+  opacity: 0.55;
   cursor: not-allowed;
+}
+.dt-tabs .tab.disabled:hover { color: var(--ink-faint); }
+.dt-tabs .tab .soon {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  color: var(--ink-faint);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  vertical-align: middle;
 }
 
 /* Main scroll area */
@@ -235,6 +250,19 @@
   box-shadow: 0 4px 12px -4px rgba(0,0,0,0.3);
 }
 
+.dt-empty-state {
+  margin-top: 18px;
+  padding: 14px 18px;
+  background: var(--bg-2);
+  border: 1px dashed var(--line-strong);
+  font-family: 'EB Garamond', serif;
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+.dt-empty-state em { color: var(--ink); }
+.dt-empty-state strong { color: var(--ink); font-style: italic; font-weight: 500; }
+
 /* ── Calendar ─────────────────────────────────────────────────────── */
 .dt-calendar-wrap { max-width: 980px; }
 .cal-nav {
@@ -372,6 +400,12 @@
 .dt-form-err {
   color: var(--red);
   font-family: 'EB Garamond', serif; font-size: 13px; font-style: italic;
+}
+.dt-form-hint {
+  margin: -2px 0 4px;
+  font-family: 'EB Garamond', serif; font-size: 12px; font-style: italic;
+  color: var(--ink-faint);
+  letter-spacing: 0.02em;
 }
 .dt-modal-actions {
   display: flex; gap: 10px; justify-content: flex-end;

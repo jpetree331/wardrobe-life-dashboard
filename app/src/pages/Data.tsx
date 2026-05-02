@@ -2,14 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { Link } from 'react-router-dom';
 import {
   createBookRead,
+  createDailyPageRead,
   createScriptureRead,
   listAllScriptureReads,
   listBookReads,
+  listDailyPageReads,
   listEntryDatesByRoom,
   versesInRead,
   chapterFractionInRead,
-  type ScriptureRead,
   type BookRead,
+  type DailyPageRead,
+  type ScriptureRead,
 } from '../lib/data';
 import {
   bucketLevel,
@@ -59,12 +62,13 @@ export default function Data() {
   const [tab, setTab] = useState<Tab>('heatmap');
   const [scriptureReads, setScriptureReads] = useState<ScriptureRead[]>([]);
   const [bookReads, setBookReads] = useState<BookRead[]>([]);
+  const [dailyPages, setDailyPages] = useState<DailyPageRead[]>([]);
   const [sanctuaryDates, setSanctuaryDates] = useState<Set<string>>(new Set());
   const [timelineDates, setTimelineDates] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [statusMsg, setStatusMsg] = useState('Loading…');
 
-  const [modal, setModal] = useState<'scripture' | 'book' | null>(null);
+  const [modal, setModal] = useState<'scripture' | 'book' | 'daily-pages' | null>(null);
 
   // Apply selected heatmap theme as CSS custom properties on the page root.
   const [theme, setTheme] = useState<Theme>('sage');
@@ -82,18 +86,23 @@ export default function Data() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, b, sd, td] = await Promise.all([
+      const [s, b, dp, sd, td] = await Promise.all([
         listAllScriptureReads(),
         listBookReads(),
+        listDailyPageReads(),
         listEntryDatesByRoom('sanctuary'),
         listEntryDatesByRoom('timeline'),
       ]);
       setScriptureReads(s);
       setBookReads(b);
+      setDailyPages(dp);
       setSanctuaryDates(sd);
       setTimelineDates(td);
       setLoaded(true);
-      setStatusMsg(`${s.length} Scripture read${s.length === 1 ? '' : 's'} · ${b.length} book${b.length === 1 ? '' : 's'} finished`);
+      const dpPagesTotal = dp.reduce((sum, r) => sum + r.pages, 0);
+      setStatusMsg(
+        `${s.length} Scripture read${s.length === 1 ? '' : 's'} · ${b.length} book${b.length === 1 ? '' : 's'} finished${dpPagesTotal ? ` · ${dpPagesTotal} pages logged` : ''}`,
+      );
     } catch (err) {
       console.error(err);
       setStatusMsg('Could not load data. Have you run migration 0005?');
@@ -113,15 +122,16 @@ export default function Data() {
         <div className="right">
           <button className="btn-quiet" onClick={() => setModal('scripture')}>+ Scripture</button>
           <button className="btn-quiet" onClick={() => setModal('book')}>+ Book</button>
+          <button className="btn-quiet" onClick={() => setModal('daily-pages')} title="Log pages read on a day you didn't finish a book">+ Daily pages</button>
         </div>
       </header>
 
       <nav className="dt-tabs" aria-label="Views">
         <TabButton current={tab} value="heatmap"  setTab={setTab}>Heatmap</TabButton>
         <TabButton current={tab} value="calendar" setTab={setTab}>Calendar</TabButton>
-        <TabButton current={tab} value="matrix"   setTab={setTab} disabled>Book × Chapter</TabButton>
-        <TabButton current={tab} value="stats"    setTab={setTab} disabled>Stats</TabButton>
-        <TabButton current={tab} value="plans"    setTab={setTab} disabled>Plans</TabButton>
+        <TabButton current={tab} value="matrix"   setTab={setTab} disabled comingIn="Build 2">Book × Chapter</TabButton>
+        <TabButton current={tab} value="stats"    setTab={setTab} disabled comingIn="Build 2">Stats</TabButton>
+        <TabButton current={tab} value="plans"    setTab={setTab} disabled comingIn="Build 3">Plans</TabButton>
       </nav>
 
       <main className="dt-main">
@@ -131,6 +141,7 @@ export default function Data() {
           <HeatmapView
             scriptureReads={scriptureReads}
             bookReads={bookReads}
+            dailyPages={dailyPages}
             theme={theme}
             setTheme={setTheme}
           />
@@ -138,6 +149,7 @@ export default function Data() {
           <CalendarView
             scriptureReads={scriptureReads}
             bookReads={bookReads}
+            dailyPages={dailyPages}
             sanctuaryDates={sanctuaryDates}
             timelineDates={timelineDates}
           />
@@ -169,14 +181,28 @@ export default function Data() {
           }}
         />
       )}
+      {modal === 'daily-pages' && (
+        <AddDailyPagesModal
+          onClose={() => setModal(null)}
+          onSaved={async () => {
+            setModal(null);
+            await refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
 
 function TabButton({
-  current, value, setTab, disabled, children,
+  current, value, setTab, disabled, comingIn, children,
 }: {
-  current: Tab; value: Tab; setTab: (t: Tab) => void; disabled?: boolean; children: React.ReactNode;
+  current: Tab;
+  value: Tab;
+  setTab: (t: Tab) => void;
+  disabled?: boolean;
+  comingIn?: string;
+  children: React.ReactNode;
 }) {
   return (
     <button
@@ -184,8 +210,10 @@ function TabButton({
       onClick={() => !disabled && setTab(value)}
       aria-pressed={current === value}
       disabled={disabled}
+      title={disabled && comingIn ? `Coming in ${comingIn}` : undefined}
     >
       {children}
+      {disabled && comingIn && <span className="soon">soon</span>}
     </button>
   );
 }
@@ -193,10 +221,11 @@ function TabButton({
 // ── Heatmap view ─────────────────────────────────────────────────────
 
 function HeatmapView({
-  scriptureReads, bookReads, theme, setTheme,
+  scriptureReads, bookReads, dailyPages, theme, setTheme,
 }: {
   scriptureReads: ScriptureRead[];
   bookReads: BookRead[];
+  dailyPages: DailyPageRead[];
   theme: Theme;
   setTheme: (t: Theme) => void;
 }) {
@@ -218,16 +247,26 @@ function HeatmapView({
       // chapters mode — use fractional chapters so partial reads contribute.
       return sumByDate(inYear, (r) => r.read_date, (r) => chapterFractionInRead(r));
     }
-    // Books mode — use book-completion days for now (daily_page_reads coming
-    // through the same reducer once Build 1's modal lands them).
-    const inYear = bookReads.filter((b) => b.finished_on.startsWith(String(year)));
+    // Books mode — sum pages from BOTH the completion records AND the
+    // daily-page logs, so days when she read but didn't finish a book
+    // still light up. Same date appearing on both sides correctly adds.
+    const completionsThisYear = bookReads.filter((b) => b.finished_on.startsWith(String(year)));
+    const dailyThisYear = dailyPages.filter((d) => d.read_date.startsWith(String(year)));
     if (unit === 'verses') {
-      // verses == pages in books mode
-      return sumByDate(inYear, (r) => r.finished_on, (r) => r.pages);
+      // "Verses" pillbar means "Pages" when source=books
+      const fromCompletions = sumByDate(completionsThisYear, (r) => r.finished_on, (r) => r.pages);
+      const fromDaily = sumByDate(dailyThisYear, (r) => r.read_date, (r) => r.pages);
+      const merged = new Map<string, number>(fromCompletions);
+      for (const [k, v] of fromDaily) merged.set(k, (merged.get(k) || 0) + v);
+      return merged;
     }
-    // sections mode = pages / 50
-    return sumByDate(inYear, (r) => r.finished_on, (r) => (r.pages > 0 ? r.pages / 50 : 0));
-  }, [scriptureReads, bookReads, source, unit, year]);
+    // "Chapters" pillbar means "Sections" when source=books — sections = pages / 50.
+    const fromCompletions = sumByDate(completionsThisYear, (r) => r.finished_on, (r) => (r.pages > 0 ? r.pages / 50 : 0));
+    const fromDaily = sumByDate(dailyThisYear, (r) => r.read_date, (r) => (r.pages > 0 ? r.pages / 50 : 0));
+    const merged = new Map<string, number>(fromCompletions);
+    for (const [k, v] of fromDaily) merged.set(k, (merged.get(k) || 0) + v);
+    return merged;
+  }, [scriptureReads, bookReads, dailyPages, source, unit, year]);
 
   const grid = useMemo(
     () => buildHeatGrid(year, byDate, scale, todayDate),
@@ -304,6 +343,14 @@ function HeatmapView({
           onLeave={() => setTip(null)}
         />
 
+        {grid.totalDays === 0 && (
+          <div className="dt-empty-state">
+            <em>No reading recorded in {year} yet.</em>
+            <span> Click <strong>+ Scripture</strong>, <strong>+ Book</strong>, or <strong>+ Daily pages</strong> to begin —
+            or tag scripture refs on a Sanctuary entry and they'll appear here automatically.</span>
+          </div>
+        )}
+
         <div className="dt-legend">
           <span className="muted">Less</span>
           {[1, 2, 3, 4, 5].map((l) => (
@@ -358,7 +405,7 @@ function HeatGrid({
 
   return (
     <div className="dt-heatgrid">
-      <div className="month-labels" style={{ gridTemplateColumns: `30px repeat(${weeks}, 1fr)` }}>
+      <div className="month-labels" style={{ gridTemplateColumns: `30px repeat(${weeks}, 12px)` }}>
         <span />
         {monthLabels.map((m, i) => (
           <span key={i} className="month-label" style={{ gridColumnStart: m.col + 2 }}>
@@ -373,8 +420,8 @@ function HeatGrid({
         <div
           className="grid-cells"
           style={{
-            gridTemplateColumns: `repeat(${weeks}, 1fr)`,
-            gridTemplateRows: 'repeat(7, 1fr)',
+            gridTemplateColumns: `repeat(${weeks}, 12px)`,
+            gridTemplateRows: 'repeat(7, 12px)',
           }}
           onMouseLeave={onLeave}
         >
@@ -426,11 +473,13 @@ function Pillbar<T extends string>({
 function CalendarView({
   scriptureReads,
   bookReads,
+  dailyPages,
   sanctuaryDates,
   timelineDates,
 }: {
   scriptureReads: ScriptureRead[];
   bookReads: BookRead[];
+  dailyPages: DailyPageRead[];
   sanctuaryDates: Set<string>;
   timelineDates: Set<string>;
 }) {
@@ -452,8 +501,16 @@ function CalendarView({
     if (source === 'scripture') {
       return sumByDate(scriptureReads, (r) => r.read_date, (r) => versesInRead(r));
     }
-    return sumByDate(bookReads, (r) => r.finished_on, (r) => r.pages);
-  }, [scriptureReads, bookReads, source]);
+    // Books mode — merge completions + daily pages.
+    const merged = new Map<string, number>();
+    for (const b of bookReads) {
+      merged.set(b.finished_on, (merged.get(b.finished_on) || 0) + b.pages);
+    }
+    for (const d of dailyPages) {
+      merged.set(d.read_date, (merged.get(d.read_date) || 0) + d.pages);
+    }
+    return merged;
+  }, [scriptureReads, bookReads, dailyPages, source]);
 
   const refsByDate = useMemo(() => {
     const out = new Map<string, string[]>();
@@ -468,13 +525,18 @@ function CalendarView({
       }
     } else {
       for (const b of bookReads) {
-        const text = `${b.pages} pages · ${b.author || b.title}`;
+        const text = `${b.pages}p · ${b.title}${b.author ? ` (${b.author})` : ''}`;
         if (!out.has(b.finished_on)) out.set(b.finished_on, []);
         out.get(b.finished_on)!.push(text);
       }
+      for (const d of dailyPages) {
+        const text = `${d.pages}p${d.title ? ` · ${d.title}` : ''}`;
+        if (!out.has(d.read_date)) out.set(d.read_date, []);
+        out.get(d.read_date)!.push(text);
+      }
     }
     return out;
-  }, [scriptureReads, bookReads, source]);
+  }, [scriptureReads, bookReads, dailyPages, source]);
 
   const cells = useMemo(
     () => buildCalendarGrid(year, monthIndex, byDate, 'verses-or-pages', today),
@@ -757,6 +819,74 @@ function AddBookModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
         <label>
           Review (optional)
           <textarea value={review} onChange={(e) => setReview(e.target.value)} rows={4} />
+        </label>
+        {err && <div className="dt-form-err">{err}</div>}
+        <ModalActions onCancel={onClose} saving={saving} />
+      </form>
+    </Modal>
+  );
+}
+
+// ── + Daily pages modal ──────────────────────────────────────────────
+
+function AddDailyPagesModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [date, setDate] = useState(localToday());
+  const [pages, setPages] = useState(1);
+  const [title, setTitle] = useState('');
+  const [author, setAuthor] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (saving) return;
+    if (pages <= 0) { setErr('Pages must be at least 1.'); return; }
+    setSaving(true); setErr(null);
+    try {
+      await createDailyPageRead({
+        read_date: date,
+        pages,
+        title: title.trim() || null,
+        author: author.trim() || null,
+      });
+      onSaved();
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || 'Could not save.');
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title="+ Daily pages" onClose={onClose}>
+      <form className="dt-form" onSubmit={onSubmit}>
+        <div className="row">
+          <label>
+            Date
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+          </label>
+          <label>
+            Pages
+            <input
+              type="number"
+              min={1}
+              value={pages}
+              onChange={(e) => setPages(Math.max(1, Number(e.target.value) || 1))}
+              required
+            />
+          </label>
+        </div>
+        <p className="dt-form-hint">
+          For days you read but didn't finish a book. These light up the heatmap and calendar
+          alongside completions.
+        </p>
+        <label>
+          Title (optional)
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} />
+        </label>
+        <label>
+          Author (optional)
+          <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)} />
         </label>
         {err && <div className="dt-form-err">{err}</div>}
         <ModalActions onCancel={onClose} saving={saving} />
