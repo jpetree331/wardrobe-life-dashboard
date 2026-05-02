@@ -66,12 +66,24 @@ export function sumByDate<T>(items: T[], pickDate: (it: T) => string, pickAmount
 }
 
 /**
- * Build the array of cells for a year-grid heatmap. Returns one entry per
- * day of the year, plus enough leading empty cells so the first row aligns
- * to Sunday. Future days have isFuture=true so the renderer can render them
- * as transparent.
+ * Build the array of cells for a year-grid heatmap. Renders the full
+ * Sunday-to-Saturday rectangle covering [Jan 1 .. Dec 31] of the year,
+ * which means leading days from the prior year (if Jan 1 isn't a Sunday)
+ * and trailing days from the next year (if Dec 31 isn't a Saturday) are
+ * also included as cells. Out-of-year cells get `inYear=false`; the
+ * renderer can choose to show their data the same way or dim them.
  *
  * `today` is parameterized so the function is deterministic for tests.
+ *
+ * Note on weekIndex: this function used to compute weekIndex with
+ * millisecond arithmetic (`(d - firstSunday) / 7days`). That subtly broke
+ * around DST transitions — after spring-forward an hour goes missing, so
+ * dates that should land at exactly N weeks instead measure N-1.999...
+ * weeks and `Math.floor` produces N-1. Two days ended up sharing a grid
+ * cell ("missing teeth" near Nov in fall-back years, around Apr 26 in
+ * spring-forward years for `firstSunday = Dec 28`). The fix below is
+ * purely calendar-based: count days from `firstGridSunday` and divide
+ * by 7. No clocks involved.
  */
 export type HeatCell = {
   date: string;          // 'YYYY-MM-DD'
@@ -80,6 +92,7 @@ export type HeatCell = {
   dow: number;           // 0 = Sunday
   weekIndex: number;     // 0 = first column
   isFuture: boolean;
+  inYear: boolean;       // false for prior/next-year padding cells
 };
 
 export function buildHeatGrid(
@@ -89,28 +102,41 @@ export function buildHeatGrid(
   today: Date = new Date(),
 ): { cells: HeatCell[]; totalDays: number; totalCount: number } {
   const cells: HeatCell[] = [];
-  const start = new Date(year, 0, 1);
-  const end = new Date(year, 11, 31);
+  const yearStart = new Date(year, 0, 1);
+  const yearEnd = new Date(year, 11, 31);
   const todayKey = formatLocalDate(today);
+  const yearStartKey = formatLocalDate(yearStart);
+  const yearEndKey = formatLocalDate(yearEnd);
+
+  // First Sunday on or before Jan 1.
+  const firstGridSunday = new Date(yearStart);
+  firstGridSunday.setDate(yearStart.getDate() - yearStart.getDay());
+
+  // Last Saturday on or after Dec 31.
+  const lastGridSaturday = new Date(yearEnd);
+  lastGridSaturday.setDate(yearEnd.getDate() + (6 - yearEnd.getDay()));
+
   let totalDays = 0;
   let totalCount = 0;
-  // Compute weekIndex relative to the year's first Sunday.
-  const firstSunday = new Date(start);
-  firstSunday.setDate(start.getDate() - start.getDay());
-  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+  let dayIndex = 0;
+  for (
+    const d = new Date(firstGridSunday);
+    d <= lastGridSaturday;
+    d.setDate(d.getDate() + 1)
+  ) {
     const dow = d.getDay();
     const dateKey = formatLocalDate(d);
     const count = byDate.get(dateKey) || 0;
     const level = bucketLevel(count, scale);
     const isFuture = dateKey > todayKey;
-    const weekIndex = Math.floor(
-      (Number(d) - Number(firstSunday)) / (7 * 24 * 3600 * 1000),
-    );
-    cells.push({ date: dateKey, count, level, dow, weekIndex, isFuture });
-    if (count > 0 && !isFuture) {
+    const inYear = dateKey >= yearStartKey && dateKey <= yearEndKey;
+    const weekIndex = Math.floor(dayIndex / 7);
+    cells.push({ date: dateKey, count, level, dow, weekIndex, isFuture, inYear });
+    if (inYear && count > 0 && !isFuture) {
       totalDays++;
       totalCount += count;
     }
+    dayIndex++;
   }
   return { cells, totalDays, totalCount };
 }

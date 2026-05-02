@@ -74,29 +74,45 @@ describe('formatLocalDate', () => {
 });
 
 describe('buildHeatGrid', () => {
-  it('returns one cell per day of the year', () => {
-    const map = new Map<string, number>();
-    const today = new Date(2026, 5, 15); // mid-year so we have past + future
-    const grid = buildHeatGrid(2026, map, 'chapters', today);
-    // 2026 is not a leap year — 365 days
-    expect(grid.cells).toHaveLength(365);
-  });
-
-  it('marks future days as isFuture, past as not', () => {
+  it('renders the full Sunday-Saturday rectangle (year + leading + trailing pad)', () => {
     const today = new Date(2026, 5, 15);
     const grid = buildHeatGrid(2026, new Map(), 'chapters', today);
-    const past = grid.cells.find((c) => c.date === '2026-01-01');
-    const future = grid.cells.find((c) => c.date === '2026-12-31');
-    expect(past?.isFuture).toBe(false);
-    expect(future?.isFuture).toBe(true);
+    // Jan 1 2026 is Thursday (4 leading pad days for Sun-Wed).
+    // Dec 31 2026 is Thursday (2 trailing pad days for Fri-Sat).
+    // Total: 4 + 365 + 2 = 371 cells.
+    expect(grid.cells).toHaveLength(371);
+    // First cell is the Sunday before Jan 1 (Dec 28, 2025).
+    expect(grid.cells[0].date).toBe('2025-12-28');
+    // Last cell is the Saturday after Dec 31 (Jan 2, 2027).
+    expect(grid.cells[grid.cells.length - 1].date).toBe('2027-01-02');
   });
 
-  it('skips future days in totals', () => {
-    const today = new Date(2026, 0, 5); // Jan 5
+  it('marks out-of-year cells with inYear=false', () => {
+    const grid = buildHeatGrid(2026, new Map(), 'chapters', new Date(2026, 11, 31));
+    const dec28_2025 = grid.cells.find((c) => c.date === '2025-12-28')!;
+    const jan1_2026 = grid.cells.find((c) => c.date === '2026-01-01')!;
+    const jan2_2027 = grid.cells.find((c) => c.date === '2027-01-02')!;
+    expect(dec28_2025.inYear).toBe(false);
+    expect(jan1_2026.inYear).toBe(true);
+    expect(jan2_2027.inYear).toBe(false);
+  });
+
+  it('marks future days as isFuture', () => {
+    const today = new Date(2026, 5, 15);
+    const grid = buildHeatGrid(2026, new Map(), 'chapters', today);
+    const past = grid.cells.find((c) => c.date === '2026-01-01')!;
+    const future = grid.cells.find((c) => c.date === '2026-12-31')!;
+    expect(past.isFuture).toBe(false);
+    expect(future.isFuture).toBe(true);
+  });
+
+  it('skips future and out-of-year days in totals', () => {
+    const today = new Date(2026, 0, 5);
     const map = new Map<string, number>([
+      ['2025-12-30', 99],   // out-of-year — must not count toward 2026 totals
       ['2026-01-03', 3],
       ['2026-01-04', 5],
-      ['2026-12-15', 10], // future — should not count
+      ['2026-12-15', 10],   // future — must not count
     ]);
     const grid = buildHeatGrid(2026, map, 'chapters', today);
     expect(grid.totalDays).toBe(2);
@@ -106,14 +122,60 @@ describe('buildHeatGrid', () => {
   it('assigns the correct level per cell from the count map', () => {
     const today = new Date(2026, 11, 31);
     const map = new Map<string, number>([
-      ['2026-04-19', 0.5], // < 1 chapter → level 1
-      ['2026-04-20', 8],   // ≥ 8 → level 5
+      ['2026-04-19', 0.5],
+      ['2026-04-20', 8],
     ]);
     const grid = buildHeatGrid(2026, map, 'chapters', today);
     const a = grid.cells.find((c) => c.date === '2026-04-19')!;
     const b = grid.cells.find((c) => c.date === '2026-04-20')!;
     expect(a.level).toBe(1);
     expect(b.level).toBe(5);
+  });
+
+  // ── Regression: every cell must have a unique (weekIndex, dow) slot ──
+  // The DST "missing teeth" bug was that two days ended up at the same
+  // grid position — one visually overwrote the other. This pins it shut
+  // for both DST transitions in the year.
+
+  it('every cell occupies a unique (weekIndex, dow) slot', () => {
+    const grid = buildHeatGrid(2026, new Map(), 'chapters', new Date(2026, 11, 31));
+    const seen = new Set<string>();
+    for (const c of grid.cells) {
+      const key = `${c.weekIndex}:${c.dow}`;
+      expect(seen.has(key), `duplicate slot at ${key} (date ${c.date})`).toBe(false);
+      seen.add(key);
+    }
+  });
+
+  it('Apr 26 2026 is in its own column (regression for spring-forward DST)', () => {
+    const grid = buildHeatGrid(2026, new Map(), 'chapters', new Date(2026, 11, 31));
+    const apr19 = grid.cells.find((c) => c.date === '2026-04-19')!;
+    const apr26 = grid.cells.find((c) => c.date === '2026-04-26')!;
+    // Both Sundays — must NOT collide.
+    expect(apr19.dow).toBe(0);
+    expect(apr26.dow).toBe(0);
+    expect(apr19.weekIndex).not.toBe(apr26.weekIndex);
+    expect(apr26.weekIndex).toBe(apr19.weekIndex + 1);
+  });
+
+  it('Nov 8 2026 is in its own column (regression for fall-back DST)', () => {
+    // Nov 8 2026 falls one week after Nov 1 (the fall-back day).
+    const grid = buildHeatGrid(2026, new Map(), 'chapters', new Date(2026, 11, 31));
+    const nov1 = grid.cells.find((c) => c.date === '2026-11-01')!;
+    const nov8 = grid.cells.find((c) => c.date === '2026-11-08')!;
+    expect(nov1.weekIndex).not.toBe(nov8.weekIndex);
+    expect(nov8.weekIndex).toBe(nov1.weekIndex + 1);
+  });
+
+  it('handles year-boundary alignment correctly across multiple years', () => {
+    // Each year's grid should start with `firstGridSunday`, and the very
+    // first cell should be at (weekIndex=0, dow=0).
+    for (const year of [2024, 2025, 2026, 2027, 2028]) {
+      const grid = buildHeatGrid(year, new Map(), 'chapters', new Date(year, 11, 31));
+      const first = grid.cells[0];
+      expect(first.dow).toBe(0);
+      expect(first.weekIndex).toBe(0);
+    }
   });
 });
 

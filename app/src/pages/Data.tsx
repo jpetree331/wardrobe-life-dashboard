@@ -237,36 +237,37 @@ function HeatmapView({
   // Pick the scale for the current source/unit pair.
   const scale = unit === 'chapters' ? 'chapters' : 'verses-or-pages';
 
-  // Build the by-date map according to source + unit.
+  // Build the by-date map across ALL years. The heatmap's grid extends a
+  // few days into the prior year (the leading partial week when Jan 1 isn't
+  // a Sunday) and into the next year (trailing partial week); using the
+  // unfiltered map means real reads on those overflow days light up too.
+  // The "totalDays / totalCount" displayed in the header is still
+  // year-bounded — buildHeatGrid only counts cells where inYear=true.
   const byDate = useMemo(() => {
     if (source === 'scripture') {
-      const inYear = scriptureReads.filter((r) => r.read_date.startsWith(String(year)));
       if (unit === 'verses') {
-        return sumByDate(inYear, (r) => r.read_date, (r) => versesInRead(r));
+        return sumByDate(scriptureReads, (r) => r.read_date, (r) => versesInRead(r));
       }
-      // chapters mode — use fractional chapters so partial reads contribute.
-      return sumByDate(inYear, (r) => r.read_date, (r) => chapterFractionInRead(r));
+      return sumByDate(scriptureReads, (r) => r.read_date, (r) => chapterFractionInRead(r));
     }
     // Books mode — sum pages from BOTH the completion records AND the
     // daily-page logs, so days when she read but didn't finish a book
     // still light up. Same date appearing on both sides correctly adds.
-    const completionsThisYear = bookReads.filter((b) => b.finished_on.startsWith(String(year)));
-    const dailyThisYear = dailyPages.filter((d) => d.read_date.startsWith(String(year)));
     if (unit === 'verses') {
       // "Verses" pillbar means "Pages" when source=books
-      const fromCompletions = sumByDate(completionsThisYear, (r) => r.finished_on, (r) => r.pages);
-      const fromDaily = sumByDate(dailyThisYear, (r) => r.read_date, (r) => r.pages);
+      const fromCompletions = sumByDate(bookReads, (r) => r.finished_on, (r) => r.pages);
+      const fromDaily = sumByDate(dailyPages, (r) => r.read_date, (r) => r.pages);
       const merged = new Map<string, number>(fromCompletions);
       for (const [k, v] of fromDaily) merged.set(k, (merged.get(k) || 0) + v);
       return merged;
     }
     // "Chapters" pillbar means "Sections" when source=books — sections = pages / 50.
-    const fromCompletions = sumByDate(completionsThisYear, (r) => r.finished_on, (r) => (r.pages > 0 ? r.pages / 50 : 0));
-    const fromDaily = sumByDate(dailyThisYear, (r) => r.read_date, (r) => (r.pages > 0 ? r.pages / 50 : 0));
+    const fromCompletions = sumByDate(bookReads, (r) => r.finished_on, (r) => (r.pages > 0 ? r.pages / 50 : 0));
+    const fromDaily = sumByDate(dailyPages, (r) => r.read_date, (r) => (r.pages > 0 ? r.pages / 50 : 0));
     const merged = new Map<string, number>(fromCompletions);
     for (const [k, v] of fromDaily) merged.set(k, (merged.get(k) || 0) + v);
     return merged;
-  }, [scriptureReads, bookReads, dailyPages, source, unit, year]);
+  }, [scriptureReads, bookReads, dailyPages, source, unit]);
 
   const grid = useMemo(
     () => buildHeatGrid(year, byDate, scale, todayDate),
