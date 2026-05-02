@@ -336,6 +336,234 @@
 }
 .cal-refs .more { color: var(--ink-faint); font-style: italic; }
 
+/* ── Book × Chapter view ─────────────────────────────────────────── */
+.dt-matrix-wrap { max-width: 1200px; }
+
+.matrix-panel { padding: 18px 22px 24px; }
+
+.dt-matrix-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr 280px;
+  gap: 18px;
+  align-items: start;
+  margin-top: 8px;
+  /* Center pane and rail can scroll independently if content overflows. */
+  max-height: calc(100vh - 280px);
+}
+.dt-matrix-grid.books-grid {
+  grid-template-columns: 220px 1fr 1fr;
+}
+
+/* Book / Author rail */
+.dt-book-rail {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  overflow-y: auto;
+  max-height: calc(100vh - 280px);
+}
+.dt-book-rail .rail-head {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg-2);
+  padding: 8px 12px 6px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--line);
+}
+.dt-book-rail .rail-item {
+  display: flex; justify-content: space-between; align-items: center;
+  background: transparent; border: 0;
+  padding: 6px 12px;
+  cursor: pointer;
+  text-align: left;
+  font-family: 'EB Garamond', serif;
+  font-size: 13px;
+  color: var(--ink-soft);
+  border-bottom: 1px solid color-mix(in oklab, var(--line) 50%, transparent 50%);
+}
+.dt-book-rail .rail-item:hover { background: color-mix(in oklab, var(--accent) 8%, transparent 92%); color: var(--ink); }
+.dt-book-rail .rail-item.active {
+  background: var(--ink);
+  color: var(--bg);
+}
+.dt-book-rail .rail-item.active .rail-count { color: var(--bg); }
+.dt-book-rail .rail-item.empty { color: var(--ink-faint); }
+.dt-book-rail .rail-item.empty .rail-count { display: none; }
+.dt-book-rail .rail-name { flex: 1; }
+.dt-book-rail .rail-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Centre: chapter matrix */
+.dt-chapter-pane,
+.dt-author-pane {
+  border: 1px solid var(--line);
+  background: var(--page);
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+  max-height: calc(100vh - 280px);
+}
+.pane-head {
+  display: flex; align-items: baseline; gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px; margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.pane-head h3 {
+  margin: 0;
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 400; font-size: 20px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+.pane-head .meta {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  color: var(--ink-faint); font-size: 12px;
+}
+.pane-head .clear-filter {
+  margin-left: auto;
+  background: transparent; border: 1px solid var(--line);
+  padding: 2px 8px;
+  font-family: 'EB Garamond', serif; font-style: italic; font-size: 11px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  border-radius: 999px;
+}
+.pane-head .clear-filter:hover { color: var(--ink); border-color: var(--ink-soft); }
+
+.chapter-matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+  gap: 4px;
+}
+.chap-tile {
+  aspect-ratio: 1;
+  background: var(--heat-empty);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-soft);
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+  transition: transform 90ms ease;
+}
+.chap-tile.l1 { background: var(--heat-1); }
+.chap-tile.l2 { background: var(--heat-2); }
+.chap-tile.l3 { background: var(--heat-3); color: var(--bg); }
+.chap-tile.l4 { background: var(--heat-4); color: var(--bg); }
+.chap-tile.l5 { background: var(--heat-5); color: var(--bg); }
+.chap-tile:hover { outline: 1px solid var(--ink-soft); transform: scale(1.04); }
+.chap-tile.selected {
+  outline: 2px solid var(--accent-strong, var(--ink));
+  outline-offset: 1px;
+}
+
+.matrix-legend { margin-top: 14px; }
+
+/* Right: reads pane */
+.dt-reads-pane {
+  border: 1px solid var(--line);
+  background: var(--page);
+  padding: 14px 16px 16px;
+  overflow-y: auto;
+  max-height: calc(100vh - 280px);
+}
+.reads-empty {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  color: var(--ink-faint);
+  font-size: 13px;
+  padding: 8px 4px;
+  line-height: 1.5;
+}
+.reads-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.read-item {
+  border-left: 2px solid var(--line-strong);
+  padding-left: 10px;
+}
+.read-item.from-sanctuary { border-left-color: #b8521a; }
+.read-row {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.read-date {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.read-ref {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 14px; color: var(--ink);
+}
+.read-source {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 10px; color: #b8521a;
+  letter-spacing: 0.04em;
+}
+.read-note {
+  margin-top: 2px;
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 12px; color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+/* Author pane (Books mode) */
+.author-books {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.book-card {
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  background: color-mix(in oklab, var(--page) 92%, var(--bg-2) 8%);
+}
+.book-card-row {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+}
+.book-date {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.book-title {
+  flex: 1;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 16px; color: var(--ink);
+}
+.book-pages {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--ink-soft);
+}
+.book-stars {
+  font-family: 'EB Garamond', serif;
+  font-size: 14px; color: var(--red);
+  letter-spacing: 1px;
+}
+.book-review {
+  margin-top: 6px;
+}
+.review-toggle {
+  background: transparent; border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 12px; color: var(--ink-faint);
+}
+.review-toggle:hover { color: var(--ink); }
+.review-body {
+  margin-top: 4px;
+  font-family: 'EB Garamond', serif;
+  font-size: 13px; color: var(--ink-soft);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
 /* ── Modals ───────────────────────────────────────────────────────── */
 .dt-modal-bg {
   position: fixed; inset: 0; z-index: 250;

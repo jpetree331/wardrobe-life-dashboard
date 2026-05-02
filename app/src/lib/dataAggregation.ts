@@ -196,6 +196,123 @@ export function buildCalendarGrid(
   return cells;
 }
 
+/**
+ * Bucket a per-chapter "fraction read across all entries" into a level.
+ * One whole-chapter read = 1.0; a 5-verse read of a 30-verse chapter ≈ 0.17.
+ *
+ *   0          → 0   (never touched)
+ *   (0, 0.5)   → 1   (started but didn't finish a single read-through)
+ *   [0.5, 1)   → 2   (read most of it once)
+ *   [1, 2)     → 3   (one full read-through, give or take)
+ *   [2, 4)     → 4   (multiple read-throughs)
+ *   [4, ∞)     → 5   (deeply familiar)
+ *
+ * The thresholds line up loosely with the heatmap chapters scale, but the
+ * unit is "chapter-read-fractions accumulated" rather than "chapters per
+ * day", so the curve is gentler.
+ */
+export function bucketChapterReads(fraction: number): HeatLevel {
+  if (!Number.isFinite(fraction) || fraction <= 0) return 0;
+  if (fraction < 0.5) return 1;
+  if (fraction < 1)   return 2;
+  if (fraction < 2)   return 3;
+  if (fraction < 4)   return 4;
+  return 5;
+}
+
+/**
+ * Per-book aggregation for the Book × Chapter view (Scripture mode).
+ * Returns a map keyed by book name; for each book we know:
+ *   - readCount: how many distinct read entries
+ *   - chapters: a Map<chapter#, fraction-read-summed>
+ *   - reads: every ScriptureRead for that book, newest-first by date
+ */
+export type ScriptureBookAggregate<T = ScriptureReadLike> = {
+  readCount: number;
+  /** Sum of fractions read per chapter — 1.0 = one full read-through. */
+  chapters: Map<number, number>;
+  reads: T[];
+};
+
+/** Minimal shape of a Scripture read used by aggregation. */
+export type ScriptureReadLike = {
+  read_date: string;
+  book: string;
+  chapter: number;
+  verse_from: number | null;
+  verse_to: number | null;
+};
+
+export function aggregateScriptureByBookChapter<T extends ScriptureReadLike>(
+  reads: T[],
+  fractionFor: (r: T) => number,
+): Map<string, ScriptureBookAggregate<T>> {
+  const out = new Map<string, ScriptureBookAggregate<T>>();
+  for (const r of reads) {
+    if (!r.book) continue;
+    let agg = out.get(r.book);
+    if (!agg) {
+      agg = { readCount: 0, chapters: new Map(), reads: [] };
+      out.set(r.book, agg);
+    }
+    agg.readCount++;
+    agg.reads.push(r);
+    if (r.chapter > 0) {
+      const f = fractionFor(r);
+      if (Number.isFinite(f) && f > 0) {
+        agg.chapters.set(r.chapter, (agg.chapters.get(r.chapter) || 0) + f);
+      }
+    }
+  }
+  // Sort each book's reads newest-first.
+  for (const agg of out.values()) {
+    agg.reads.sort((a, b) => b.read_date.localeCompare(a.read_date));
+  }
+  return out;
+}
+
+/** Minimal shape of a Book read used by aggregation. */
+export type BookReadLike = {
+  finished_on: string;
+  title: string;
+  author: string;
+  pages: number;
+  rating: number;
+  review: string | null;
+};
+
+export type AuthorAggregate<T extends BookReadLike> = {
+  total: number;
+  pages: number;
+  books: T[];
+};
+
+/**
+ * Group book completions by author. Authors with empty/whitespace strings
+ * are bucketed under "Unknown author". Each group's books are sorted by
+ * finish date, newest-first.
+ */
+export function aggregateBooksByAuthor<T extends BookReadLike>(
+  bookReads: T[],
+): Map<string, AuthorAggregate<T>> {
+  const out = new Map<string, AuthorAggregate<T>>();
+  for (const b of bookReads) {
+    const author = (b.author || '').trim() || 'Unknown author';
+    let agg = out.get(author);
+    if (!agg) {
+      agg = { total: 0, pages: 0, books: [] };
+      out.set(author, agg);
+    }
+    agg.total++;
+    agg.pages += Math.max(0, b.pages || 0);
+    agg.books.push(b);
+  }
+  for (const agg of out.values()) {
+    agg.books.sort((a, b) => b.finished_on.localeCompare(a.finished_on));
+  }
+  return out;
+}
+
 /** Format a Date as 'YYYY-MM-DD' in local time (no UTC drift). */
 export function formatLocalDate(d: Date): string {
   const y = d.getFullYear();

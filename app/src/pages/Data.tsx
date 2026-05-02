@@ -15,6 +15,9 @@ import {
   type ScriptureRead,
 } from '../lib/data';
 import {
+  aggregateBooksByAuthor,
+  aggregateScriptureByBookChapter,
+  bucketChapterReads,
   bucketLevel,
   buildCalendarGrid,
   buildHeatGrid,
@@ -28,6 +31,8 @@ import {
 } from '../lib/dataAggregation';
 import {
   BIBLE_BOOKS,
+  NEW_TESTAMENT,
+  OLD_TESTAMENT,
   chapterCount,
   verseCount,
 } from '../lib/bibleVerseCounts';
@@ -129,7 +134,7 @@ export default function Data() {
       <nav className="dt-tabs" aria-label="Views">
         <TabButton current={tab} value="heatmap"  setTab={setTab}>Heatmap</TabButton>
         <TabButton current={tab} value="calendar" setTab={setTab}>Calendar</TabButton>
-        <TabButton current={tab} value="matrix"   setTab={setTab} disabled comingIn="Build 2">Book × Chapter</TabButton>
+        <TabButton current={tab} value="matrix"   setTab={setTab}>Book × Chapter</TabButton>
         <TabButton current={tab} value="stats"    setTab={setTab} disabled comingIn="Build 2">Stats</TabButton>
         <TabButton current={tab} value="plans"    setTab={setTab} disabled comingIn="Build 3">Plans</TabButton>
       </nav>
@@ -153,10 +158,15 @@ export default function Data() {
             sanctuaryDates={sanctuaryDates}
             timelineDates={timelineDates}
           />
+        ) : tab === 'matrix' ? (
+          <BookByChapterView
+            scriptureReads={scriptureReads}
+            bookReads={bookReads}
+          />
         ) : (
           <div className="dt-coming-soon">
-            <p>Coming in Build 2 (Book × Chapter and Stats) and Build 3 (Reading Plans).</p>
-            <p className="hint">Heatmap and Calendar are live now.</p>
+            <p>Coming in Build 2 (Stats) and Build 3 (Reading Plans).</p>
+            <p className="hint">Heatmap, Calendar, and Book × Chapter are live now.</p>
           </div>
         )}
       </main>
@@ -622,6 +632,326 @@ function CalendarView({
         </div>
       </div>
     </div>
+  );
+}
+
+// ── Book × Chapter view ──────────────────────────────────────────────
+
+function BookByChapterView({
+  scriptureReads,
+  bookReads,
+}: {
+  scriptureReads: ScriptureRead[];
+  bookReads: BookRead[];
+}) {
+  const [source, setSource] = useState<Source>('scripture');
+
+  return (
+    <div className="dt-matrix-wrap">
+      <div className="panel matrix-panel">
+        <div className="panel-head">
+          <div>
+            <h2>Book × Chapter</h2>
+            <div className="sub">
+              {source === 'scripture'
+                ? 'Pick a book to see which chapters you\'ve read, how often, and the entries behind each.'
+                : 'Authors A–Z, with every finished book and review.'}
+            </div>
+          </div>
+          <div className="controls">
+            <Pillbar
+              value={source}
+              options={[
+                { value: 'scripture', label: 'Scripture' },
+                { value: 'books', label: 'Books' },
+              ]}
+              onChange={(v) => setSource(v as Source)}
+            />
+          </div>
+        </div>
+
+        {source === 'scripture' ? (
+          <ScriptureMatrix scriptureReads={scriptureReads} />
+        ) : (
+          <BookByAuthor bookReads={bookReads} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Scripture matrix (book rail + chapter grid + reads pane) ─────────
+
+function ScriptureMatrix({ scriptureReads }: { scriptureReads: ScriptureRead[] }) {
+  // Aggregate reads → per-book/per-chapter fractions.
+  const aggregate = useMemo(
+    () => aggregateScriptureByBookChapter(scriptureReads, (r) => chapterFractionInRead(r)),
+    [scriptureReads],
+  );
+
+  // Default selected book: first one with reads, else 'Genesis'.
+  const initialBook = useMemo(() => {
+    for (const b of BIBLE_BOOKS) if (aggregate.has(b)) return b;
+    return 'Genesis';
+  }, [aggregate]);
+
+  const [selectedBook, setSelectedBook] = useState<string>(initialBook);
+  // Reset whenever the underlying reads change and the selection vanishes.
+  useEffect(() => {
+    if (!aggregate.has(selectedBook) && initialBook) setSelectedBook(initialBook);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aggregate]);
+
+  const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
+  // Clear chapter filter when we switch books.
+  useEffect(() => { setSelectedChapter(null); }, [selectedBook]);
+
+  const bookAgg = aggregate.get(selectedBook);
+  const chapters = chapterCount(selectedBook);
+  const visibleReads = useMemo(() => {
+    if (!bookAgg) return [] as ScriptureRead[];
+    if (selectedChapter === null) return bookAgg.reads;
+    return bookAgg.reads.filter((r) => r.chapter === selectedChapter);
+  }, [bookAgg, selectedChapter]);
+
+  return (
+    <div className="dt-matrix-grid">
+      {/* Book rail — OT then NT, with a small read-count next to each book */}
+      <aside className="dt-book-rail">
+        <div className="rail-head">Old Testament</div>
+        {OLD_TESTAMENT.map((b) => (
+          <BookRailItem
+            key={b}
+            book={b}
+            count={aggregate.get(b)?.readCount || 0}
+            active={b === selectedBook}
+            onClick={() => setSelectedBook(b)}
+          />
+        ))}
+        <div className="rail-head">New Testament</div>
+        {NEW_TESTAMENT.map((b) => (
+          <BookRailItem
+            key={b}
+            book={b}
+            count={aggregate.get(b)?.readCount || 0}
+            active={b === selectedBook}
+            onClick={() => setSelectedBook(b)}
+          />
+        ))}
+      </aside>
+
+      {/* Centre: chapter matrix */}
+      <section className="dt-chapter-pane">
+        <header className="pane-head">
+          <h3>{selectedBook}</h3>
+          <span className="meta">
+            {chapters} chapter{chapters === 1 ? '' : 's'}
+            {bookAgg ? ` · ${bookAgg.readCount} read${bookAgg.readCount === 1 ? '' : 's'}` : ''}
+          </span>
+          {selectedChapter !== null && (
+            <button className="clear-filter" onClick={() => setSelectedChapter(null)}>
+              clear ch. {selectedChapter}
+            </button>
+          )}
+        </header>
+        <div className="chapter-matrix">
+          {Array.from({ length: chapters }, (_, i) => i + 1).map((ch) => {
+            const fraction = bookAgg?.chapters.get(ch) || 0;
+            const level = bucketChapterReads(fraction);
+            const isSelected = ch === selectedChapter;
+            return (
+              <button
+                key={ch}
+                className={`chap-tile l${level}${isSelected ? ' selected' : ''}`}
+                onClick={() => setSelectedChapter(isSelected ? null : ch)}
+                title={fraction > 0
+                  ? `Chapter ${ch} — ${fraction.toFixed(fraction % 1 ? 2 : 0)} read${fraction === 1 ? '' : 's'}`
+                  : `Chapter ${ch} — not read yet`}
+              >
+                {ch}
+              </button>
+            );
+          })}
+        </div>
+        <div className="dt-legend matrix-legend">
+          <span className="muted">Less</span>
+          {[1, 2, 3, 4, 5].map((l) => (
+            <span key={l} className="leg-cell" style={{ background: `var(--heat-${l})` }} />
+          ))}
+          <span className="muted">More</span>
+        </div>
+      </section>
+
+      {/* Right: reads pane */}
+      <aside className="dt-reads-pane">
+        <header className="pane-head">
+          <h3>Reads</h3>
+          <span className="meta">
+            {visibleReads.length} entr{visibleReads.length === 1 ? 'y' : 'ies'}
+            {selectedChapter !== null ? ` · ch. ${selectedChapter}` : ''}
+          </span>
+        </header>
+        {visibleReads.length === 0 ? (
+          <div className="reads-empty">
+            {bookAgg
+              ? selectedChapter !== null
+                ? <em>No reads recorded for {selectedBook} {selectedChapter} yet.</em>
+                : <em>No reads recorded for {selectedBook} yet.</em>
+              : <em>Pick a book on the left to see reads here. Books with darker rails have more entries.</em>}
+          </div>
+        ) : (
+          <ul className="reads-list">
+            {visibleReads.map((r) => (
+              <ReadItem key={r.id} read={r} />
+            ))}
+          </ul>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function BookRailItem({
+  book, count, active, onClick,
+}: {
+  book: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`rail-item${active ? ' active' : ''}${count === 0 ? ' empty' : ''}`}
+      onClick={onClick}
+    >
+      <span className="rail-name">{book}</span>
+      {count > 0 && <span className="rail-count">{count}</span>}
+    </button>
+  );
+}
+
+function ReadItem({ read }: { read: ScriptureRead }) {
+  const refStr = `${read.book} ${read.chapter}${
+    read.verse_from !== null && read.verse_to !== null
+      ? `:${read.verse_from}${read.verse_from !== read.verse_to ? '–' + read.verse_to : ''}`
+      : ''
+  }`;
+  return (
+    <li className={`read-item${read.source === 'sanctuary' ? ' from-sanctuary' : ''}`}>
+      <div className="read-row">
+        <span className="read-date">{read.read_date}</span>
+        <span className="read-ref">{refStr}</span>
+        {read.source === 'sanctuary' && <span className="read-source" title="Synthesized from a Sanctuary entry">sanctuary</span>}
+      </div>
+      {read.note && <div className="read-note">{read.note}</div>}
+    </li>
+  );
+}
+
+// ── Books-by-author panel ────────────────────────────────────────────
+
+function BookByAuthor({ bookReads }: { bookReads: BookRead[] }) {
+  const aggregate = useMemo(() => aggregateBooksByAuthor(bookReads), [bookReads]);
+
+  // Sort authors A→Z (case-insensitive). "Unknown author" sinks to the bottom.
+  const authors = useMemo(() => {
+    const names = Array.from(aggregate.keys());
+    return names.sort((a, b) => {
+      if (a === 'Unknown author' && b !== 'Unknown author') return 1;
+      if (b === 'Unknown author' && a !== 'Unknown author') return -1;
+      return a.localeCompare(b, undefined, { sensitivity: 'base' });
+    });
+  }, [aggregate]);
+
+  const [selectedAuthor, setSelectedAuthor] = useState<string | null>(authors[0] || null);
+  // Re-sync when the dataset changes.
+  useEffect(() => {
+    if (selectedAuthor && !aggregate.has(selectedAuthor)) {
+      setSelectedAuthor(authors[0] || null);
+    } else if (!selectedAuthor && authors[0]) {
+      setSelectedAuthor(authors[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aggregate]);
+
+  if (authors.length === 0) {
+    return (
+      <div className="dt-empty-state">
+        <em>No books finished yet.</em>
+        <span> Click <strong>+ Book</strong> in the ribbon above to log your first finished read.</span>
+      </div>
+    );
+  }
+
+  const authorAgg = selectedAuthor ? aggregate.get(selectedAuthor) : undefined;
+
+  return (
+    <div className="dt-matrix-grid books-grid">
+      {/* Author rail */}
+      <aside className="dt-book-rail authors">
+        <div className="rail-head">Authors</div>
+        {authors.map((a) => {
+          const agg = aggregate.get(a)!;
+          return (
+            <button
+              key={a}
+              className={`rail-item${selectedAuthor === a ? ' active' : ''}`}
+              onClick={() => setSelectedAuthor(a)}
+            >
+              <span className="rail-name">{a}</span>
+              <span className="rail-count">{agg.total}</span>
+            </button>
+          );
+        })}
+      </aside>
+
+      {/* Centre + right are merged into a single books pane (no chapter matrix). */}
+      <section className="dt-author-pane" style={{ gridColumn: '2 / span 2' }}>
+        {authorAgg ? (
+          <>
+            <header className="pane-head">
+              <h3>{selectedAuthor}</h3>
+              <span className="meta">
+                {authorAgg.total} book{authorAgg.total === 1 ? '' : 's'}
+                {authorAgg.pages > 0 ? ` · ${authorAgg.pages} pages` : ''}
+              </span>
+            </header>
+            <ul className="author-books">
+              {authorAgg.books.map((b) => <BookCard key={b.id} book={b} />)}
+            </ul>
+          </>
+        ) : (
+          <div className="reads-empty"><em>Pick an author on the left.</em></div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function BookCard({ book }: { book: BookRead }) {
+  const [expanded, setExpanded] = useState(false);
+  const stars = '★'.repeat(book.rating) + '☆'.repeat(5 - book.rating);
+  return (
+    <li className="book-card">
+      <div className="book-card-row">
+        <span className="book-date">{book.finished_on}</span>
+        <span className="book-title">{book.title}</span>
+        {book.pages > 0 && <span className="book-pages">{book.pages}p</span>}
+        {book.rating > 0 && <span className="book-stars" title={`${book.rating}/5`}>{stars}</span>}
+      </div>
+      {book.review && (
+        <div className={`book-review${expanded ? ' expanded' : ''}`}>
+          <button
+            className="review-toggle"
+            onClick={() => setExpanded((x) => !x)}
+            aria-expanded={expanded}
+          >
+            {expanded ? '▾ review' : '▸ review'}
+          </button>
+          {expanded && <div className="review-body">{book.review}</div>}
+        </div>
+      )}
+    </li>
   );
 }
 
