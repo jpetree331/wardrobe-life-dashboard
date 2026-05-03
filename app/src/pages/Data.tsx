@@ -505,11 +505,20 @@ function YearRail({
   }, [value, windowEnd]);
 
   const options = Array.from({ length: YEAR_WINDOW }, (_, i) => windowEnd - i);
-  const canGoBack = windowEnd - YEAR_WINDOW >= earliestYear;
+
+  // canGoBack: there's at least one year of data older than the current
+  // LEFT edge of the window. Data-driven (doesn't assume contiguity), so
+  // if Jess has gaps (e.g., books from 1999-2019 then nothing till 2023)
+  // we still let her page back into the older clusters.
+  const leftEdge = windowEnd - YEAR_WINDOW + 1;
+  const canGoBack = dataYears.some((y) => y < leftEdge);
   const canGoForward = windowEnd < currentYear;
 
   function pageBack() {
-    if (canGoBack) setWindowEnd((w) => Math.max(earliestYear + YEAR_WINDOW - 1, w - YEAR_WINDOW));
+    if (!canGoBack) return;
+    // Snap to the next 5-year window down, but never go past the very
+    // oldest data year (the right-edge floor is earliestYear + WINDOW - 1).
+    setWindowEnd((w) => Math.max(earliestYear + YEAR_WINDOW - 1, w - YEAR_WINDOW));
   }
   function pageForward() {
     if (canGoForward) setWindowEnd((w) => Math.min(currentYear, w + YEAR_WINDOW));
