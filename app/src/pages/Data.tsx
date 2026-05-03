@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   bulkCreateBookReads,
@@ -490,9 +490,16 @@ function YearRail({
   // containing `value` (so navigating away and back doesn't lose place).
   const [windowEnd, setWindowEnd] = useState<number>(currentYear);
 
-  // If the user picks a year outside the current window via some other
-  // path, slide the window so it's visible.
+  // If `value` is set programmatically to a year OUTSIDE the visible
+  // window (e.g., the user clicked a row in the Years-in-X retro to
+  // jump to 2014), slide the window to include it. We only react to
+  // actual changes in `value` — the previous version watched `windowEnd`
+  // too, which caused chevron paging to immediately snap back to
+  // include the active year, making it impossible to browse history.
+  const prevValueRef = useRef(value);
   useEffect(() => {
+    if (prevValueRef.current === value) return;
+    prevValueRef.current = value;
     if (value > windowEnd) setWindowEnd(value);
     else if (value <= windowEnd - YEAR_WINDOW) setWindowEnd(value + YEAR_WINDOW - 1);
   }, [value, windowEnd]);

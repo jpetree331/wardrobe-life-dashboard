@@ -181,7 +181,7 @@
 
 /* ── Heatmap ──────────────────────────────────────────────────────── */
 .dt-heatmap-wrap {
-  display: grid; grid-template-columns: minmax(0, 1fr) 80px;
+  display: grid; grid-template-columns: minmax(0, 1fr) 110px;
   gap: 22px;
   align-items: start;
 }
@@ -288,10 +288,14 @@
   justify-content: center;
   gap: 5px;
 }
+/* Vertical rail: year + count on one line. The wider 110px rail in
+   .dt-heatmap-wrap gives "2026 (203)" room without wrapping. */
 .year-rail.vertical .year {
-  padding: 8px 4px;
-  flex-direction: column;
-  gap: 2px;
+  padding: 8px 10px;
+  flex-direction: row;
+  gap: 6px;
+  width: 100%;
+  justify-content: flex-start;
 }
 .year-rail.horizontal .year { padding: 6px 14px; }
 .year-rail .year:hover { color: var(--ink); border-color: var(--ink-soft); }
@@ -305,12 +309,11 @@
 }
 .year-rail .year .year-count {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
 }
-.year-rail.vertical .year .year-count { font-size: 8px; }
 
 .year-rail .year-page-btn {
   background: transparent;

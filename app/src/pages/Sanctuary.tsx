@@ -1074,7 +1074,7 @@ export default function Sanctuary() {
                   <span>{active.entry_date}</span>
                   <span className="pip">✦</span>
                   <span>{dayOfWeekFor(active.entry_date)}</span>
-                  {(active.scripture_refs || []).slice(0, 1).map((r) => (
+                  {(active.scripture_refs || []).map((r) => (
                     <span key={r} style={{ display: 'contents' }}>
                       <span className="pip">✦</span>
                       <span>{r}</span>
