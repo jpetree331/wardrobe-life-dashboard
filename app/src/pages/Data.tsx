@@ -37,6 +37,7 @@ import {
   buildCalendarGrid,
   buildHeatGrid,
   computeYearStats,
+  daysWithReadingByYear,
   formatLocalDate,
   MONTH_NAMES,
   MONTH_SHORT,
@@ -46,6 +47,7 @@ import {
   planChapterSequence,
   planPaceStatus,
   sumByDate,
+  topAuthorsByCount,
   topBooksByVerses,
   yearsInBooksRetro,
   type HeatLevel,
@@ -352,8 +354,13 @@ function HeatmapView({
     ? (unit === 'verses' ? 'Pages' : 'Sections')
     : (unit === 'verses' ? 'Verses' : 'Chapters');
 
-  // Year rail: show last 5 years up through the current year.
-  const yearOptions = Array.from({ length: 5 }, (_, i) => todayDate.getFullYear() - i);
+  // Year-rail counts: distinct days with any reading per year. Same metric
+  // across Heatmap and Stats so paging back through history feels uniform.
+  const yearCounts = useMemo(
+    () => daysWithReadingByYear({ scriptureReads, bookReads, dailyPages }),
+    [scriptureReads, bookReads, dailyPages],
+  );
+  const dataYears = useMemo(() => Array.from(yearCounts.keys()), [yearCounts]);
 
   // Tooltip
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
@@ -435,7 +442,13 @@ function HeatmapView({
         </div>
       </div>
 
-      <YearRail layout="vertical" options={yearOptions} value={year} onChange={setYear} />
+      <YearRail
+        layout="vertical"
+        value={year}
+        onChange={setYear}
+        counts={yearCounts}
+        dataYears={dataYears}
+      />
 
       {tip && <div className="dt-tooltip" style={{ left: tip.x + 14, top: tip.y + 14 }}>{tip.text}</div>}
     </div>
@@ -443,30 +456,104 @@ function HeatmapView({
 }
 
 /**
- * The "pick a year" rail used by Heatmap and Stats. Vertical orientation
- * puts it next to a wide content area; horizontal (used by Stats) puts it
- * inline next to the year title.
+ * The "pick a year" rail used by Heatmap and Stats. Two layouts:
+ *   - vertical: next to the heatmap; cells stacked top-to-bottom
+ *   - horizontal: next to the Stats title bar
+ *
+ * Shows a 5-year window. `<` chevron pages back 5 years (further into
+ * history); `>` chevron pages forward. Chevrons are disabled when the
+ * window is at a boundary defined by `dataYears` (the years in which
+ * the user has any reading data) — so paging back stops when she hits
+ * her oldest year, and paging forward stops at the current year.
+ *
+ * `counts` is an optional Map<year, n> that puts a small "(n)" next to
+ * each year so blank years are easy to spot.
  */
+const YEAR_WINDOW = 5;
+
 function YearRail({
-  options, value, onChange, layout,
+  value, onChange, layout, counts, dataYears,
 }: {
-  options: number[];
   value: number;
   onChange: (y: number) => void;
   layout: 'vertical' | 'horizontal';
+  counts?: Map<number, number>;
+  /** Years where the user has data — used to bound chevron paging. */
+  dataYears: number[];
 }) {
+  const today = useMemo(() => new Date(), []);
+  const currentYear = today.getFullYear();
+  const earliestYear = dataYears.length > 0 ? Math.min(...dataYears) : currentYear;
+
+  // The window's RIGHTMOST year — we render 5 years ending here.
+  // Persisted in state so chevron paging works; default to the year
+  // containing `value` (so navigating away and back doesn't lose place).
+  const [windowEnd, setWindowEnd] = useState<number>(currentYear);
+
+  // If the user picks a year outside the current window via some other
+  // path, slide the window so it's visible.
+  useEffect(() => {
+    if (value > windowEnd) setWindowEnd(value);
+    else if (value <= windowEnd - YEAR_WINDOW) setWindowEnd(value + YEAR_WINDOW - 1);
+  }, [value, windowEnd]);
+
+  const options = Array.from({ length: YEAR_WINDOW }, (_, i) => windowEnd - i);
+  const canGoBack = windowEnd - YEAR_WINDOW >= earliestYear;
+  const canGoForward = windowEnd < currentYear;
+
+  function pageBack() {
+    if (canGoBack) setWindowEnd((w) => Math.max(earliestYear + YEAR_WINDOW - 1, w - YEAR_WINDOW));
+  }
+  function pageForward() {
+    if (canGoForward) setWindowEnd((w) => Math.min(currentYear, w + YEAR_WINDOW));
+  }
+
+  // Vertical: chevrons stack top/bottom. Horizontal: chevrons sit at left/right.
+  const olderChevron = (
+    <button
+      type="button"
+      className="year-page-btn"
+      onClick={pageBack}
+      disabled={!canGoBack}
+      aria-label="Older years"
+      title={canGoBack ? 'Older' : 'No older data'}
+    >
+      {layout === 'vertical' ? '▾' : '‹'}
+    </button>
+  );
+  const newerChevron = (
+    <button
+      type="button"
+      className="year-page-btn"
+      onClick={pageForward}
+      disabled={!canGoForward}
+      aria-label="Newer years"
+      title={canGoForward ? 'Newer' : 'No newer data'}
+    >
+      {layout === 'vertical' ? '▴' : '›'}
+    </button>
+  );
+
   return (
     <div className={`year-rail ${layout}`} role="radiogroup" aria-label="Year">
-      {options.map((y) => (
-        <button
-          key={y}
-          className={`year${value === y ? ' active' : ''}`}
-          onClick={() => onChange(y)}
-          aria-pressed={value === y}
-        >
-          {y}
-        </button>
-      ))}
+      {layout === 'vertical' ? newerChevron : olderChevron}
+      {options.map((y) => {
+        const n = counts?.get(y);
+        return (
+          <button
+            key={y}
+            className={`year${value === y ? ' active' : ''}${!n ? ' no-data' : ''}`}
+            onClick={() => onChange(y)}
+            aria-pressed={value === y}
+          >
+            <span className="year-num">{y}</span>
+            {counts !== undefined && (
+              <span className="year-count">{n ? `(${n})` : '·'}</span>
+            )}
+          </button>
+        );
+      })}
+      {layout === 'vertical' ? olderChevron : newerChevron}
     </div>
   );
 }
@@ -1089,6 +1176,13 @@ function BookCard({ book, onEdit }: { book: BookRead; onEdit: () => void }) {
 }
 
 // ── Stats view ───────────────────────────────────────────────────────
+//
+// Top-level Scripture/Books toggle scopes the entire page. KPIs, the
+// middle panels, and the Years-in-X retrospective all swap shape
+// between modes; the year rail (with chevron paging into history) and
+// the title bar are shared.
+
+type StatsMode = 'scripture' | 'books';
 
 function StatsView({
   scriptureReads,
@@ -1100,11 +1194,8 @@ function StatsView({
   dailyPages: DailyPageRead[];
 }) {
   const today = useMemo(() => new Date(), []);
+  const [mode, setMode] = useState<StatsMode>('scripture');
   const [year, setYear] = useState(today.getFullYear());
-  const yearOptions = useMemo(
-    () => Array.from({ length: 5 }, (_, i) => today.getFullYear() - i),
-    [today],
-  );
 
   // Year-bound KPIs.
   const stats = useMemo(
@@ -1119,52 +1210,30 @@ function StatsView({
     [year, scriptureReads, bookReads, dailyPages, today],
   );
 
-  // Monthly columns — switch between scripture verses and book pages.
-  const [monthlySource, setMonthlySource] = useState<Source>('scripture');
+  // Year-rail counts: distinct days with any reading per year. Same
+  // metric across Heatmap and Stats so paging back through history
+  // feels uniform.
+  const yearCounts = useMemo(
+    () => daysWithReadingByYear({ scriptureReads, bookReads, dailyPages }),
+    [scriptureReads, bookReads, dailyPages],
+  );
+  const dataYears = useMemo(() => Array.from(yearCounts.keys()), [yearCounts]);
+
+  // Monthly chart — verses in scripture mode, pages in books mode.
+  // Auto-syncs with the page-level mode toggle (no separate pillbar).
   const monthlyTotals = useMemo(() => {
-    if (monthlySource === 'scripture') {
-      const map = sumByDate(scriptureReads, (r) => r.read_date, (r) => versesInRead(r));
-      return monthlyTotalsForYear(year, map);
+    if (mode === 'scripture') {
+      return monthlyTotalsForYear(year,
+        sumByDate(scriptureReads, (r) => r.read_date, (r) => versesInRead(r)));
     }
     return monthlyTotalsForYear(year, mergeByDate(
       sumByDate(bookReads, (r) => r.finished_on, (r) => r.pages),
       sumByDate(dailyPages, (r) => r.read_date, (r) => r.pages),
     ));
-  }, [monthlySource, year, scriptureReads, bookReads, dailyPages]);
+  }, [mode, year, scriptureReads, bookReads, dailyPages]);
   const monthlyMax = Math.max(1, ...monthlyTotals);
-  const monthlyUnitLabel = monthlySource === 'scripture' ? 'verses' : 'pages';
+  const monthlyUnitLabel = mode === 'scripture' ? 'verses' : 'pages';
   const monthlyTotal = monthlyTotals.reduce((a, b) => a + b, 0);
-
-  // OT/NT split for the year.
-  const otNt = useMemo(
-    () => otNtVerseSplit({
-      year,
-      reads: scriptureReads,
-      versesFor: (r) => versesInRead(r),
-      isOldTestament,
-    }),
-    [year, scriptureReads],
-  );
-
-  // Top-N books for the year — passes in versesInRead so the helper stays
-  // schema-agnostic.
-  const top10 = useMemo(
-    () => topBooksByVerses({ year, n: 10, reads: scriptureReads, versesFor: (r) => versesInRead(r) }),
-    [year, scriptureReads],
-  );
-
-  // Years-in-Books retrospective — all-time.
-  const retro = useMemo(
-    () => yearsInBooksRetro({
-      scriptureReads,
-      bookReads,
-      dailyPages,
-      versesFor: (r) => versesInRead(r),
-    }),
-    [scriptureReads, bookReads, dailyPages],
-  );
-
-  const hasAnyData = retro.length > 0;
 
   return (
     <div className="dt-stats-wrap">
@@ -1177,36 +1246,113 @@ function StatsView({
               : 'No reading recorded for this year yet.'}
           </div>
         </div>
-        <YearRail layout="horizontal" options={yearOptions} value={year} onChange={setYear} />
+        <div className="stats-controls">
+          <Pillbar
+            value={mode}
+            options={[
+              { value: 'scripture', label: 'Scripture' },
+              { value: 'books', label: 'Books' },
+            ]}
+            onChange={(v) => setMode(v as StatsMode)}
+          />
+          <YearRail
+            layout="horizontal"
+            value={year}
+            onChange={setYear}
+            counts={yearCounts}
+            dataYears={dataYears}
+          />
+        </div>
       </div>
 
-      {/* KPIs */}
+      {mode === 'scripture' ? (
+        <ScriptureStats
+          stats={stats}
+          year={year}
+          scriptureReads={scriptureReads}
+          monthlyTotals={monthlyTotals}
+          monthlyMax={monthlyMax}
+          monthlyTotal={monthlyTotal}
+          monthlyUnitLabel={monthlyUnitLabel}
+        />
+      ) : (
+        <BooksStats
+          stats={stats}
+          year={year}
+          bookReads={bookReads}
+          dailyPages={dailyPages}
+          scriptureReads={scriptureReads}
+          monthlyTotals={monthlyTotals}
+          monthlyMax={monthlyMax}
+          monthlyTotal={monthlyTotal}
+          monthlyUnitLabel={monthlyUnitLabel}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Stats: Scripture mode ────────────────────────────────────────────
+
+function ScriptureStats({
+  stats, year, scriptureReads,
+  monthlyTotals, monthlyMax, monthlyTotal, monthlyUnitLabel,
+}: {
+  stats: ReturnType<typeof computeYearStats>;
+  year: number;
+  scriptureReads: ScriptureRead[];
+  monthlyTotals: number[];
+  monthlyMax: number;
+  monthlyTotal: number;
+  monthlyUnitLabel: string;
+}) {
+  const otNt = useMemo(
+    () => otNtVerseSplit({
+      year,
+      reads: scriptureReads,
+      versesFor: (r) => versesInRead(r),
+      isOldTestament,
+    }),
+    [year, scriptureReads],
+  );
+
+  const top10 = useMemo(
+    () => topBooksByVerses({ year, n: 10, reads: scriptureReads, versesFor: (r) => versesInRead(r) }),
+    [year, scriptureReads],
+  );
+
+  return (
+    <>
+      {/* KPIs — Scripture flavor */}
       <div className="kpi-row">
+        <KpiCard label="Reading days" value={stats.scripture.days.toLocaleString()} hint="days you opened the Word" />
         <KpiCard label="Verses" value={stats.scripture.verses.toLocaleString()} hint={`${stats.scripture.chapters} chapter reads`} />
         <KpiCard label="Distinct chapters" value={stats.scripture.distinctChapters.toLocaleString()} hint={`across ${stats.scripture.booksTouched} of 66 books`} />
-        <KpiCard label="Books finished" value={stats.books.finished.toLocaleString()} hint={`${stats.books.authors} author${stats.books.authors === 1 ? '' : 's'}`} />
-        <KpiCard label="Pages read" value={stats.books.pages.toLocaleString()} hint={`across ${stats.books.days} day${stats.books.days === 1 ? '' : 's'}`} />
-        <KpiCard label="Current streak" value={`${stats.combined.streakCurrent} day${stats.combined.streakCurrent === 1 ? '' : 's'}`} hint={`longest ${stats.combined.streakLongest}`} />
+        <KpiCard label="Longest streak" value={`${stats.combined.streakLongest} day${stats.combined.streakLongest === 1 ? '' : 's'}`} hint={stats.combined.streakCurrent > 0 ? `current ${stats.combined.streakCurrent}` : 'no current streak'} />
       </div>
 
-      {/* Monthly columns + OT/NT donut side by side */}
-      <div className="stats-row">
+      {/* Top books · Monthly · OT/NT side by side */}
+      <div className="stats-row scripture-row">
         <div className="panel stats-panel">
           <div className="panel-head">
             <div>
-              <h3 className="stats-h3">Monthly</h3>
-              <div className="sub">
-                {monthlyTotal.toLocaleString()} {monthlyUnitLabel} across {year}
-              </div>
+              <h3 className="stats-h3">Top books read</h3>
+              <div className="sub">most-read by verses · {year}</div>
             </div>
-            <Pillbar
-              value={monthlySource}
-              options={[
-                { value: 'scripture', label: 'Verses' },
-                { value: 'books', label: 'Pages' },
-              ]}
-              onChange={(v) => setMonthlySource(v as Source)}
-            />
+          </div>
+          {top10.length === 0 ? (
+            <div className="reads-empty"><em>No Scripture reads recorded for {year}.</em></div>
+          ) : (
+            <TopBooksBar rows={top10} />
+          )}
+        </div>
+
+        <div className="panel stats-panel">
+          <div className="panel-head">
+            <div>
+              <h3 className="stats-h3">By month</h3>
+              <div className="sub">{monthlyTotal.toLocaleString()} {monthlyUnitLabel}</div>
+            </div>
           </div>
           <MonthlyBars totals={monthlyTotals} max={monthlyMax} unit={monthlyUnitLabel} />
         </div>
@@ -1215,43 +1361,111 @@ function StatsView({
           <div className="panel-head">
             <div>
               <h3 className="stats-h3">Old / New</h3>
-              <div className="sub">verses by testament</div>
+              <div className="sub">by testament</div>
             </div>
           </div>
           <OtNtDonut ot={otNt.ot} nt={otNt.nt} />
         </div>
       </div>
 
-      {/* Top books */}
-      <div className="panel stats-panel">
-        <div className="panel-head">
-          <div>
-            <h3 className="stats-h3">Top books · {year}</h3>
-            <div className="sub">most-read by verses</div>
-          </div>
-        </div>
-        {top10.length === 0 ? (
-          <div className="reads-empty"><em>No Scripture reads recorded for {year}.</em></div>
-        ) : (
-          <TopBooksBar rows={top10} />
-        )}
+      {/* Years-in-Scripture retrospective — all-time */}
+      <YearsInScripture
+        scriptureReads={scriptureReads}
+        activeYear={year}
+      />
+    </>
+  );
+}
+
+// ── Stats: Books mode ────────────────────────────────────────────────
+
+function BooksStats({
+  stats, year, bookReads, dailyPages, scriptureReads,
+  monthlyTotals, monthlyMax, monthlyTotal, monthlyUnitLabel,
+}: {
+  stats: ReturnType<typeof computeYearStats>;
+  year: number;
+  bookReads: BookRead[];
+  dailyPages: DailyPageRead[];
+  scriptureReads: ScriptureRead[];
+  monthlyTotals: number[];
+  monthlyMax: number;
+  monthlyTotal: number;
+  monthlyUnitLabel: string;
+}) {
+  const topAuthors = useMemo(
+    () => topAuthorsByCount({ year, n: 8, bookReads }),
+    [year, bookReads],
+  );
+
+  // "Recently finished" = the last 6 books finished within the active year,
+  // newest first. bookReads is already sorted newest-first by listBookReads.
+  const recentlyFinished = useMemo(
+    () => bookReads
+      .filter((b) => b.finished_on.startsWith(`${year}-`))
+      .slice(0, 6),
+    [year, bookReads],
+  );
+
+  return (
+    <>
+      {/* KPIs — Books flavor */}
+      <div className="kpi-row">
+        <KpiCard label="Books finished" value={stats.books.finished.toLocaleString()} hint={`in ${year}`} />
+        <KpiCard label="Pages" value={stats.books.pages.toLocaleString()} hint="approximate" />
+        <KpiCard label="Authors" value={stats.books.authors.toLocaleString()} hint="distinct" />
+        <KpiCard label="Reading days" value={stats.books.days.toLocaleString()} hint="at least one page" />
       </div>
 
-      {/* Years-in-books retrospective — all-time */}
+      {/* Top authors + Recently finished + Monthly */}
+      <div className="stats-row books-row">
+        <div className="panel stats-panel">
+          <div className="panel-head">
+            <div>
+              <h3 className="stats-h3">Top authors</h3>
+              <div className="sub">books finished · {year}</div>
+            </div>
+          </div>
+          {topAuthors.length === 0 ? (
+            <div className="reads-empty"><em>No books finished in {year} yet.</em></div>
+          ) : (
+            <TopAuthorsBar rows={topAuthors} />
+          )}
+        </div>
+
+        <div className="panel stats-panel">
+          <div className="panel-head">
+            <div>
+              <h3 className="stats-h3">Recently finished</h3>
+              <div className="sub">{year}</div>
+            </div>
+          </div>
+          {recentlyFinished.length === 0 ? (
+            <div className="reads-empty"><em>No books finished in {year} yet.</em></div>
+          ) : (
+            <RecentlyFinishedList books={recentlyFinished} />
+          )}
+        </div>
+      </div>
+
       <div className="panel stats-panel">
         <div className="panel-head">
           <div>
-            <h3 className="stats-h3">Years-in-Books</h3>
-            <div className="sub">a long view of your reading life</div>
+            <h3 className="stats-h3">By month</h3>
+            <div className="sub">{monthlyTotal.toLocaleString()} {monthlyUnitLabel} · {year}</div>
           </div>
         </div>
-        {!hasAnyData ? (
-          <div className="reads-empty"><em>Nothing logged yet. Add a Scripture read or finished book to begin building this picture.</em></div>
-        ) : (
-          <RetroTable rows={retro} onPickYear={setYear} activeYear={year} />
-        )}
+        <MonthlyBars totals={monthlyTotals} max={monthlyMax} unit={monthlyUnitLabel} />
       </div>
-    </div>
+
+      {/* Years-in-Books retrospective — all-time */}
+      <YearsInBooks
+        bookReads={bookReads}
+        dailyPages={dailyPages}
+        scriptureReads={scriptureReads}
+        activeYear={year}
+      />
+    </>
   );
 }
 
@@ -1367,42 +1581,371 @@ function TopBooksBar({ rows }: { rows: Array<{ book: string; verses: number; rea
   );
 }
 
-function RetroTable({
-  rows, activeYear, onPickYear,
-}: {
-  rows: ReturnType<typeof yearsInBooksRetro>;
-  activeYear: number;
-  onPickYear: (y: number) => void;
-}) {
+// ── Top authors bar (Books mode) ─────────────────────────────────────
+
+function TopAuthorsBar({ rows }: { rows: Array<{ author: string; total: number; pages: number }> }) {
+  const max = Math.max(1, ...rows.map((r) => r.total));
   return (
-    <table className="retro-table">
-      <thead>
-        <tr>
-          <th>Year</th>
-          <th className="num">Verses</th>
-          <th className="num">Chapter reads</th>
-          <th className="num">Books</th>
-          <th className="num">Pages</th>
-          <th className="num">Days</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr
+    <ul className="topbooks-list">
+      {rows.map((r) => {
+        const pct = (r.total / max) * 100;
+        const level = bucketLevelForBar(r.total, max);
+        return (
+          <li key={r.author} className="topbooks-row">
+            <span className="topbooks-name">{r.author}</span>
+            <div className="topbooks-track">
+              <div className={`topbooks-bar l${level}`} style={{ width: `${pct}%` }} />
+            </div>
+            <span className="topbooks-num">{r.total.toLocaleString()}</span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+// ── Recently finished list (Books mode) ──────────────────────────────
+
+function RecentlyFinishedList({ books }: { books: BookRead[] }) {
+  // EB Garamond italic for the meta line, Cormorant for the title — matches
+  // the rest of the room's voice.
+  return (
+    <ul className="recent-finished">
+      {books.map((b) => (
+        <li key={b.id} className="recent-finished-row">
+          <div className="rf-title">{b.title}</div>
+          <div className="rf-meta">
+            <em>{b.author || 'Unknown author'}</em>
+            <span className="dot-sep">·</span>
+            <span>{formatRecentDate(b.finished_on)}</span>
+            {b.pages > 0 && <>
+              <span className="dot-sep">·</span>
+              <span>{b.pages} pp</span>
+            </>}
+            {b.rating > 0 && <>
+              <span className="dot-sep">·</span>
+              <span className="rf-stars">{'★'.repeat(b.rating)}</span>
+            </>}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** "Apr 22, 2026" — short month + day + year. */
+function formatRecentDate(dateKey: string): string {
+  const [y, m, d] = dateKey.split('-').map((s) => parseInt(s, 10));
+  const date = new Date(y, (m || 1) - 1, d || 1);
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// ── Years-in-Books retrospective ─────────────────────────────────────
+//
+// Shows all years with reading data, descending. Each row is a
+// horizontal bar showing the number of books finished that year, with
+// a chevron toggle to expand. Expanded rows show every book grouped by
+// star rating, plus footer stats (books / pages / longest / shortest).
+
+function YearsInBooks({
+  bookReads, dailyPages, scriptureReads, activeYear,
+}: {
+  bookReads: BookRead[];
+  dailyPages: DailyPageRead[];
+  scriptureReads: ScriptureRead[];
+  activeYear: number;
+}) {
+  // Default to expanding the active year for instant visual continuity.
+  const [expandedYear, setExpandedYear] = useState<number | null>(activeYear);
+  useEffect(() => { setExpandedYear(activeYear); }, [activeYear]);
+
+  const retro = useMemo(
+    () => yearsInBooksRetro({
+      scriptureReads, bookReads, dailyPages,
+      versesFor: (r) => versesInRead(r),
+    }),
+    [scriptureReads, bookReads, dailyPages],
+  );
+
+  // Books grouped by year for fast lookup when a row expands.
+  const booksByYear = useMemo(() => {
+    const out = new Map<number, BookRead[]>();
+    for (const b of bookReads) {
+      const y = parseInt(b.finished_on.slice(0, 4), 10);
+      if (!Number.isFinite(y)) continue;
+      if (!out.has(y)) out.set(y, []);
+      out.get(y)!.push(b);
+    }
+    return out;
+  }, [bookReads]);
+
+  if (retro.length === 0) {
+    return (
+      <div className="panel stats-panel">
+        <div className="panel-head">
+          <div>
+            <h3 className="stats-h3">Years in Books</h3>
+            <div className="sub">a long view of your reading life</div>
+          </div>
+        </div>
+        <div className="reads-empty"><em>Nothing logged yet. Add a finished book to begin building this picture.</em></div>
+      </div>
+    );
+  }
+
+  const max = Math.max(1, ...retro.map((r) => r.books));
+
+  return (
+    <div className="panel stats-panel years-in-books">
+      <div className="panel-head">
+        <div>
+          <h3 className="stats-h3">Years in Books</h3>
+          <div className="sub">click a year to see what you read</div>
+        </div>
+      </div>
+      <ul className="yib-list">
+        {retro.map((r) => (
+          <YearsInBooksRow
             key={r.year}
-            className={r.year === activeYear ? 'active' : ''}
-            onClick={() => onPickYear(r.year)}
-          >
-            <td>{r.year}</td>
-            <td className="num">{r.verses.toLocaleString()}</td>
-            <td className="num">{r.chapters.toLocaleString()}</td>
-            <td className="num">{r.books.toLocaleString()}</td>
-            <td className="num">{r.pages.toLocaleString()}</td>
-            <td className="num">{r.days.toLocaleString()}</td>
-          </tr>
+            year={r.year}
+            count={r.books}
+            max={max}
+            expanded={expandedYear === r.year}
+            onToggle={() => setExpandedYear((y) => y === r.year ? null : r.year)}
+            books={booksByYear.get(r.year) || []}
+            pages={r.pages}
+            days={r.days}
+          />
         ))}
-      </tbody>
-    </table>
+      </ul>
+    </div>
+  );
+}
+
+function YearsInBooksRow({
+  year, count, max, expanded, onToggle, books, pages, days,
+}: {
+  year: number;
+  count: number;
+  max: number;
+  expanded: boolean;
+  onToggle: () => void;
+  books: BookRead[];
+  pages: number;
+  days: number;
+}) {
+  const pct = (count / max) * 100;
+  const hasBooks = books.length > 0;
+
+  // Group books by rating, descending. Unrated (0) goes last.
+  const grouped = useMemo(() => {
+    const buckets = new Map<number, BookRead[]>();
+    for (const b of books) {
+      const k = b.rating || 0;
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k)!.push(b);
+    }
+    const keys = Array.from(buckets.keys()).sort((a, b) => b - a);
+    return keys.map((k) => ({ rating: k, books: buckets.get(k)! }));
+  }, [books]);
+
+  // Longest / shortest by page count (only books with known pages).
+  const withPages = useMemo(() => books.filter((b) => b.pages > 0), [books]);
+  const longest = withPages.length > 0
+    ? withPages.reduce((a, b) => a.pages >= b.pages ? a : b)
+    : null;
+  const shortest = withPages.length > 0
+    ? withPages.reduce((a, b) => a.pages <= b.pages ? a : b)
+    : null;
+
+  return (
+    <li className={`yib-row${expanded ? ' expanded' : ''}`}>
+      <button
+        type="button"
+        className="yib-toggle"
+        onClick={onToggle}
+        disabled={!hasBooks}
+        aria-expanded={expanded}
+      >
+        <span className="yib-year">{year}</span>
+        <div className="yib-bar-track">
+          <div className="yib-bar" style={{ width: `${pct}%` }}>
+            {count > 0 && <span className="yib-bar-label">{count}</span>}
+          </div>
+        </div>
+        <span className="yib-chevron" aria-hidden="true">
+          {hasBooks ? (expanded ? '▾' : '▸') : '·'}
+        </span>
+      </button>
+
+      {expanded && hasBooks && (
+        <div className="yib-detail">
+          <div className="yib-detail-main">
+            {grouped.map((g) => (
+              <div key={g.rating} className="yib-rating-row">
+                <div className="yib-rating-label" title={`${g.rating || 0}/5`}>
+                  {g.rating > 0
+                    ? <>{'★'.repeat(g.rating)}<span className="dim">{'☆'.repeat(5 - g.rating)}</span></>
+                    : <span className="dim">unrated</span>}
+                </div>
+                <div className="yib-books-row">
+                  {g.books.map((b) => (
+                    <span key={b.id} className="yib-book-chip" title={b.author || 'Unknown author'}>
+                      <em>{b.title}</em>
+                      {b.author && <> · <span className="dim">{b.author.split(' ').pop()}</span></>}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div className="yib-detail-stats">
+              <span><span className="lbl">Books</span><strong>{books.length}</strong></span>
+              <span><span className="lbl">Pages</span><strong>{pages.toLocaleString()}</strong></span>
+              <span><span className="lbl">Days</span><strong>{days.toLocaleString()}</strong></span>
+              {longest && (
+                <span className="yib-stat-superlative">
+                  <span className="lbl">Longest</span>
+                  <em>{longest.title}</em> · {longest.pages}pp
+                </span>
+              )}
+              {shortest && shortest !== longest && (
+                <span className="yib-stat-superlative">
+                  <span className="lbl">Shortest</span>
+                  <em>{shortest.title}</em> · {shortest.pages}pp
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
+// ── Years-in-Scripture retrospective ─────────────────────────────────
+//
+// Parallel to YearsInBooks but for scripture reads. Bar shows
+// chapter-read count per year. Expanded rows show top-N Bible books
+// for that year (mirrors the Top Books panel above, but year-scoped).
+
+function YearsInScripture({
+  scriptureReads, activeYear,
+}: {
+  scriptureReads: ScriptureRead[];
+  activeYear: number;
+}) {
+  const [expandedYear, setExpandedYear] = useState<number | null>(activeYear);
+  useEffect(() => { setExpandedYear(activeYear); }, [activeYear]);
+
+  // Year-by-year totals. Reuse `yearsInBooksRetro` since it covers
+  // scripture columns too — we just read the chapters/verses fields.
+  const retro = useMemo(
+    () => yearsInBooksRetro({
+      scriptureReads, bookReads: [], dailyPages: [],
+      versesFor: (r) => versesInRead(r),
+    }),
+    [scriptureReads],
+  );
+
+  if (retro.length === 0) {
+    return (
+      <div className="panel stats-panel">
+        <div className="panel-head">
+          <div>
+            <h3 className="stats-h3">Years in Scripture</h3>
+            <div className="sub">a long view of your reading life</div>
+          </div>
+        </div>
+        <div className="reads-empty"><em>No Scripture reads logged yet.</em></div>
+      </div>
+    );
+  }
+
+  const max = Math.max(1, ...retro.map((r) => r.chapters));
+
+  return (
+    <div className="panel stats-panel years-in-books">
+      <div className="panel-head">
+        <div>
+          <h3 className="stats-h3">Years in Scripture</h3>
+          <div className="sub">click a year to see what you read</div>
+        </div>
+      </div>
+      <ul className="yib-list">
+        {retro.map((r) => (
+          <YearsInScriptureRow
+            key={r.year}
+            year={r.year}
+            count={r.chapters}
+            verses={r.verses}
+            days={r.days}
+            max={max}
+            expanded={expandedYear === r.year}
+            onToggle={() => setExpandedYear((y) => y === r.year ? null : r.year)}
+            scriptureReads={scriptureReads}
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function YearsInScriptureRow({
+  year, count, verses, days, max, expanded, onToggle, scriptureReads,
+}: {
+  year: number;
+  count: number;
+  verses: number;
+  days: number;
+  max: number;
+  expanded: boolean;
+  onToggle: () => void;
+  scriptureReads: ScriptureRead[];
+}) {
+  const pct = (count / max) * 100;
+  const hasReads = count > 0;
+
+  // Top books for this specific year — only computed when expanded.
+  const topThisYear = useMemo(
+    () => expanded
+      ? topBooksByVerses({ year, n: 10, reads: scriptureReads, versesFor: (r) => versesInRead(r) })
+      : [],
+    [expanded, year, scriptureReads],
+  );
+
+  return (
+    <li className={`yib-row${expanded ? ' expanded' : ''}`}>
+      <button
+        type="button"
+        className="yib-toggle"
+        onClick={onToggle}
+        disabled={!hasReads}
+        aria-expanded={expanded}
+      >
+        <span className="yib-year">{year}</span>
+        <div className="yib-bar-track">
+          <div className="yib-bar" style={{ width: `${pct}%` }}>
+            {count > 0 && <span className="yib-bar-label">{count}</span>}
+          </div>
+        </div>
+        <span className="yib-chevron" aria-hidden="true">
+          {hasReads ? (expanded ? '▾' : '▸') : '·'}
+        </span>
+      </button>
+
+      {expanded && hasReads && (
+        <div className="yib-detail">
+          <div className="yib-detail-main">
+            {topThisYear.length > 0 && <TopBooksBar rows={topThisYear} />}
+            <div className="yib-detail-stats">
+              <span><span className="lbl">Verses</span><strong>{verses.toLocaleString()}</strong></span>
+              <span><span className="lbl">Chapter reads</span><strong>{count.toLocaleString()}</strong></span>
+              <span><span className="lbl">Days</span><strong>{days.toLocaleString()}</strong></span>
+            </div>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 

@@ -564,6 +564,64 @@ export function topBooksByVerses<S extends ScriptureReadLike>(opts: {
   return arr.slice(0, Math.max(0, n));
 }
 
+/**
+ * Top-N authors for a year (or all-time), ranked by number of books
+ * finished. Stable tie break by author name. Whitespace-only authors
+ * collapse to "Unknown author" (same convention as
+ * `aggregateBooksByAuthor`).
+ */
+export function topAuthorsByCount<T extends BookReadLike>(opts: {
+  year: number | null;
+  n: number;
+  bookReads: T[];
+}): Array<{ author: string; total: number; pages: number }> {
+  const { year, n, bookReads } = opts;
+  const yearPrefix = year !== null ? `${year}-` : null;
+  const totals = new Map<string, { total: number; pages: number }>();
+  for (const b of bookReads) {
+    if (yearPrefix && !b.finished_on.startsWith(yearPrefix)) continue;
+    const author = (b.author || '').trim() || 'Unknown author';
+    let row = totals.get(author);
+    if (!row) { row = { total: 0, pages: 0 }; totals.set(author, row); }
+    row.total++;
+    row.pages += Math.max(0, b.pages || 0);
+  }
+  const arr: Array<{ author: string; total: number; pages: number }> = [];
+  for (const [author, row] of totals) arr.push({ author, ...row });
+  arr.sort((a, b) => b.total - a.total || a.author.localeCompare(b.author));
+  return arr.slice(0, Math.max(0, n));
+}
+
+/**
+ * Map of year → count-of-distinct-days-with-any-reading. Used to label
+ * year-rail buttons with `(N)` so the user can see at a glance which
+ * years have data and how much. "Any reading" = scripture, book
+ * completion, or daily-page log on that date.
+ */
+export function daysWithReadingByYear<S extends ScriptureReadLike, B extends BookReadLike>(opts: {
+  scriptureReads: S[];
+  bookReads: B[];
+  dailyPages: DailyPageLike[];
+}): Map<number, number> {
+  const { scriptureReads, bookReads, dailyPages } = opts;
+  // Build per-year sets of date keys, then convert to counts.
+  const byYear = new Map<number, Set<string>>();
+  function addDate(dateKey: string) {
+    if (!dateKey || dateKey.length < 4) return;
+    const y = parseInt(dateKey.slice(0, 4), 10);
+    if (!Number.isFinite(y)) return;
+    let s = byYear.get(y);
+    if (!s) { s = new Set(); byYear.set(y, s); }
+    s.add(dateKey);
+  }
+  for (const r of scriptureReads) addDate(r.read_date);
+  for (const b of bookReads) addDate(b.finished_on);
+  for (const d of dailyPages) addDate(d.read_date);
+  const out = new Map<number, number>();
+  for (const [y, s] of byYear) out.set(y, s.size);
+  return out;
+}
+
 /** One row in the Years-in-Books retrospective. */
 export type YearRetrospective = {
   year: number;

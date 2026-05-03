@@ -268,10 +268,12 @@
 
 /* Year rail — vertical (next to the heatmap) and horizontal (next to
    the stats title) layouts share the same button rules; only the
-   container's flex direction and padding differ. */
+   container's flex direction and padding differ. Chevron page-buttons
+   shift the visible 5-year window further into history (or back). */
 .year-rail {
   display: flex;
   gap: 4px;
+  align-items: center;
 }
 .year-rail.vertical { flex-direction: column; }
 .year-rail.horizontal { flex-direction: row; }
@@ -281,12 +283,53 @@
   font-family: 'Cormorant Garamond', serif;
   font-size: 14px; letter-spacing: 0.12em;
   color: var(--ink-soft);
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 5px;
 }
-.year-rail.vertical .year { padding: 8px 0; }
+.year-rail.vertical .year {
+  padding: 8px 4px;
+  flex-direction: column;
+  gap: 2px;
+}
 .year-rail.horizontal .year { padding: 6px 14px; }
 .year-rail .year:hover { color: var(--ink); border-color: var(--ink-soft); }
 .year-rail .year.active {
   background: var(--ink); color: var(--bg); border-color: var(--ink);
+}
+.year-rail .year.active .year-count { color: color-mix(in oklab, var(--bg) 75%, transparent 25%); }
+.year-rail .year.no-data {
+  color: var(--ink-faint);
+  border-style: dashed;
+}
+.year-rail .year .year-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+.year-rail.vertical .year .year-count { font-size: 8px; }
+
+.year-rail .year-page-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  color: var(--ink-faint);
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+  transition: color 100ms ease, border-color 100ms ease;
+}
+.year-rail.vertical .year-page-btn { padding: 2px 0; width: 100%; }
+.year-rail .year-page-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--line);
+}
+.year-rail .year-page-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .dt-tooltip {
@@ -688,6 +731,13 @@
   color: var(--ink-faint); font-size: 13px;
   margin-top: 4px;
 }
+/* Stats controls (Pillbar + YearRail packed into the head bar). */
+.stats-controls {
+  display: flex; align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
 /* KPI row */
 .kpi-row {
   display: grid;
@@ -733,15 +783,29 @@
   color: var(--ink);
 }
 
-/* Side-by-side row: monthly + donut */
+/* Side-by-side row layouts:
+   - scripture-row: top books · monthly · donut (3 columns)
+   - books-row: top authors · recently finished (2 columns)
+   - default: 1fr + 320px (legacy two-up) */
 .stats-row {
   display: grid;
   grid-template-columns: 1fr 320px;
   gap: 18px;
   align-items: stretch;
 }
+.stats-row.scripture-row {
+  grid-template-columns: 1fr 1fr 320px;
+}
+.stats-row.books-row {
+  grid-template-columns: 1fr 1fr;
+}
+@media (max-width: 1100px) {
+  .stats-row.scripture-row { grid-template-columns: 1fr 1fr; }
+}
 @media (max-width: 900px) {
-  .stats-row { grid-template-columns: 1fr; }
+  .stats-row,
+  .stats-row.scripture-row,
+  .stats-row.books-row { grid-template-columns: 1fr; }
 }
 
 /* Monthly bars */
@@ -876,54 +940,191 @@
   font-size: 12px; color: var(--ink-faint);
 }
 
-/* Years-in-Books retrospective */
-.retro-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 12px;
-  font-family: 'EB Garamond', serif;
-  font-size: 14px;
+/* Recently finished list (Books mode) */
+.recent-finished {
+  list-style: none; padding: 0; margin: 12px 0 0;
+  display: flex; flex-direction: column; gap: 10px;
 }
-.retro-table th, .retro-table td {
-  padding: 8px 10px;
+.recent-finished-row {
+  border-bottom: 1px dashed var(--line);
+  padding-bottom: 8px;
+}
+.recent-finished-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.rf-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 16px;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+.rf-meta {
+  margin-top: 2px;
+  font-family: 'EB Garamond', serif;
+  font-size: 12px;
+  color: var(--ink-soft);
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 4px;
+}
+.rf-meta em {
+  font-style: italic;
+}
+.rf-meta .dot-sep { color: var(--ink-faint); }
+.rf-meta .rf-stars { color: var(--red); letter-spacing: 1px; }
+
+/* Years-in-X retrospective — horizontal bars with chevron-toggled
+   detail panels. One component shape; Scripture and Books modes feed
+   it slightly different bar counts (chapter-reads vs books-finished)
+   and slightly different detail content. */
+.years-in-books { padding-bottom: 8px; }
+
+.yib-list {
+  list-style: none; padding: 0; margin: 12px 0 0;
+  display: flex; flex-direction: column;
+  gap: 6px;
+}
+.yib-row {
+  border-bottom: 1px solid color-mix(in oklab, var(--line) 50%, transparent 50%);
+  padding-bottom: 6px;
+}
+.yib-row:last-child { border-bottom: 0; }
+.yib-row.expanded { padding-bottom: 14px; }
+
+.yib-toggle {
+  display: grid;
+  grid-template-columns: 70px 1fr 24px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 8px 4px;
+  cursor: pointer;
   text-align: left;
-  border-bottom: 1px solid var(--line);
+  border-radius: 2px;
+}
+.yib-toggle:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 5%, transparent 95%);
+}
+.yib-toggle:disabled { cursor: default; opacity: 0.55; }
+
+.yib-year {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 22px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.yib-bar-track {
+  background: color-mix(in oklab, var(--bg-2) 70%, transparent 30%);
+  height: 28px;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.yib-bar {
+  height: 100%;
+  background: var(--heat-4);
+  border-radius: 4px;
+  display: flex; align-items: center;
+  padding: 0 10px;
+  transition: width 200ms ease-out;
+  min-width: 0;
+}
+.yib-bar-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--bg);
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.retro-table th {
+.yib-chevron {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  color: var(--ink-faint);
+  text-align: center;
+}
+.yib-toggle:hover:not(:disabled) .yib-chevron { color: var(--ink); }
+
+/* Expanded detail panel */
+.yib-detail {
+  margin: 6px 0 0 70px;  /* aligns under the bar, indented past the year */
+  padding: 12px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  border-left: 3px solid var(--heat-4);
+}
+.yib-detail-main { display: flex; flex-direction: column; gap: 10px; }
+
+/* Books grouped by rating */
+.yib-rating-row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px dashed color-mix(in oklab, var(--line) 60%, transparent 40%);
+}
+.yib-rating-row:last-of-type { border-bottom: 0; }
+.yib-rating-label {
+  font-family: 'EB Garamond', serif;
+  font-size: 14px;
+  color: var(--red);
+  letter-spacing: 1px;
+}
+.yib-rating-label .dim { color: var(--ink-faint); }
+.yib-books-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.yib-book-chip {
+  background: var(--page);
+  border: 1px solid var(--line);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-family: 'EB Garamond', serif;
+  font-size: 12px;
+  color: var(--ink);
+}
+.yib-book-chip em { font-style: italic; }
+.yib-book-chip .dim { color: var(--ink-faint); }
+
+/* Footer stats inside expanded detail */
+.yib-detail-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding-top: 10px;
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  font-family: 'EB Garamond', serif;
+  font-size: 13px;
+  color: var(--ink);
+}
+.yib-detail-stats > span {
+  display: flex; flex-direction: column;
+  gap: 2px;
+}
+.yib-detail-stats .lbl {
   font-family: 'Cormorant Garamond', serif;
-  font-weight: 400;
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-faint);
-  border-bottom-color: var(--line-strong);
 }
-.retro-table td.num, .retro-table th.num {
-  text-align: right;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
-}
-.retro-table td:first-child {
+.yib-detail-stats strong {
   font-family: 'Cormorant Garamond', serif;
+  font-weight: 400;
   font-size: 18px;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
-.retro-table tbody tr {
-  cursor: pointer;
-  transition: background 100ms ease;
+.yib-stat-superlative {
+  /* Title + page count instead of a single big number. */
 }
-.retro-table tbody tr:hover {
-  background: color-mix(in oklab, var(--accent) 6%, transparent 94%);
-}
-.retro-table tbody tr.active {
-  background: color-mix(in oklab, var(--accent) 12%, transparent 88%);
-}
-.retro-table tbody tr.active td:first-child::before {
-  content: '▸ ';
-  color: var(--ink);
+.yib-stat-superlative em {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
   font-size: 14px;
+  color: var(--ink);
 }
 
 /* ── Plans view ───────────────────────────────────────────────────── */

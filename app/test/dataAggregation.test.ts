@@ -7,6 +7,7 @@ import {
   buildCalendarGrid,
   buildHeatGrid,
   computeYearStats,
+  daysWithReadingByYear,
   formatLocalDate,
   mergeByDate,
   monthlyTotalsForYear,
@@ -17,6 +18,7 @@ import {
   planTotalSessions,
   sessionsThroughDate,
   sumByDate,
+  topAuthorsByCount,
   topBooksByVerses,
   yearsInBooksRetro,
 } from '../src/lib/dataAggregation';
@@ -465,6 +467,70 @@ describe('topBooksByVerses', () => {
     const psalms = top.find((t) => t.book === 'Psalms')!;
     expect(psalms.verses).toBe(12);
     expect(psalms.reads).toBe(2);
+  });
+});
+
+describe('topAuthorsByCount', () => {
+  const books = [
+    { finished_on: '2026-01-15', title: 'A', author: 'C.S. Lewis',         pages: 250, rating: 5, review: null },
+    { finished_on: '2026-03-10', title: 'B', author: 'C.S. Lewis',         pages: 300, rating: 5, review: null },
+    { finished_on: '2026-04-12', title: 'C', author: 'Marilynne Robinson', pages: 247, rating: 5, review: null },
+    { finished_on: '2026-05-05', title: 'D', author: 'Marilynne Robinson', pages: 260, rating: 4, review: null },
+    { finished_on: '2026-02-20', title: 'E', author: 'Annie Dillard',      pages: 180, rating: 4, review: null },
+    { finished_on: '2025-09-01', title: 'F', author: 'Annie Dillard',      pages: 200, rating: 5, review: null },
+    { finished_on: '2025-11-11', title: 'G', author: '',                   pages: 100, rating: 0, review: null },
+  ];
+
+  it('ranks authors by total books and slices to N (year-bound)', () => {
+    const top = topAuthorsByCount({ year: 2026, n: 2, bookReads: books });
+    expect(top).toHaveLength(2);
+    expect(top[0]).toMatchObject({ author: 'C.S. Lewis',         total: 2, pages: 550 });
+    expect(top[1]).toMatchObject({ author: 'Marilynne Robinson', total: 2, pages: 507 });
+  });
+
+  it('ties break alphabetically', () => {
+    const top = topAuthorsByCount({ year: 2026, n: 5, bookReads: books });
+    // Lewis and Robinson both have 2; Lewis sorts before Robinson alphabetically.
+    expect(top.slice(0, 2).map((a) => a.author)).toEqual([
+      'C.S. Lewis', 'Marilynne Robinson',
+    ]);
+  });
+
+  it('all-time when year is null', () => {
+    const top = topAuthorsByCount({ year: null, n: 10, bookReads: books });
+    const dillard = top.find((a) => a.author === 'Annie Dillard')!;
+    expect(dillard.total).toBe(2); // both 2025 and 2026 entries
+    const unknown = top.find((a) => a.author === 'Unknown author')!;
+    expect(unknown.total).toBe(1); // empty author falls into Unknown
+  });
+});
+
+describe('daysWithReadingByYear', () => {
+  it('counts distinct days per year across all three sources', () => {
+    const out = daysWithReadingByYear({
+      scriptureReads: [
+        { read_date: '2026-01-05', book: 'X', chapter: 1, verse_from: null, verse_to: null },
+        { read_date: '2026-01-05', book: 'Y', chapter: 1, verse_from: null, verse_to: null }, // same day, dedup
+        { read_date: '2026-01-06', book: 'Z', chapter: 1, verse_from: null, verse_to: null },
+        { read_date: '2024-12-31', book: 'A', chapter: 1, verse_from: null, verse_to: null },
+      ],
+      bookReads: [
+        { finished_on: '2026-01-05', title: '', author: '', pages: 0, rating: 0, review: null }, // overlaps with scripture, still 1 day
+        { finished_on: '2026-04-01', title: '', author: '', pages: 0, rating: 0, review: null },
+      ],
+      dailyPages: [
+        { read_date: '2026-04-01', pages: 50 }, // overlaps with book completion
+        { read_date: '2026-04-02', pages: 30 },
+      ],
+    });
+    expect(out.get(2026)).toBe(4); // Jan 5, Jan 6, Apr 1, Apr 2
+    expect(out.get(2024)).toBe(1); // Dec 31
+    expect(out.get(2025)).toBeUndefined(); // no 2025 reading
+  });
+
+  it('returns empty map for empty inputs', () => {
+    const out = daysWithReadingByYear({ scriptureReads: [], bookReads: [], dailyPages: [] });
+    expect(out.size).toBe(0);
   });
 });
 
