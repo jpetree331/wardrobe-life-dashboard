@@ -464,42 +464,59 @@ function HeatGrid({
     }
   }
 
+  // Single grid: column 1 = dow gutter (30px), columns 2..N+1 = week
+  // columns (1fr each so cells stretch to fill available width).
+  // Row 1 = month labels, rows 2..8 = the seven dow rows.
+  // Putting labels and cells in the same grid means they share column
+  // sizing AND the 3px gap exactly — no drift between a label's
+  // position and the cells it points to. Cells stay square via
+  // `aspect-ratio: 1` and grow with the container.
+  const dowLabels = ['', 'Mon', '', 'Wed', '', 'Fri', ''];
+
   return (
-    <div className="dt-heatgrid">
-      <div className="month-labels" style={{ gridTemplateColumns: `30px repeat(${weeks}, 12px)` }}>
-        <span />
-        {monthLabels.map((m, i) => (
-          <span key={i} className="month-label" style={{ gridColumnStart: m.col + 2 }}>
-            {MONTH_SHORT[m.month]}
-          </span>
-        ))}
-      </div>
-      <div className="grid-body">
-        <div className="dow-labels">
-          <span /><span>Mon</span><span /><span>Wed</span><span /><span>Fri</span><span />
-        </div>
-        <div
-          className="grid-cells"
-          style={{
-            gridTemplateColumns: `repeat(${weeks}, 12px)`,
-            gridTemplateRows: 'repeat(7, 12px)',
-          }}
-          onMouseLeave={onLeave}
+    <div
+      className="dt-heatgrid"
+      style={{ gridTemplateColumns: `30px repeat(${weeks}, minmax(0, 1fr))` }}
+      onMouseLeave={onLeave}
+    >
+      {/* Top-left corner spacer (aligns over the dow gutter). */}
+      <span className="hg-corner" />
+
+      {/* Month labels — row 1, columns 2..N+1 keyed by week index. */}
+      {monthLabels.map((m) => (
+        <span
+          key={m.col}
+          className="month-label"
+          style={{ gridRow: 1, gridColumn: m.col + 2 }}
         >
-          {cells.map((c) => (
-            <div
-              key={c.date}
-              className={`heat-cell l${c.level}${c.isFuture ? ' future' : ''}`}
-              style={{
-                gridColumn: c.weekIndex + 1,
-                gridRow: c.dow + 1,
-              }}
-              onMouseMove={(e) => onHover(c, e.clientX, e.clientY)}
-              title={`${c.date} (${year})`}
-            />
-          ))}
-        </div>
-      </div>
+          {MONTH_SHORT[m.month]}
+        </span>
+      ))}
+
+      {/* Day-of-week labels — column 1, rows 2..8. */}
+      {dowLabels.map((d, i) => (
+        <span
+          key={i}
+          className="dow-label"
+          style={{ gridRow: i + 2, gridColumn: 1 }}
+        >
+          {d}
+        </span>
+      ))}
+
+      {/* Cells — rows 2..8, columns 2..N+1. */}
+      {cells.map((c) => (
+        <div
+          key={c.date}
+          className={`heat-cell l${c.level}${c.isFuture ? ' future' : ''}`}
+          style={{
+            gridColumn: c.weekIndex + 2,
+            gridRow: c.dow + 2,
+          }}
+          onMouseMove={(e) => onHover(c, e.clientX, e.clientY)}
+          title={`${c.date} (${year})`}
+        />
+      ))}
     </div>
   );
 }
@@ -881,12 +898,32 @@ function ReadItem({ read }: { read: ScriptureRead }) {
       ? `:${read.verse_from}${read.verse_from !== read.verse_to ? '–' + read.verse_to : ''}`
       : ''
   }`;
+
+  // Sanctuary-derived reads carry their entry id in the synthetic id:
+  // `sanctuary:<entry_id>:<ref_index>`. Extract it so the date can deep-
+  // link to the original Sanctuary entry. Sanctuary reads `?id=...` from
+  // useSearchParams to focus that entry on load.
+  const sanctuaryHref = read.source === 'sanctuary'
+    ? (() => {
+        const parts = read.id.split(':');
+        return parts.length >= 2 ? `/sanctuary?id=${parts[1]}` : null;
+      })()
+    : null;
+
   return (
     <li className={`read-item${read.source === 'sanctuary' ? ' from-sanctuary' : ''}`}>
       <div className="read-row">
-        <span className="read-date">{read.read_date}</span>
+        {sanctuaryHref ? (
+          <Link className="read-date link" to={sanctuaryHref} title="Open this Sanctuary entry">
+            {read.read_date}
+          </Link>
+        ) : (
+          <span className="read-date">{read.read_date}</span>
+        )}
         <span className="read-ref">{refStr}</span>
-        {read.source === 'sanctuary' && <span className="read-source" title="Synthesized from a Sanctuary entry">sanctuary</span>}
+        {read.source === 'sanctuary' && (
+          <span className="read-source" title="Synthesized from a Sanctuary entry — click the date to open it">sanctuary</span>
+        )}
       </div>
       {read.note && <div className="read-note">{read.note}</div>}
     </li>
