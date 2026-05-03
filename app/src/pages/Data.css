@@ -594,6 +594,7 @@
   padding: 10px 12px;
   background: color-mix(in oklab, var(--page) 92%, var(--bg-2) 8%);
 }
+.book-card:hover .book-edit { opacity: 1; }
 .book-card-row {
   display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
 }
@@ -611,11 +612,38 @@
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px; color: var(--ink-soft);
 }
+.book-pages-missing {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  padding: 1px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.book-pages-missing:hover {
+  color: var(--ink); border-color: var(--ink-soft);
+  background: color-mix(in oklab, var(--accent) 8%, transparent 92%);
+}
 .book-stars {
   font-family: 'EB Garamond', serif;
   font-size: 14px; color: var(--red);
   letter-spacing: 1px;
 }
+/* Edit affordance — only visible on hover so the card stays calm
+   when the user is just reading through their library. */
+.book-edit {
+  background: transparent; border: 0; cursor: pointer;
+  padding: 0;
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 11px;
+  color: var(--ink-faint);
+  opacity: 0;
+  transition: opacity 100ms ease, color 100ms ease;
+}
+.book-edit:hover { color: var(--ink); }
+.book-edit:focus-visible { opacity: 1; }
 .book-review {
   margin-top: 6px;
 }
@@ -1224,6 +1252,206 @@
 }
 .picker-item:hover { background: color-mix(in oklab, var(--accent) 10%, transparent 90%); }
 .picker-item input { margin: 0; }
+
+/* ── Goodreads import modal + footer link in + Book ───────────────── */
+
+/* Footer link inside + Book modal pointing at bulk import. */
+.modal-footer-link {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 12px;
+  color: var(--ink-faint);
+  text-align: center;
+}
+.text-link {
+  background: transparent; border: 0; padding: 0;
+  font-family: inherit; font-style: italic;
+  color: var(--ink-soft); cursor: pointer;
+  border-bottom: 1px dashed transparent;
+  font-size: inherit;
+}
+.text-link:hover {
+  color: var(--ink); border-bottom-color: var(--ink-soft);
+}
+
+/* Import: pick-file phase */
+.import-pick .file-pick {
+  display: flex; flex-direction: column; gap: 8px;
+  align-items: stretch;
+}
+.import-pick .file-pick input[type="file"] {
+  /* Hidden — the styled label-button is the visible affordance. */
+  position: absolute; left: -9999px; opacity: 0;
+}
+.import-pick .file-pick-button {
+  display: inline-block;
+  text-align: center;
+  background: var(--bg-2);
+  border: 1px dashed var(--line-strong);
+  padding: 22px 20px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  transition: border-color 100ms ease, color 100ms ease;
+}
+.import-pick .file-pick:hover .file-pick-button,
+.import-pick .file-pick input:focus-visible + .file-pick-button {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+.import-pick .file-pick-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+/* Import: preview phase */
+.import-preview { display: flex; flex-direction: column; gap: 14px; }
+.import-summary {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  padding: 12px 14px;
+  border-radius: 4px;
+}
+.import-headline {
+  font-family: 'EB Garamond', serif;
+  font-size: 15px;
+  color: var(--ink);
+}
+.import-headline strong {
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 400;
+  font-size: 22px;
+  color: var(--ink);
+}
+.import-headline .muted {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+.import-detail {
+  list-style: none; padding: 0;
+  margin: 8px 0 0;
+  display: flex; flex-direction: column; gap: 4px;
+  font-family: 'EB Garamond', serif;
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+.import-detail li {
+  padding-left: 14px;
+  position: relative;
+}
+.import-detail li::before {
+  content: '·';
+  position: absolute; left: 4px;
+  color: var(--ink-faint);
+}
+.import-detail .muted { color: var(--ink-faint); font-style: italic; }
+.import-detail strong {
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 400;
+  color: var(--ink);
+}
+
+/* Preview list of first-N books */
+.import-list-wrap {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.import-list-head {
+  background: var(--bg-2);
+  padding: 8px 12px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--line);
+}
+.import-list {
+  list-style: none; padding: 0; margin: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.import-list li {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 6px 12px;
+  border-bottom: 1px solid color-mix(in oklab, var(--line) 50%, transparent 50%);
+  font-family: 'EB Garamond', serif;
+  font-size: 13px;
+}
+.import-list li:last-child { border-bottom: 0; }
+.import-list .ip-date {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.import-list .ip-title {
+  flex: 1;
+  color: var(--ink);
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 14px;
+}
+.import-list .ip-author {
+  color: var(--ink-soft);
+  font-style: italic;
+  font-size: 12px;
+}
+.import-list .ip-pages {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.import-list .ip-rating {
+  color: var(--red);
+  letter-spacing: 1px;
+  font-size: 12px;
+}
+.import-list .ip-warn {
+  font-style: italic;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--ink-faint) 12%, transparent 88%);
+  color: var(--ink-soft);
+}
+.import-list .ip-more {
+  text-align: center;
+  font-style: italic;
+  color: var(--ink-faint);
+  font-size: 12px;
+  padding: 8px;
+}
+
+/* Inserting + done states */
+.import-progress { padding: 30px 12px; }
+.import-done {
+  font-family: 'EB Garamond', serif;
+  font-size: 14px;
+  color: var(--ink);
+}
+.import-done strong {
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 400;
+  font-size: 18px;
+}
+.import-done p { margin: 0 0 10px 0; }
+.import-done .dt-form-hint {
+  background: var(--bg-2);
+  border: 1px dashed var(--line);
+  padding: 10px 12px;
+  border-radius: 4px;
+  margin-bottom: 14px;
+}
 
 /* ── Modals ───────────────────────────────────────────────────────── */
 .dt-modal-bg {

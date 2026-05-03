@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
+  bulkCreateBookReads,
   createBookRead,
   createDailyPageRead,
   createReadingPlan,
@@ -13,6 +14,7 @@ import {
   listEntryDatesByRoom,
   listReadingPlans,
   togglePlanCompletion,
+  updateBookRead,
   versesInRead,
   chapterFractionInRead,
   type BookRead,
@@ -21,6 +23,13 @@ import {
   type ReadingPlan,
   type ScriptureRead,
 } from '../lib/data';
+import {
+  buildImportPreview,
+  dedupAgainstExisting,
+  parseCSV,
+  type GoodreadsBookCandidate,
+  type GoodreadsImportPreview,
+} from '../lib/goodreadsImport';
 import {
   aggregateBooksByAuthor,
   aggregateScriptureByBookChapter,
@@ -92,7 +101,12 @@ export default function Data() {
   const [loaded, setLoaded] = useState(false);
   const [statusMsg, setStatusMsg] = useState('Loading…');
 
-  const [modal, setModal] = useState<'scripture' | 'book' | 'daily-pages' | null>(null);
+  const [modal, setModal] = useState<
+    'scripture' | 'book' | 'daily-pages' | 'goodreads-import' | null
+  >(null);
+  // Edit-book modal — separate state because it carries the row to edit
+  // and is summoned from the Books pane, not the ribbon.
+  const [editBook, setEditBook] = useState<BookRead | null>(null);
 
   // Apply selected heatmap theme as CSS custom properties on the page
   // root. --heat-empty is theme-independent and lives in Data.css.
@@ -185,6 +199,7 @@ export default function Data() {
           <BookByChapterView
             scriptureReads={scriptureReads}
             bookReads={bookReads}
+            onEditBook={setEditBook}
           />
         ) : tab === 'stats' ? (
           <StatsView
@@ -213,12 +228,13 @@ export default function Data() {
         />
       )}
       {modal === 'book' && (
-        <AddBookModal
+        <BookFormModal
           onClose={() => setModal(null)}
           onSaved={async () => {
             setModal(null);
             await refresh();
           }}
+          onWantImport={() => setModal('goodreads-import')}
         />
       )}
       {modal === 'daily-pages' && (
@@ -226,6 +242,26 @@ export default function Data() {
           onClose={() => setModal(null)}
           onSaved={async () => {
             setModal(null);
+            await refresh();
+          }}
+        />
+      )}
+      {modal === 'goodreads-import' && (
+        <GoodreadsImportModal
+          existingBooks={bookReads}
+          onClose={() => setModal(null)}
+          onSaved={async () => {
+            setModal(null);
+            await refresh();
+          }}
+        />
+      )}
+      {editBook && (
+        <BookFormModal
+          existing={editBook}
+          onClose={() => setEditBook(null)}
+          onSaved={async () => {
+            setEditBook(null);
             await refresh();
           }}
         />
@@ -703,9 +739,11 @@ function CalendarView({
 function BookByChapterView({
   scriptureReads,
   bookReads,
+  onEditBook,
 }: {
   scriptureReads: ScriptureRead[];
   bookReads: BookRead[];
+  onEditBook: (b: BookRead) => void;
 }) {
   const [source, setSource] = useState<Source>('scripture');
 
@@ -736,7 +774,7 @@ function BookByChapterView({
         {source === 'scripture' ? (
           <ScriptureMatrix scriptureReads={scriptureReads} />
         ) : (
-          <BookByAuthor bookReads={bookReads} />
+          <BookByAuthor bookReads={bookReads} onEditBook={onEditBook} />
         )}
       </div>
     </div>
@@ -932,7 +970,12 @@ function ReadItem({ read }: { read: ScriptureRead }) {
 
 // ── Books-by-author panel ────────────────────────────────────────────
 
-function BookByAuthor({ bookReads }: { bookReads: BookRead[] }) {
+function BookByAuthor({
+  bookReads, onEditBook,
+}: {
+  bookReads: BookRead[];
+  onEditBook: (b: BookRead) => void;
+}) {
   const aggregate = useMemo(() => aggregateBooksByAuthor(bookReads), [bookReads]);
 
   // Sort authors A→Z (case-insensitive). "Unknown author" sinks to the bottom.
@@ -998,7 +1041,9 @@ function BookByAuthor({ bookReads }: { bookReads: BookRead[] }) {
               </span>
             </header>
             <ul className="author-books">
-              {authorAgg.books.map((b) => <BookCard key={b.id} book={b} />)}
+              {authorAgg.books.map((b) => (
+                <BookCard key={b.id} book={b} onEdit={() => onEditBook(b)} />
+              ))}
             </ul>
           </>
         ) : (
@@ -1009,7 +1054,7 @@ function BookByAuthor({ bookReads }: { bookReads: BookRead[] }) {
   );
 }
 
-function BookCard({ book }: { book: BookRead }) {
+function BookCard({ book, onEdit }: { book: BookRead; onEdit: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const stars = '★'.repeat(book.rating) + '☆'.repeat(5 - book.rating);
   return (
@@ -1017,8 +1062,15 @@ function BookCard({ book }: { book: BookRead }) {
       <div className="book-card-row">
         <span className="book-date">{book.finished_on}</span>
         <span className="book-title">{book.title}</span>
-        {book.pages > 0 && <span className="book-pages">{book.pages}p</span>}
+        {book.pages > 0
+          ? <span className="book-pages">{book.pages}p</span>
+          : <button type="button" className="book-pages-missing" onClick={onEdit} title="Click to add a page count">
+              add pages
+            </button>}
         {book.rating > 0 && <span className="book-stars" title={`${book.rating}/5`}>{stars}</span>}
+        <button type="button" className="book-edit" onClick={onEdit} title="Edit this book" aria-label="Edit this book">
+          edit
+        </button>
       </div>
       {book.review && (
         <div className={`book-review${expanded ? ' expanded' : ''}`}>
@@ -2040,18 +2092,34 @@ function AddScriptureModal({ onClose, onSaved }: { onClose: () => void; onSaved:
   );
 }
 
-// ── + Book modal ─────────────────────────────────────────────────────
+// ── + Book / Edit Book modal ─────────────────────────────────────────
+// Single component handles both: create when `existing` is null, edit
+// otherwise. Title and other fields pre-fill from `existing`. The
+// "bulk import" footer link is only shown in create mode (it'd be
+// confusing in an edit context).
 
-function AddBookModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [date, setDate] = useState(localToday());
-  const [pages, setPages] = useState(0);
-  const [title, setTitle] = useState('');
-  const [author, setAuthor] = useState('');
-  const [rating, setRating] = useState<0 | 1 | 2 | 3 | 4 | 5>(0);
+function BookFormModal({
+  existing,
+  onClose,
+  onSaved,
+  onWantImport,
+}: {
+  existing?: BookRead | null;
+  onClose: () => void;
+  onSaved: () => void;
+  onWantImport?: () => void;
+}) {
+  const [date, setDate] = useState(existing?.finished_on || localToday());
+  const [pages, setPages] = useState(existing?.pages || 0);
+  const [title, setTitle] = useState(existing?.title || '');
+  const [author, setAuthor] = useState(existing?.author || '');
+  const [rating, setRating] = useState<0 | 1 | 2 | 3 | 4 | 5>(existing?.rating || 0);
   const [hoverRating, setHoverRating] = useState(0);
-  const [review, setReview] = useState('');
+  const [review, setReview] = useState(existing?.review || '');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const isEdit = !!existing;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -2059,14 +2127,25 @@ function AddBookModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
     if (!title.trim()) { setErr('Title required.'); return; }
     setSaving(true); setErr(null);
     try {
-      await createBookRead({
-        finished_on: date,
-        title: title.trim(),
-        author: author.trim(),
-        pages,
-        rating,
-        review: review.trim() || null,
-      });
+      if (existing) {
+        await updateBookRead(existing.id, {
+          finished_on: date,
+          title: title.trim(),
+          author: author.trim(),
+          pages,
+          rating,
+          review: review.trim() || null,
+        });
+      } else {
+        await createBookRead({
+          finished_on: date,
+          title: title.trim(),
+          author: author.trim(),
+          pages,
+          rating,
+          review: review.trim() || null,
+        });
+      }
       onSaved();
     } catch (e: any) {
       console.error(e);
@@ -2076,7 +2155,7 @@ function AddBookModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
   }
 
   return (
-    <Modal title="+ Book" onClose={onClose}>
+    <Modal title={isEdit ? 'Edit book' : '+ Book'} onClose={onClose}>
       <form className="dt-form" onSubmit={onSubmit}>
         <div className="row">
           <label>
@@ -2127,7 +2206,203 @@ function AddBookModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
         </label>
         {err && <div className="dt-form-err">{err}</div>}
         <ModalActions onCancel={onClose} saving={saving} />
+        {!isEdit && onWantImport && (
+          <div className="modal-footer-link">
+            Have a Goodreads library? <button type="button" className="text-link" onClick={onWantImport}>
+              Bulk import from CSV
+            </button>
+          </div>
+        )}
       </form>
+    </Modal>
+  );
+}
+
+// ── Goodreads import modal ───────────────────────────────────────────
+// Two phases: pick a file → preview the candidates and stats → confirm
+// → bulk insert. Idempotent: dedupes against existing book reads on
+// (title, finished_on), so re-running is safe.
+
+function GoodreadsImportModal({
+  existingBooks,
+  onClose,
+  onSaved,
+}: {
+  existingBooks: BookRead[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [preview, setPreview] = useState<GoodreadsImportPreview | null>(null);
+  const [duplicateCount, setDuplicateCount] = useState(0);
+  const [toInsert, setToInsert] = useState<GoodreadsBookCandidate[]>([]);
+  const [phase, setPhase] = useState<'pick' | 'preview' | 'inserting' | 'done'>('pick');
+  const [err, setErr] = useState<string | null>(null);
+  const [insertedCount, setInsertedCount] = useState(0);
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErr(null);
+    setFileName(file.name);
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      if (rows.length === 0) {
+        setErr('That CSV looks empty or unrecognised.');
+        return;
+      }
+      const previewData = buildImportPreview(rows);
+      const dedup = dedupAgainstExisting(
+        previewData.candidates,
+        existingBooks.map((b) => ({ title: b.title, finished_on: b.finished_on })),
+      );
+      setPreview(previewData);
+      setToInsert(dedup.toInsert);
+      setDuplicateCount(dedup.duplicateCount);
+      setPhase('preview');
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || 'Could not read that file.');
+    }
+  }
+
+  async function onConfirm() {
+    if (toInsert.length === 0 || phase === 'inserting') return;
+    setPhase('inserting');
+    setErr(null);
+    try {
+      const inserted = await bulkCreateBookReads(toInsert.map((c) => ({
+        finished_on: c.finished_on,
+        title: c.title,
+        author: c.author,
+        pages: c.pages,
+        rating: c.rating,
+        review: c.review,
+      })));
+      setInsertedCount(inserted);
+      setPhase('done');
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || 'Something went wrong while saving.');
+      setPhase('preview');
+    }
+  }
+
+  return (
+    <Modal title="Import from Goodreads" onClose={onClose}>
+      {phase === 'pick' && (
+        <div className="dt-form import-pick">
+          <p className="dt-form-hint" style={{ marginTop: 0 }}>
+            Export your library from <em>Goodreads → My Books → Import and export → Export Library</em>.
+            That gives you a CSV you can drop here. We'll only import books on your <em>Read</em> shelf;
+            to-read and currently-reading lists are ignored.
+          </p>
+          <label className="file-pick">
+            <input type="file" accept=".csv,text/csv" onChange={onFile} />
+            <span className="file-pick-button">Choose CSV file…</span>
+            {fileName && <span className="file-pick-name">{fileName}</span>}
+          </label>
+          {err && <div className="dt-form-err">{err}</div>}
+          <div className="dt-modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'preview' && preview && (
+        <div className="dt-form import-preview">
+          <div className="import-summary">
+            <div className="import-headline">
+              <strong>{toInsert.length}</strong> book{toInsert.length === 1 ? '' : 's'} ready to import
+              {duplicateCount > 0 && <> · <span className="muted">{duplicateCount} skipped as duplicates</span></>}
+            </div>
+            <ul className="import-detail">
+              {preview.skippedNonRead > 0 && (
+                <li>
+                  <span className="muted">Skipped {preview.skippedNonRead}</span> on other shelves
+                  ({Object.entries(preview.shelfBreakdown).map(([s, n]) => `${n} ${s}`).join(', ')})
+                </li>
+              )}
+              {preview.dateFallbackCount > 0 && (
+                <li>
+                  <strong>{preview.dateFallbackCount}</strong> book{preview.dateFallbackCount === 1 ? '' : 's'} had no <em>Date Read</em> —
+                  using <em>Date Added</em> as a stand-in.
+                </li>
+              )}
+              {preview.missingPagesCount > 0 && (
+                <li>
+                  <strong>{preview.missingPagesCount}</strong> book{preview.missingPagesCount === 1 ? '' : 's'} had no page count —
+                  pages set to 0; you can edit them after import (click <em>edit</em> on any book card).
+                </li>
+              )}
+              {preview.reReadCount > 0 && (
+                <li>
+                  <strong>{preview.reReadCount}</strong> re-read{preview.reReadCount === 1 ? '' : 's'} —
+                  Goodreads only stored one date per book; each will be imported once with the most recent date,
+                  and you can add the earlier reads via <em>+ Book</em>.
+                </li>
+              )}
+            </ul>
+          </div>
+
+          {toInsert.length > 0 && (
+            <div className="import-list-wrap">
+              <div className="import-list-head">First few to import:</div>
+              <ul className="import-list">
+                {toInsert.slice(0, 8).map((c, i) => (
+                  <li key={i}>
+                    <span className="ip-date">{c.finished_on}</span>
+                    <span className="ip-title">{c.title}</span>
+                    {c.author && <span className="ip-author">{c.author}</span>}
+                    {c.pages > 0 && <span className="ip-pages">{c.pages}p</span>}
+                    {c.rating > 0 && <span className="ip-rating">{'★'.repeat(c.rating)}</span>}
+                    {c.dateFallback && <span className="ip-warn">date est.</span>}
+                    {c.readCount > 1 && <span className="ip-warn">re-read</span>}
+                  </li>
+                ))}
+                {toInsert.length > 8 && (
+                  <li className="ip-more">…and {toInsert.length - 8} more.</li>
+                )}
+              </ul>
+            </div>
+          )}
+
+          {err && <div className="dt-form-err">{err}</div>}
+          <div className="dt-modal-actions">
+            <button type="button" onClick={onClose}>Cancel</button>
+            <button
+              type="button"
+              className="primary"
+              onClick={onConfirm}
+              disabled={toInsert.length === 0}
+            >
+              Import {toInsert.length} book{toInsert.length === 1 ? '' : 's'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {phase === 'inserting' && (
+        <div className="import-progress">
+          <div className="dt-loading">Importing {toInsert.length} books… this may take a moment.</div>
+        </div>
+      )}
+
+      {phase === 'done' && (
+        <div className="import-done">
+          <p>Imported <strong>{insertedCount}</strong> book{insertedCount === 1 ? '' : 's'}.</p>
+          {preview && preview.missingPagesCount > 0 && (
+            <p className="dt-form-hint">
+              Don't forget — <strong>{preview.missingPagesCount}</strong> book{preview.missingPagesCount === 1 ? '' : 's'} need page counts.
+              Open <em>Book × Chapter → Books</em> and click <em>add pages</em> on each.
+            </p>
+          )}
+          <div className="dt-modal-actions">
+            <button type="button" className="primary" onClick={onSaved}>Done</button>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }

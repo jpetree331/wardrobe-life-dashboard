@@ -263,9 +263,69 @@ export async function createBookRead(input: {
   return data as BookRead;
 }
 
+export async function updateBookRead(
+  id: string,
+  patch: Partial<{
+    finished_on: string;
+    title: string;
+    author: string;
+    pages: number;
+    rating: number;
+    review: string | null;
+  }>,
+): Promise<BookRead> {
+  const { data, error } = await supabase
+    .from('data_book_reads')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as BookRead;
+}
+
 export async function deleteBookRead(id: string): Promise<void> {
   const { error } = await supabase.from('data_book_reads').delete().eq('id', id);
   if (error) throw error;
+}
+
+/**
+ * Bulk-insert book reads. Inserts in batches of 100 so a single
+ * Goodreads import (~250 rows) doesn't blow past PostgREST's payload
+ * limits. Returns the count actually inserted; throws on any failure
+ * (the early rows DO commit before the error — the caller's onChanged()
+ * hook will pick them up on the next refresh).
+ */
+export async function bulkCreateBookReads(
+  inputs: Array<{
+    finished_on: string;
+    title: string;
+    author?: string;
+    pages?: number;
+    rating?: number;
+    review?: string | null;
+  }>,
+): Promise<number> {
+  if (inputs.length === 0) return 0;
+  const userId = await currentUserId();
+  const rows = inputs.map((b) => ({
+    user_id: userId,
+    finished_on: b.finished_on,
+    title: b.title,
+    author: b.author ?? '',
+    pages: b.pages ?? 0,
+    rating: b.rating ?? 0,
+    review: b.review ?? null,
+  }));
+  let inserted = 0;
+  const BATCH = 100;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const slice = rows.slice(i, i + BATCH);
+    const { error } = await supabase.from('data_book_reads').insert(slice);
+    if (error) throw error;
+    inserted += slice.length;
+  }
+  return inserted;
 }
 
 // ── Daily page reads ─────────────────────────────────────────────────
