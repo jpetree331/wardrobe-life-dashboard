@@ -5,7 +5,7 @@ import './Hallway.css';
 
 /** Per-room metadata: which spheres exist, where they go, and what's beneath them. */
 interface RoomDoor {
-  key: 'notes' | 'timeline' | 'data' | 'treasury' | 'sanctuary';
+  key: 'notes' | 'timeline' | 'data' | 'treasury' | 'daybook' | 'sanctuary';
   name: string;
   sub: string;
   size: 'big' | 'small';
@@ -18,6 +18,7 @@ const DOORS: RoomDoor[] = [
   { key: 'timeline',  name: 'Timeline',  sub: 'life, in a line',      size: 'small', route: '/timeline' },
   { key: 'data',      name: 'Data',      sub: 'reading & scripture',  size: 'small', route: '/data' },
   { key: 'treasury',  name: 'Treasury',  sub: 'verses kept',          size: 'small', route: '/treasury' },
+  { key: 'daybook',   name: 'Daybook',   sub: 'hours given shape',    size: 'small', route: '/daybook' },
   { key: 'sanctuary', name: 'Sanctuary', sub: 'scripture & prayer',   size: 'big',   route: '/sanctuary' },
 ];
 

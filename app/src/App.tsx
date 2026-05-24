@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './hooks/useAuth';
 import Data from './pages/Data';
+import Daybook from './pages/Daybook';
 import Hallway from './pages/Hallway';
 import Login from './pages/Login';
 import Notes from './pages/Notes';
@@ -25,6 +26,7 @@ export default function App() {
       <Route path="/timeline" element={<Protected><Timeline /></Protected>} />
       <Route path="/data" element={<Protected><Data /></Protected>} />
       <Route path="/treasury" element={<Protected><Treasury /></Protected>} />
+      <Route path="/daybook" element={<Protected><Daybook /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

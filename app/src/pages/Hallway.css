@@ -154,13 +154,16 @@
 /* Pawprint — Sanctuary big & centered horizontally directly under Notes.
    Timeline & Data symmetric around 50%. Treasury sits on the vertical
    centerline between Notes (top) and Sanctuary (bottom), anchoring the
-   spine of the layout. The arrangement reads: Notes → Treasury →
-   Sanctuary down the middle, with Timeline / Data flanking. */
+   spine of the layout. Daybook sits below Timeline on the left side —
+   deliberate asymmetry: the LEFT column is time-related (Timeline =
+   past life events, Daybook = future schedule), the RIGHT column is
+   the Scripture-stats axis (Data). */
 .s-sanctuary { left: 50%; top: 60%; transform: translate(-50%, -50%); }
 .s-timeline  { left: 14%; top: 20%; }
 .s-notes     { left: 50%; top: 10%; transform: translateX(-50%); }
 .s-data      { right: 14%; top: 20%; }
 .s-treasury  { left: 50%; top: 36%; transform: translateX(-50%); }
+.s-daybook   { left: 14%; top: 52%; }
 
 /* Quiet hairline arc */
 .archline {
@@ -319,7 +322,8 @@
 }
 
 .s-notes     { animation-delay: 250ms; }
-.s-timeline  { animation-delay: 600ms; }
-.s-data      { animation-delay: 900ms; }
-.s-treasury  { animation-delay: 1100ms; }
-.s-sanctuary { animation-delay: 1400ms; }
+.s-timeline  { animation-delay: 550ms; }
+.s-data      { animation-delay: 800ms; }
+.s-treasury  { animation-delay: 1050ms; }
+.s-daybook   { animation-delay: 1250ms; }
+.s-sanctuary { animation-delay: 1500ms; }
