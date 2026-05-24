@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Notes from './pages/Notes';
 import Sanctuary from './pages/Sanctuary';
 import Timeline from './pages/Timeline';
+import Treasury from './pages/Treasury';
 
 function Protected({ children }: { children: JSX.Element }) {
   const { session, loading } = useAuth();
@@ -23,6 +24,7 @@ export default function App() {
       <Route path="/sanctuary" element={<Protected><Sanctuary /></Protected>} />
       <Route path="/timeline" element={<Protected><Timeline /></Protected>} />
       <Route path="/data" element={<Protected><Data /></Protected>} />
+      <Route path="/treasury" element={<Protected><Treasury /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

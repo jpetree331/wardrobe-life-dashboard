@@ -1,0 +1,451 @@
+/* Treasury — the room for verses kept from Scripture reading.
+   Scoped under .treasury-page. Visual language: same parchment palette
+   as the rest of the rooms, EB Garamond italic for the verse text itself
+   (the focal point), Cormorant Garamond for headings, JetBrains Mono for
+   dates. Promises get a faint yellow wash; stand-outs are plain. */
+
+.treasury-page {
+  /* Highlighter color — a faint Post-it / yellow-marker wash applied as
+     a background under promise cards. Defined here so it's easy to find
+     and adjust without rummaging through component rules. */
+  --highlight-yellow: #f4d460;
+
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'EB Garamond', Georgia, serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+}
+
+/* ── Ribbon ─────────────────────────────────────────────────────────── */
+.tr-ribbon {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 22px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+.tr-ribbon .left { display: flex; align-items: center; gap: 18px; }
+.tr-ribbon .back,
+.tr-ribbon .sister {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  color: var(--ink-soft); text-decoration: none; font-size: 14px;
+  border-bottom: 1px solid transparent; padding-bottom: 2px;
+}
+.tr-ribbon .back:hover,
+.tr-ribbon .sister:hover { color: var(--ink); border-bottom-color: var(--line-strong); }
+.tr-ribbon .sister { font-size: 12px; color: var(--ink-faint); }
+.tr-ribbon .place {
+  font-family: 'Cormorant Garamond', serif; font-weight: 400;
+  font-size: 16px; letter-spacing: 0.32em; text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.tr-ribbon .right { display: flex; gap: 10px; align-items: center; }
+.tr-ribbon .btn-quiet {
+  font-family: 'EB Garamond', serif; font-size: 13px;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-soft);
+  padding: 5px 14px;
+  cursor: pointer;
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+}
+.tr-ribbon .btn-quiet:hover { color: var(--ink); border-color: var(--ink-soft); }
+.tr-ribbon .btn-quiet.primary {
+  background: var(--ink); color: var(--bg); border-color: var(--ink);
+}
+.tr-ribbon .btn-quiet.primary:hover {
+  background: color-mix(in oklab, var(--ink) 85%, transparent 15%);
+}
+
+/* ── Controls strip ─────────────────────────────────────────────────── */
+.tr-controls {
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px 26px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.tr-pillbar {
+  display: inline-flex; gap: 2px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  padding: 3px;
+  border-radius: 999px;
+}
+.tr-pillbar button {
+  background: transparent; border: 0; cursor: pointer;
+  padding: 4px 14px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-faint);
+  border-radius: 999px;
+}
+.tr-pillbar button.active {
+  background: var(--ink); color: var(--bg);
+}
+
+.tr-sort label {
+  display: flex; align-items: center; gap: 8px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.tr-sort select {
+  font-family: 'EB Garamond', serif; font-size: 13px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 5px 10px;
+  border-radius: 2px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.tr-search {
+  flex: 1;
+  min-width: 200px;
+  max-width: 380px;
+  font-family: 'EB Garamond', serif; font-size: 14px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 7px 12px;
+  border-radius: 2px;
+}
+.tr-search::placeholder {
+  font-style: italic;
+  color: var(--ink-faint);
+}
+
+/* ── Main scroll area ───────────────────────────────────────────────── */
+.tr-main {
+  padding: 24px 26px 60px;
+  overflow-y: auto;
+  animation: tr-fade 700ms ease-out;
+}
+@keyframes tr-fade { from { opacity: 0.01; } to { opacity: 1; } }
+.tr-loading,
+.tr-empty {
+  max-width: 600px;
+  margin: 50px auto;
+  padding: 24px 28px;
+  text-align: center;
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  color: var(--ink-faint);
+  background: var(--bg-2);
+  border: 1px dashed var(--line-strong);
+  line-height: 1.55;
+}
+.tr-empty em { display: block; color: var(--ink); font-size: 16px; margin-bottom: 8px; }
+.tr-empty strong { color: var(--ink); font-style: italic; font-weight: 500; }
+
+/* ── List + year/book dividers ──────────────────────────────────────── */
+.tr-list {
+  max-width: 780px;
+  margin: 0 auto;
+  display: flex; flex-direction: column;
+  gap: 22px;
+}
+.tr-year-group { display: flex; flex-direction: column; gap: 12px; }
+.tr-year-divider {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+}
+.tr-year {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 26px;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.tr-year-count {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  color: var(--ink-faint); font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* ── Verse card ─────────────────────────────────────────────────────── */
+.verse-card {
+  background: var(--page);
+  border: 1px solid var(--line);
+  padding: 14px 18px 16px;
+  border-radius: 2px;
+  position: relative;
+  transition: border-color 100ms ease, box-shadow 100ms ease;
+}
+.verse-card:hover {
+  border-color: var(--ink-soft);
+  box-shadow: 0 1px 0 var(--line);
+}
+/* Promise highlight — a soft yellow wash. Color-mix in oklab keeps it
+   tinted with the room's warm parchment palette rather than a flat
+   neon yellow. */
+.verse-card.promise {
+  background: color-mix(in oklab, var(--highlight-yellow) 14%, var(--page) 86%);
+  border-color: color-mix(in oklab, var(--highlight-yellow) 28%, var(--line) 72%);
+}
+.verse-card.promise:hover {
+  border-color: color-mix(in oklab, var(--highlight-yellow) 45%, var(--ink-soft) 55%);
+}
+
+.vc-head {
+  display: flex; align-items: baseline; gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.vc-date {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+.vc-ref {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 17px;
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+.vc-translation {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+.vc-kind-tag {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.vc-kind-tag.promise {
+  color: color-mix(in oklab, #a0700e 70%, var(--ink) 30%);
+  background: color-mix(in oklab, var(--highlight-yellow) 22%, transparent 78%);
+}
+.vc-edit {
+  margin-left: auto;
+  background: transparent; border: 0;
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 11px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  padding: 2px 4px;
+  opacity: 0;
+  transition: opacity 100ms ease, color 100ms ease;
+}
+.verse-card:hover .vc-edit { opacity: 1; }
+.vc-edit:hover { color: var(--ink); }
+
+.vc-text {
+  margin: 4px 0 0;
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+  /* Subtle left margin so the verse text "indents" off the metadata row,
+     reading more like a quoted passage. */
+  padding-left: 4px;
+}
+.vc-note {
+  margin: 10px 0 0;
+  padding-left: 4px;
+  font-family: 'EB Garamond', serif;
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+}
+
+/* ── Status footer ──────────────────────────────────────────────────── */
+.tr-status {
+  padding: 6px 22px;
+  background: var(--bg-2);
+  border-top: 1px solid var(--line);
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 12px; color: var(--ink-faint);
+  letter-spacing: 0.04em;
+}
+
+/* ── + Keep verse / Edit modal ──────────────────────────────────────── */
+.tr-modal-bg {
+  position: fixed; inset: 0; z-index: 250;
+  background: color-mix(in oklab, var(--ink) 45%, transparent 55%);
+  backdrop-filter: blur(2px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 60px 20px;
+  overflow-y: auto;
+}
+.tr-modal {
+  background: var(--page);
+  border: 1px solid var(--line-strong);
+  width: min(620px, 94vw);
+  max-height: 88vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 30px 70px -20px color-mix(in oklab, var(--ink) 50%, transparent 50%);
+}
+.tr-modal-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.tr-modal-head h2 {
+  margin: 0;
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 400; font-size: 24px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+.tr-modal-head .x {
+  background: transparent; border: 0;
+  font-size: 24px; line-height: 1;
+  cursor: pointer;
+  color: var(--ink-faint);
+  padding: 0 6px;
+}
+.tr-modal-head .x:hover { color: var(--ink); }
+
+.tr-form {
+  padding: 22px;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow-y: auto;
+}
+.tr-form label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.tr-form input[type=text],
+.tr-form input[type=date],
+.tr-form select,
+.tr-form textarea {
+  font-family: 'EB Garamond', serif; font-size: 14px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 8px 10px;
+  border-radius: 2px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.tr-form textarea { resize: vertical; min-height: 60px; line-height: 1.5; }
+.tr-form .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.tr-kind {
+  border: 1px solid var(--line);
+  padding: 12px 14px;
+  border-radius: 2px;
+}
+.tr-kind legend {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 0 6px;
+}
+.tr-kind-option {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 6px 4px;
+  cursor: pointer;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 14px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.tr-kind-option input { margin: 0; }
+.tr-kind-option span { font-weight: 500; }
+.tr-kind-option em.hint {
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 12px;
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+.tr-kind-option.promise {
+  background: color-mix(in oklab, var(--highlight-yellow) 10%, transparent 90%);
+  border-radius: 2px;
+  padding: 6px 10px;
+}
+
+.tr-text-row {
+  display: flex; gap: 8px; align-items: flex-start;
+}
+.tr-text-row textarea {
+  flex: 1;
+}
+.tr-text-row .btn-quiet {
+  flex-shrink: 0;
+  font-family: 'EB Garamond', serif; font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-soft);
+  padding: 5px 12px;
+  cursor: pointer;
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+.tr-text-row .btn-quiet:hover:not(:disabled) {
+  color: var(--ink); border-color: var(--ink-soft);
+}
+.tr-text-row .btn-quiet:disabled {
+  opacity: 0.5; cursor: wait;
+}
+
+.tr-form-err {
+  color: var(--red, #a64e2e);
+  font-family: 'EB Garamond', serif; font-size: 13px; font-style: italic;
+}
+
+.tr-modal-actions {
+  display: flex; gap: 10px; align-items: center;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.tr-modal-actions .spacer { flex: 1; }
+.tr-modal-actions button {
+  font-family: 'EB Garamond', serif; font-size: 13px;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--ink-soft);
+  padding: 6px 14px;
+  cursor: pointer;
+  border-radius: 2px;
+  letter-spacing: 0.04em;
+}
+.tr-modal-actions button.primary {
+  background: var(--ink); color: var(--bg);
+  border-color: var(--ink);
+}
+.tr-modal-actions button.danger {
+  color: color-mix(in oklab, #a64e2e 80%, var(--ink) 20%);
+  border-color: color-mix(in oklab, #a64e2e 60%, var(--line) 40%);
+}
+.tr-modal-actions button.danger:hover {
+  background: color-mix(in oklab, #a64e2e 10%, transparent 90%);
+}
+.tr-modal-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Focus rings for keyboard navigation. */
+.treasury-page :focus-visible {
+  outline: 2px solid var(--ink-soft);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
