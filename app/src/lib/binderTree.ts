@@ -39,8 +39,8 @@ export type SortOrder = 'desc' | 'asc';
 /**
  * Group flat entries into year > month > entries. Order is consistent at
  * every level — by default newest first ('desc'), but callers can pass
- * 'asc' for a chronological (oldest-first) read, which mirrors how Jess's
- * paper journals were arranged before the import.
+ * 'asc' for a chronological (oldest-first) read, which mirrors how
+ * paper journals are typically arranged.
  */
 export function buildBinderTree(
   entries: Entry[],

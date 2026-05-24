@@ -134,7 +134,7 @@ The reviewer noted this relies entirely on Supabase RLS. **Correct** — and tha
 
 ### "KPI value font is Cormorant, should be JetBrains Mono"
 
-The reviewer thought the large KPI numbers (28px Cormorant Garamond) should match the smaller numeric values elsewhere (JetBrains Mono). That's a defensible take — the small numerics (read-date, book-pages, retro table cells) all use Mono with `tabular-nums`. But the *headline* numbers in the KPI cards are intentionally the romantic serif: this room is a reading tracker, the numbers are about the reading life, not engineering metrics. Cormorant fits the room's voice. Defer to Jess if she wants to flip it.
+The reviewer thought the large KPI numbers (28px Cormorant Garamond) should match the smaller numeric values elsewhere (JetBrains Mono). That's a defensible take — the small numerics (read-date, book-pages, retro table cells) all use Mono with `tabular-nums`. But the *headline* numbers in the KPI cards are intentionally the romantic serif: this room is a reading tracker, the numbers are about the reading life, not engineering metrics. Cormorant fits the room's voice. Open to feedback if it should flip.
 
 ### "Status footer doesn't update when switching tabs"
 

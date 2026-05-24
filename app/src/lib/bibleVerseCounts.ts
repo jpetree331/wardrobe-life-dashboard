@@ -3,10 +3,10 @@
 // OSIS, SBL, and every major Bible API. Total: 31,102 verses across 1189
 // chapters.
 //
-// Jess specifically asked for accurate verse counts (not an averaged
-// fallback), so this manifest is the authoritative answer for the Data
-// room's heatmap, calendar, and stats. Any verse-count question — "how
-// many verses are in Psalm 119?" "how many in 3 John?" — is answered by
+// The Data room requires accurate verse counts (not an averaged
+// fallback), so this manifest is the authoritative answer for the
+// heatmap, calendar, and stats. Any verse-count question — "how many
+// verses are in Psalm 119?" "how many in 3 John?" — is answered by
 // this single table.
 //
 // The book order is canonical Protestant 66-book ordering (Genesis →

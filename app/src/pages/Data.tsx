@@ -508,8 +508,9 @@ function YearRail({
 
   // canGoBack: there's at least one year of data older than the current
   // LEFT edge of the window. Data-driven (doesn't assume contiguity), so
-  // if Jess has gaps (e.g., books from 1999-2019 then nothing till 2023)
-  // we still let her page back into the older clusters.
+  // if the reading history has gaps (e.g., books from 1999-2019 then
+  // nothing till 2023) we still let the user page back into the older
+  // clusters.
   const leftEdge = windowEnd - YEAR_WINDOW + 1;
   const canGoBack = dataYears.some((y) => y < leftEdge);
   const canGoForward = windowEnd < currentYear;

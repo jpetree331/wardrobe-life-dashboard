@@ -85,7 +85,7 @@ create index if not exists data_reading_plans_user_idx
 -- ── Plan completions ───────────────────────────────────────────────────
 -- Tracks completion at the chapter level (matches the prototype's UI).
 -- Reads here are SEPARATE from data_scripture_reads — completing a plan
--- session does NOT log a Scripture read, and vice versa, per Jess's rule.
+-- session does NOT log a Scripture read, and vice versa — by design.
 create table if not exists data_plan_completions (
   id            uuid primary key default gen_random_uuid(),
   user_id       uuid not null references auth.users(id) on delete cascade,

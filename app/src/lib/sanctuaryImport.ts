@@ -3,8 +3,8 @@
 //
 // Each Scrivener document becomes one .md file plus a sibling
 // `<name> MetaData.txt`. Dates live in the filename across five different
-// conventions Jess used over the years; the importer canonicalises every
-// one to YYYY-MM-DD on the way in.
+// historical conventions; the importer canonicalises every one to
+// YYYY-MM-DD on the way in.
 
 const MONTH_NAMES: Record<string, number> = {
   jan: 1, january: 1,

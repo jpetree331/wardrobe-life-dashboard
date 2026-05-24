@@ -8,9 +8,8 @@
 //   Date Added · Exclusive Shelf · My Review · Read Count
 //
 // We import only `Exclusive Shelf == "read"`. Books without a Date Read
-// fall back to Date Added (Jess's call — the alternative is silently
-// dropping them). HTML in reviews is normalized: `<br/>` → newline,
-// other tags stripped.
+// fall back to Date Added — the alternative is silently dropping them.
+// HTML in reviews is normalized: `<br/>` → newline, other tags stripped.
 
 /** Cleaned, ready-to-insert candidate. Maps 1-1 onto createBookRead's input. */
 export type GoodreadsBookCandidate = {

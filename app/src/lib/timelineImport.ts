@@ -31,7 +31,7 @@ const MONTH_NAMES: Record<string, number> = {
 /**
  * Loose date parser. Returns ISO 'YYYY-MM-DD', or null if nothing matches.
  *
- * Handles formats actually seen in Jess's Reckoning of Years.xlsx:
+ * Handles formats actually seen in the source xlsx:
  *   "2024-04-19", "2026.04.02"           - already-canonical
  *   "4/19/2024"                           - US slash
  *   "1-Apr", "12-Jun"                     - D-Mon, year from sheet name
