@@ -3,6 +3,12 @@
    Faithful port of design_handoff_life_board/design_files/Hallway.html */
 
 .hallway {
+  /* Cache-bust marker — bumping this forces a fresh CSS hash so any
+     transient 404 pinned in the browser's immutable-cache by a Vercel
+     deploy-race can't keep poisoning. CSS minifiers strip comments
+     but preserve custom properties, so this survives the build. */
+  --build: "2026-05-24T20:30";
+
   background: var(--bg);
   color: var(--ink);
   min-height: 100vh;
