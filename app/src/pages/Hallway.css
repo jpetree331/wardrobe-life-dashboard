@@ -137,11 +137,10 @@
 .sphere:focus-visible .sub { opacity: 1; transform: translateY(0); }
 .sphere:active { transform: scale(0.985); }
 .sphere.big:hover                                       { transform: translate(-50%, -50%) scale(1.02); }
-/* Centered spheres (Notes, Treasury) keep their translateX so the
-   hover scale doesn't shove them off-center. */
-.sphere.small.s-notes:hover,
-.sphere.small.s-treasury:hover                          { transform: translateX(-50%) scale(1.03); }
-.sphere.small:not(.s-notes):not(.s-treasury):hover      { transform: scale(1.03); }
+/* Notes is the only horizontally-centered satellite; keep its
+   translateX so the hover scale doesn't shove it off-center. */
+.sphere.small.s-notes:hover                             { transform: translateX(-50%) scale(1.03); }
+.sphere.small:not(.s-notes):hover                       { transform: scale(1.03); }
 
 .sphere.big   { width: 30%; aspect-ratio: 1; }
 .sphere.small { width: 18%; aspect-ratio: 1; }
@@ -151,19 +150,22 @@
 .sphere.small .label { font-size: clamp(13px, 1.3vw, 18px); }
 .sphere.small .sub   { font-size: clamp(10px, 0.9vw, 12px); }
 
-/* Pawprint — Sanctuary big & centered horizontally directly under Notes.
-   Timeline & Data symmetric around 50%. Treasury sits on the vertical
-   centerline between Notes (top) and Sanctuary (bottom), anchoring the
-   spine of the layout. Daybook sits below Timeline on the left side —
-   deliberate asymmetry: the LEFT column is time-related (Timeline =
-   past life events, Daybook = future schedule), the RIGHT column is
-   the Scripture-stats axis (Data). */
-.s-sanctuary { left: 50%; top: 60%; transform: translate(-50%, -50%); }
-.s-timeline  { left: 14%; top: 20%; }
+/* Flower arrangement — Sanctuary at the geometric center as the flower's
+   heart, five satellites as petals around it: Notes at the top,
+   Timeline and Data on the upper arms, Daybook and Treasury on the
+   lower arms. None overlap Sanctuary's bounding circle.
+
+   Column thematics survive the rearrangement:
+     LEFT column  = time-related     (Timeline UL ↔ Daybook LL)
+     RIGHT column = scripture-related (Data UR ↔ Treasury LR)
+     NOTES on top (the daily capture, untethered to either axis)
+     SANCTUARY at center (the heart that holds it all). */
+.s-sanctuary { left: 50%; top: 53%; transform: translate(-50%, -50%); }
 .s-notes     { left: 50%; top: 10%; transform: translateX(-50%); }
-.s-data      { right: 14%; top: 20%; }
-.s-treasury  { left: 50%; top: 36%; transform: translateX(-50%); }
-.s-daybook   { left: 14%; top: 52%; }
+.s-timeline  { left: 12%; top: 28%; }
+.s-data      { right: 12%; top: 28%; }
+.s-daybook   { left: 12%; top: 78%; }
+.s-treasury  { right: 12%; top: 78%; }
 
 /* Quiet hairline arc */
 .archline {
@@ -321,9 +323,11 @@
   @keyframes hw-dawn { 0%, 100% { opacity: 1; filter: none; } }
 }
 
+/* Petals unfold from the top outward, then the lower arms appear,
+   then Sanctuary blooms last at the center. */
 .s-notes     { animation-delay: 250ms; }
-.s-timeline  { animation-delay: 550ms; }
-.s-data      { animation-delay: 800ms; }
+.s-timeline  { animation-delay: 500ms; }
+.s-data      { animation-delay: 650ms; }
+.s-daybook   { animation-delay: 900ms; }
 .s-treasury  { animation-delay: 1050ms; }
-.s-daybook   { animation-delay: 1250ms; }
-.s-sanctuary { animation-delay: 1500ms; }
+.s-sanctuary { animation-delay: 1350ms; }
