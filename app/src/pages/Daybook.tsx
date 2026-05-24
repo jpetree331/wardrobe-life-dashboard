@@ -77,6 +77,22 @@ export default function Daybook() {
   const [statusMsg, setStatusMsg] = useState('');
   const [blockModal, setBlockModal] = useState<BlockModalState | null>(null);
   const [categoryModal, setCategoryModal] = useState<CategoryModalState | null>(null);
+  // Build 2 — selection: which block has the 2px ink ring, edited by
+  // double-click. Esc deselects. Selection survives navigation; the
+  // edit modal opens directly without disturbing it.
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+
+  // Esc deselects, OR closes any open modal. Modals already trap Esc
+  // via their own handlers, so this only fires when no modal is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !blockModal && !categoryModal && selectedBlockId) {
+        setSelectedBlockId(null);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [blockModal, categoryModal, selectedBlockId]);
 
   // Initial mount: seed categories if empty, then load.
   const refreshBlocks = useCallback(async (date: Date) => {
@@ -190,7 +206,12 @@ export default function Daybook() {
             date={selectedDate}
             blocks={blocks}
             catById={catById}
-            onBlockClick={(b) => setBlockModal({ mode: 'edit', block: b })}
+            selectedBlockId={selectedBlockId}
+            onSelectBlock={setSelectedBlockId}
+            onEditBlock={(b) => setBlockModal({ mode: 'edit', block: b })}
+            onCreateAtRange={(startIso, endIso) =>
+              setBlockModal({ mode: 'add', defaultStart: startIso, defaultEnd: endIso })
+            }
           />
         )}
       </main>
@@ -238,56 +259,189 @@ export default function Daybook() {
 }
 
 // ── Day view ──────────────────────────────────────────────────────────
+//
+// Build 2 added drag-to-create, single-click selection, double-click
+// edit, and a hover tooltip. The DayView owns three transient pieces of
+// interaction state — drag, selection (via parent), tooltip — and
+// dispatches to the parent via callbacks for the persistent ones.
 
 function DayView({
   date,
   blocks,
   catById,
-  onBlockClick,
+  selectedBlockId,
+  onSelectBlock,
+  onEditBlock,
+  onCreateAtRange,
 }: {
   date: Date;
   blocks: DaybookBlock[];
   catById: Map<string, DaybookCategory>;
-  onBlockClick: (b: DaybookBlock) => void;
+  selectedBlockId: string | null;
+  onSelectBlock: (id: string | null) => void;
+  onEditBlock: (b: DaybookBlock) => void;
+  onCreateAtRange: (startIso: string, endIso: string) => void;
 }) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to ~6:30 AM on first render so the user lands on the
   // morning without scrolling.
   useEffect(() => {
-    if (!canvasRef.current) return;
-    canvasRef.current.scrollTop = 30 / 60 * ROW_H; // half a row from the top
+    if (!scrollerRef.current) return;
+    scrollerRef.current.scrollTop = 30 / 60 * ROW_H;
   }, []);
 
+  // ── Drag-to-create ───────────────────────────────────────────────
+  // Two minutes-since-midnight values, snapped to 15. The start is the
+  // anchor; the end follows the mouse. While dragging, a DraftBlock
+  // renders between them. On mouseup, the parent's BlockModal opens
+  // pre-filled with the dragged range. If the user just clicked
+  // (start === end after snap), no modal opens — that's a deselect.
+  const [drag, setDrag] = useState<{ startMin: number; endMin: number } | null>(null);
+  const dragRef = useRef<{ startMin: number; endMin: number } | null>(null);
+
+  function yToMinutes(yPxFromCanvasTop: number): number {
+    const totalMin = HOUR_START * 60 + (yPxFromCanvasTop / ROW_H) * 60;
+    return Math.max(HOUR_START * 60, Math.min(HOUR_END * 60 + 59, totalMin));
+  }
+  function snap15(min: number): number {
+    return Math.round(min / 15) * 15;
+  }
+  function localMinToHHMM(min: number): string {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
+  function onCanvasMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    // Only start a drag on the empty canvas — block clicks are handled
+    // by BlockTile, which stops propagation on its own mousedown.
+    if (e.button !== 0) return;
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const startY = e.clientY - rect.top;
+    const startMin = snap15(yToMinutes(startY));
+    const initial = { startMin, endMin: startMin };
+    setDrag(initial);
+    dragRef.current = initial;
+    // Clear any selection — starting a new drag is a fresh action.
+    onSelectBlock(null);
+
+    const onMove = (ev: MouseEvent) => {
+      if (!canvasRef.current) return;
+      const r = canvasRef.current.getBoundingClientRect();
+      const y = ev.clientY - r.top;
+      const endMin = snap15(yToMinutes(y));
+      const next = { startMin: dragRef.current!.startMin, endMin };
+      dragRef.current = next;
+      setDrag(next);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      const finished = dragRef.current;
+      dragRef.current = null;
+      setDrag(null);
+      if (!finished) return;
+      const lo = Math.min(finished.startMin, finished.endMin);
+      const hi = Math.max(finished.startMin, finished.endMin);
+      // A bare click on empty canvas: just a deselect, no modal.
+      if (hi - lo < 15) return;
+      const dateKey = localDateKey(date);
+      const startIso = combineLocalDateTimeToIso(dateKey, localMinToHHMM(lo));
+      const endIso = combineLocalDateTimeToIso(dateKey, localMinToHHMM(hi));
+      onCreateAtRange(startIso, endIso);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  // ── Hover tooltip ────────────────────────────────────────────────
+  // 220ms delay before showing — avoids flicker on quick mouse-overs.
+  // Position computed in JS so we can flip the tooltip when it would
+  // overflow the right edge of the viewport.
+  const [tooltip, setTooltip] = useState<{
+    block: DaybookBlock;
+    x: number;
+    y: number;
+    flip: boolean;
+  } | null>(null);
+  const tooltipTimerRef = useRef<number | null>(null);
+
+  function showTooltip(block: DaybookBlock, blockRect: DOMRect) {
+    if (tooltipTimerRef.current) window.clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = window.setTimeout(() => {
+      const TOOLTIP_W = 280;
+      const MARGIN = 12;
+      const wouldOverflow = blockRect.right + MARGIN + TOOLTIP_W > window.innerWidth;
+      const x = wouldOverflow ? blockRect.left - MARGIN - TOOLTIP_W : blockRect.right + MARGIN;
+      const y = blockRect.top;
+      setTooltip({ block, x, y, flip: wouldOverflow });
+    }, 220);
+  }
+  function hideTooltip() {
+    if (tooltipTimerRef.current) {
+      window.clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+    setTooltip(null);
+  }
+  // Cancel the tooltip on any scroll — the cached anchor rect would
+  // be stale otherwise.
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const onScroll = () => hideTooltip();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Render ───────────────────────────────────────────────────────
   const hours: number[] = [];
   for (let h = HOUR_START; h <= HOUR_END; h++) hours.push(h);
-
   const isToday = localDateKey(date) === localDateKey(new Date());
 
   return (
-    <div className="db-day-scroller" ref={canvasRef}>
-      <div className="db-day-grid">
-        <div className="db-time-gutter" aria-hidden="true">
-          {hours.map((h) => (
-            <div key={h} className="db-hour-label" style={{ height: `${ROW_H}px` }}>
-              <span>{format12h(h)}</span>
-            </div>
-          ))}
-        </div>
-        <div
-          className="db-canvas"
-          style={{
-            height: `${(HOUR_END - HOUR_START + 1) * ROW_H}px`,
-            backgroundSize: `${ROW_H}px ${ROW_H}px, ${ROW_H / 2}px ${ROW_H / 2}px`,
-          }}
-        >
-          {blocks.map((b) => (
-            <BlockTile key={b.id} block={b} catById={catById} onClick={() => onBlockClick(b)} />
-          ))}
-          {isToday && <NowLine />}
+    <>
+      <div className="db-day-scroller" ref={scrollerRef}>
+        <div className="db-day-grid">
+          <div className="db-time-gutter" aria-hidden="true">
+            {hours.map((h) => (
+              <div key={h} className="db-hour-label" style={{ height: `${ROW_H}px` }}>
+                <span>{format12h(h)}</span>
+              </div>
+            ))}
+          </div>
+          <div
+            ref={canvasRef}
+            className={`db-canvas${drag ? ' dragging' : ''}`}
+            style={{
+              height: `${(HOUR_END - HOUR_START + 1) * ROW_H}px`,
+              backgroundSize: `${ROW_H}px ${ROW_H}px, ${ROW_H / 2}px ${ROW_H / 2}px`,
+            }}
+            onMouseDown={onCanvasMouseDown}
+          >
+            {blocks.map((b) => (
+              <BlockTile
+                key={b.id}
+                block={b}
+                catById={catById}
+                selected={selectedBlockId === b.id}
+                onSelect={() => onSelectBlock(b.id)}
+                onEdit={() => { onSelectBlock(null); onEditBlock(b); }}
+                onShowTooltip={(rect) => showTooltip(b, rect)}
+                onHideTooltip={hideTooltip}
+              />
+            ))}
+            {drag && <DraftBlock startMin={drag.startMin} endMin={drag.endMin} />}
+            {isToday && <NowLine />}
+          </div>
         </div>
       </div>
-    </div>
+      {tooltip && <BlockTooltip {...tooltip} catById={catById} />}
+    </>
   );
 }
 
@@ -296,11 +450,19 @@ function DayView({
 function BlockTile({
   block,
   catById,
-  onClick,
+  selected,
+  onSelect,
+  onEdit,
+  onShowTooltip,
+  onHideTooltip,
 }: {
   block: DaybookBlock;
   catById: Map<string, DaybookCategory>;
-  onClick: () => void;
+  selected: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+  onShowTooltip: (anchor: DOMRect) => void;
+  onHideTooltip: () => void;
 }) {
   const cat = block.category_id ? catById.get(block.category_id) : undefined;
   const color = cat?.color ?? ORPHAN_COLOR;
@@ -309,17 +471,28 @@ function BlockTile({
   const top = (startMin - HOUR_START * 60) / 60 * ROW_H;
   const height = (endMin - startMin) / 60 * ROW_H;
   const sizeClass = height < 32 ? ' tiny' : height < 55 ? ' short' : '';
+  const ref = useRef<HTMLButtonElement>(null);
+
   return (
     <button
+      ref={ref}
       type="button"
-      className={`db-block${sizeClass}`}
+      className={`db-block${sizeClass}${selected ? ' selected' : ''}`}
       style={{
         top: `${top}px`,
         height: `${height}px`,
         ['--cat-color' as 'color']: color,
       }}
-      onClick={onClick}
-      title="Click to edit"
+      // Stop the canvas drag from starting when the mousedown lands on
+      // a block. Click + double-click handle selection / edit instead.
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={onSelect}
+      onDoubleClick={onEdit}
+      onMouseEnter={() => {
+        if (ref.current) onShowTooltip(ref.current.getBoundingClientRect());
+      }}
+      onMouseLeave={onHideTooltip}
+      title="Double-click to edit"
     >
       <span className="db-block-bg" aria-hidden="true" />
       <span className="db-block-content">
@@ -332,6 +505,80 @@ function BlockTile({
         )}
       </span>
     </button>
+  );
+}
+
+// ── Draft block (the in-progress drag visual) ────────────────────────
+
+function DraftBlock({
+  startMin,
+  endMin,
+}: {
+  startMin: number;
+  endMin: number;
+}) {
+  const lo = Math.min(startMin, endMin);
+  const hi = Math.max(startMin, endMin);
+  const top = (lo - HOUR_START * 60) / 60 * ROW_H;
+  const height = (hi - lo) / 60 * ROW_H;
+  // Hide the draft until the drag has moved at least 15 min — otherwise
+  // a tiny "phantom" tile flashes on every click.
+  if (height < ROW_H / 4) return null;
+  const minutes = hi - lo;
+  const hLabel = Math.floor(minutes / 60);
+  const mLabel = minutes % 60;
+  const labelStr = hLabel > 0
+    ? `${hLabel}h${mLabel > 0 ? ` ${mLabel}m` : ''}`
+    : `${mLabel}m`;
+  return (
+    <div className="db-draft" style={{ top: `${top}px`, height: `${height}px` }} aria-hidden="true">
+      <span className="db-draft-label">{labelStr}</span>
+    </div>
+  );
+}
+
+// ── Hover tooltip ────────────────────────────────────────────────────
+
+function BlockTooltip({
+  block,
+  x,
+  y,
+  catById,
+}: {
+  block: DaybookBlock;
+  x: number;
+  y: number;
+  flip: boolean;
+  catById: Map<string, DaybookCategory>;
+}) {
+  const cat = block.category_id ? catById.get(block.category_id) : undefined;
+  const color = cat?.color ?? ORPHAN_COLOR;
+  const minutes = minutesBetween(block.start_at, block.end_at);
+  const hLabel = Math.floor(minutes / 60);
+  const mLabel = minutes % 60;
+  const durStr = hLabel > 0
+    ? `${hLabel}h${mLabel > 0 ? ` ${mLabel}m` : ''}`
+    : `${mLabel}m`;
+  return (
+    <div
+      className="db-tooltip"
+      style={{
+        left: `${x}px`,
+        top: `${y}px`,
+        ['--cat-color' as 'color']: color,
+      }}
+      role="tooltip"
+    >
+      {cat && <div className="dbt-cat">{cat.name}</div>}
+      <div className="dbt-title">{block.title || '(untitled)'}</div>
+      <div className="dbt-time">
+        {isoToLocalTime12h(block.start_at)} – {isoToLocalTime12h(block.end_at)} · {durStr}
+      </div>
+      {block.notes && (
+        <div className="dbt-notes">{block.notes}</div>
+      )}
+      <div className="dbt-hint">Double-click to edit · Esc to deselect</div>
+    </div>
   );
 }
 

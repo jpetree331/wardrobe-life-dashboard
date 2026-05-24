@@ -451,6 +451,100 @@
 .db-block.tiny .db-block-cat { display: none; }
 .db-block.tiny .db-block-title { font-size: 11.5px; font-weight: 500; }
 
+/* Selected — 2px ink ring + the hover lift. Lives above other blocks
+   so its ring isn't clipped by neighbors. */
+.db-block.selected {
+  z-index: 7;
+  outline: 2px solid var(--db-ink);
+  outline-offset: 0;
+  box-shadow:
+    0 6px 22px -10px rgba(60, 40, 20, 0.25),
+    0 0 0 1px var(--cat-color, var(--db-ink-faint));
+}
+
+/* Show the cursor as a grab/text cursor while hovering empty canvas,
+   so the drag-to-create affordance is discoverable. */
+.db-canvas { cursor: crosshair; }
+.db-canvas.dragging { cursor: ns-resize; }
+.db-canvas .db-block { cursor: pointer; }
+
+/* ── Draft block (in-progress drag) ─────────────────────────────── */
+.db-draft {
+  position: absolute;
+  left: 8px;
+  right: 12px;
+  border: 2px dashed var(--cat-deep);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--cat-deep) 8%, transparent 92%);
+  z-index: 5;
+  pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.db-draft-label {
+  font: 500 12px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--cat-deep);
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  background: var(--paper);
+  border: 1px solid var(--cat-deep);
+  border-radius: 100px;
+}
+
+/* ── Hover tooltip ───────────────────────────────────────────────── */
+.db-tooltip {
+  position: fixed;
+  z-index: 50;
+  width: 280px;
+  background: var(--paper);
+  border: 1px solid var(--paper-edge);
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 18px 50px -15px rgba(60, 40, 20, 0.35);
+  pointer-events: none;
+  font-family: 'Work Sans', ui-sans-serif, system-ui, sans-serif;
+}
+.dbt-cat {
+  font: 600 9.5px 'JetBrains Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--cat-color, var(--db-ink-faint));
+  margin-bottom: 4px;
+}
+.dbt-title {
+  font: 500 17px 'Newsreader', 'Source Serif 4', Georgia, serif;
+  color: var(--db-ink);
+  letter-spacing: -0.005em;
+  line-height: 1.25;
+  margin-bottom: 4px;
+}
+.dbt-time {
+  font: 400 11px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--db-ink-soft);
+  letter-spacing: 0.02em;
+}
+.dbt-notes {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dotted var(--paper-edge);
+  font: 400 12.5px 'Work Sans', sans-serif;
+  color: var(--db-ink-soft);
+  line-height: 1.5;
+  /* Wrap long notes nicely, but don't let them push the tooltip too
+     tall on extremely long content. */
+  max-height: 100px;
+  overflow: hidden;
+}
+.dbt-hint {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dotted var(--paper-edge);
+  font: 400 9.5px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--db-ink-faint);
+  letter-spacing: 0.04em;
+}
+
 /* Now-line */
 .db-now-line {
   position: absolute;
