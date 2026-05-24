@@ -46,6 +46,17 @@ export type DaybookTemplate = {
   updated_at: string;
 };
 
+/**
+ * A block as it appears in a rendered view. Same shape as DaybookBlock,
+ * plus optional flags identifying phantom (recurrence-derived) instances.
+ * For phantoms, the `id` is synthetic (combines master id + date) so
+ * React keys stay unique; the underlying master id is in `_master_id`.
+ */
+export type DaybookBlockInstance = DaybookBlock & {
+  _phantom?: boolean;
+  _master_id?: string;
+};
+
 export type DaybookGoal = {
   id: string;
   user_id: string;
@@ -171,6 +182,24 @@ export async function listBlocksForRange(
   return (data || []) as DaybookBlock[];
 }
 
+/**
+ * List all recurring "master" blocks that started before `beforeIso`.
+ * Used to materialize phantom instances onto a date range — only masters
+ * whose start_at predates the range can possibly project into it.
+ */
+export async function listRecurringMasters(
+  beforeIso: string,
+): Promise<DaybookBlock[]> {
+  const { data, error } = await supabase
+    .from('daybook_blocks')
+    .select('*')
+    .neq('recur', 'none')
+    .lt('start_at', beforeIso)
+    .order('start_at', { ascending: true });
+  if (error) throw error;
+  return (data || []) as DaybookBlock[];
+}
+
 export async function createBlock(input: {
   title: string;
   category_id: string | null;
@@ -227,6 +256,39 @@ export async function deleteBlock(id: string): Promise<void> {
 
 // ── Date helpers ──────────────────────────────────────────────────────
 
+/**
+ * Sunday-anchored start of the week containing `d`, midnight local time.
+ * Returns a fresh Date object — does not mutate the input.
+ */
+export function startOfWeek(d: Date): Date {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  out.setDate(out.getDate() - out.getDay());
+  return out;
+}
+
+/** End of the week (exclusive — start of next Sunday). */
+export function endOfWeek(d: Date): Date {
+  const out = startOfWeek(d);
+  out.setDate(out.getDate() + 7);
+  return out;
+}
+
+/** First-of-month at midnight local time. */
+export function startOfMonth(d: Date): Date {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  out.setDate(1);
+  return out;
+}
+
+/** Exclusive end of month — start of the following month. */
+export function endOfMonth(d: Date): Date {
+  const out = startOfMonth(d);
+  out.setMonth(out.getMonth() + 1);
+  return out;
+}
+
 /** Local-time YYYY-MM-DD (matches localToday from src/lib/dates.ts). */
 export function localDateKey(d: Date): string {
   const y = d.getFullYear();
@@ -251,6 +313,22 @@ export function localDayEndIso(d: Date): string {
   end.setHours(0, 0, 0, 0);
   end.setDate(end.getDate() + 1);
   return end.toISOString();
+}
+
+/** Whole local week (Sun-anchored) as a [start, end) ISO pair. */
+export function localWeekRangeIso(d: Date): { startIso: string; endIso: string } {
+  return {
+    startIso: startOfWeek(d).toISOString(),
+    endIso: endOfWeek(d).toISOString(),
+  };
+}
+
+/** Whole local month as a [start, end) ISO pair. */
+export function localMonthRangeIso(d: Date): { startIso: string; endIso: string } {
+  return {
+    startIso: startOfMonth(d).toISOString(),
+    endIso: endOfMonth(d).toISOString(),
+  };
 }
 
 /**

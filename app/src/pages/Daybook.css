@@ -462,6 +462,34 @@
     0 0 0 1px var(--cat-color, var(--db-ink-faint));
 }
 
+/* Phantom — a recurrence-derived instance. Dashed border + tiny ↻ glyph
+   beside the title hint at "this is a copy that will move if you edit it." */
+.db-block.phantom {
+  border-style: dashed;
+}
+.db-block-phantom-mark {
+  display: inline-block;
+  font: 500 0.85em 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--cat-color, var(--db-ink-faint));
+  margin-right: 3px;
+  opacity: 0.85;
+  vertical-align: 1px;
+}
+
+/* Compact — used by Week view columns where horizontal space is tight.
+   Pulls the block in from the column edges, shrinks the type a notch,
+   and hides the cat badge. */
+.db-block.compact {
+  left: 3px;
+  right: 3px;
+  padding: 4px 6px 4px 8px;
+}
+.db-block.compact .db-block-title { font-size: 12.5px; }
+.db-block.compact .db-block-time  { font-size: 9.5px; }
+.db-block.compact .db-block-cat   { display: none; }
+.db-block.compact.short .db-block-title { font-size: 12px; }
+.db-block.compact.tiny  .db-block-title { font-size: 11px; }
+
 /* Show the cursor as a grab/text cursor while hovering empty canvas,
    so the drag-to-create affordance is discoverable. */
 .db-canvas { cursor: crosshair; }
@@ -808,4 +836,175 @@
 .daybook-page button:focus-visible {
   outline: 2px solid var(--cat-meet);
   outline-offset: 2px;
+}
+
+/* ── Week view ───────────────────────────────────────────────────── */
+.db-week-scroller {
+  height: 100%;
+  overflow-y: auto;
+}
+.db-week-grid {
+  display: grid;
+  grid-template-columns: 64px repeat(7, 1fr);
+  grid-template-rows: 44px auto;
+}
+.db-week-corner {
+  grid-column: 1; grid-row: 1;
+  position: sticky;
+  top: 0; left: 0;
+  z-index: 4;
+  background: var(--paper);
+  border-right: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.db-week-day-header {
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  border-left: 1px solid var(--rule-soft);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 4px;
+  gap: 2px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.db-week-day-header:hover { background: var(--paper-deep); }
+.db-week-dow {
+  font: 600 9.5px 'JetBrains Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--db-ink-faint);
+}
+.db-week-dom {
+  font: 500 20px 'Newsreader', 'Source Serif 4', Georgia, serif;
+  color: var(--db-ink);
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+.db-week-day-header.today .db-week-dow,
+.db-week-day-header.today .db-week-dom {
+  color: var(--margin);
+}
+.db-week-gutter {
+  grid-column: 1; grid-row: 2;
+}
+.db-week-col {
+  grid-row: 2;
+  border-left: 1px solid var(--rule-soft);
+}
+/* Today's column gets a faint warm tint. The .db-canvas gradient lines
+   are drawn over a transparent background-color, so setting a color
+   here shows through without disturbing the hour rules. */
+.db-week-col.today {
+  background-color: color-mix(in oklab, var(--cat-health) 6%, var(--paper) 94%);
+}
+
+/* ── Month view ──────────────────────────────────────────────────── */
+.db-month {
+  height: 100%;
+  display: flex; flex-direction: column;
+}
+.db-month-dow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule);
+  flex-shrink: 0;
+}
+.db-month-dow-cell {
+  font: 600 10px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--db-ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-align: center;
+  padding: 7px 0;
+  border-left: 1px solid var(--rule-soft);
+}
+.db-month-dow-cell:first-child { border-left: none; }
+.db-month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: repeat(6, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.db-month-cell {
+  background: var(--paper);
+  border: 0;
+  border-left: 1px solid var(--rule-soft);
+  border-top: 1px solid var(--rule-soft);
+  padding: 5px 6px;
+  display: flex; flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  min-height: 0;
+  overflow: hidden;
+  gap: 3px;
+  position: relative;
+}
+.db-month-cell:hover { background: var(--paper-deep); }
+.db-month-cell.muted {
+  background: color-mix(in oklab, var(--paper) 88%, oklch(0.94 0.005 240) 12%);
+}
+.db-month-cell.muted .db-month-cell-date {
+  color: var(--db-ink-faint);
+  opacity: 0.55;
+}
+.db-month-cell-date {
+  font: 500 12px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--db-ink);
+  letter-spacing: 0.02em;
+  align-self: flex-start;
+  padding: 1px 4px;
+  border-radius: 4px;
+  line-height: 1.2;
+}
+.db-month-cell.today .db-month-cell-date {
+  background: var(--margin);
+  color: var(--paper);
+  font-weight: 600;
+}
+.db-month-cell-blocks {
+  display: flex; flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  min-height: 0;
+}
+.db-month-pill {
+  display: flex; align-items: baseline;
+  gap: 5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--cat-color, var(--db-ink-faint)) 16%, var(--paper) 84%);
+  border-left: 2px solid var(--cat-color, var(--db-ink-faint));
+  font: 500 10.5px 'Work Sans', sans-serif;
+  color: var(--db-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-month-pill.phantom { border-left-style: dashed; }
+.db-month-pill-time {
+  font: 400 9px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--db-ink-soft);
+  letter-spacing: 0;
+  flex-shrink: 0;
+}
+.db-month-pill-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-month-more {
+  font: 500 9.5px 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--db-ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
 }

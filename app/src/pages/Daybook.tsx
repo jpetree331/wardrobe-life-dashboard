@@ -5,12 +5,14 @@
 // time/meta. All styles scoped under .daybook-page so the vibrant world
 // stays sealed inside.
 //
-// Build 1 ships: app shell + Day view + block CRUD modal + category
-// management. Drag-to-create, Week/Month views, Pomodoro, Weekly Review,
-// keyboard shortcuts, and templates all land in later builds.
+// Build 3 ships: recurrence materialization + Week view + Month view +
+// functional view tabs. Phantom (recurrence-derived) instances get a
+// subtle marker; editing one routes to the master block so all
+// occurrences move together.
 //
 // Schema: app/supabase/migrations/0007_daybook.sql
 // CRUD:   src/lib/daybook.ts
+// Pure:   src/lib/daybookRecurrence.ts
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
@@ -19,21 +21,28 @@ import {
   createCategory,
   deleteBlock,
   deleteCategory,
+  endOfMonth,
+  endOfWeek,
   isoToLocalTime12h,
   isoToLocalTimeHHMM,
   listBlocksForRange,
   listCategories,
+  listRecurringMasters,
   localDateKey,
   localDayEndIso,
   localDayStartIso,
   combineLocalDateTimeToIso,
   seedDefaultCategoriesIfEmpty,
+  startOfMonth,
+  startOfWeek,
   updateBlock,
   updateCategory,
   type DaybookBlock,
+  type DaybookBlockInstance,
   type DaybookCategory,
   type DaybookRecur,
 } from '../lib/daybook';
+import { expandRecurringInstances } from '../lib/daybookRecurrence';
 import { useFavicon } from '../hooks/useFavicon';
 import './Daybook.css';
 
@@ -63,15 +72,26 @@ type CategoryModalState =
   | { mode: 'add' }
   | { mode: 'edit'; category: DaybookCategory };
 
+type ViewMode = 'day' | 'week' | 'month';
+
 export default function Daybook() {
   useFavicon('/icons/wardrobe1.png', 'Daybook · Wardrobe');
 
+  const [viewMode, setViewMode] = useState<ViewMode>('day');
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d;
   });
+  // Real blocks (persisted) for the current view's range.
   const [blocks, setBlocks] = useState<DaybookBlock[]>([]);
+  // All recurring masters whose start_at is before the view's end.
+  // Kept separately so phantom edits can route to the master even if
+  // the master itself is outside the current view's range.
+  const [recurringMasters, setRecurringMasters] = useState<DaybookBlock[]>([]);
+  // Materialized instances = real blocks + expanded phantoms.
+  // Phantoms have _phantom: true and _master_id pointing at their master.
+  const [instances, setInstances] = useState<DaybookBlockInstance[]>([]);
   const [categories, setCategories] = useState<DaybookCategory[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -94,13 +114,71 @@ export default function Daybook() {
     return () => document.removeEventListener('keydown', onKey);
   }, [blockModal, categoryModal, selectedBlockId]);
 
-  // Initial mount: seed categories if empty, then load.
-  const refreshBlocks = useCallback(async (date: Date) => {
+  // Compute the date range the current view covers, in local time. For
+  // the Month view we expand to the visible 6×7 grid (not just the
+  // calendar month) so spilled days from prev/next month show their
+  // blocks too.
+  const viewRange = useMemo(() => {
+    if (viewMode === 'day') {
+      const start = new Date(selectedDate);
+      start.setHours(0, 0, 0, 0);
+      return { start, end: addDays(start, 1) };
+    }
+    if (viewMode === 'week') {
+      return { start: startOfWeek(selectedDate), end: endOfWeek(selectedDate) };
+    }
+    const monthStart = startOfMonth(selectedDate);
+    const monthEnd = endOfMonth(selectedDate);
+    // endOfMonth is exclusive (start of next month). The last visible
+    // day is monthEnd - 1; we want the Sunday-end of that day's week.
+    return {
+      start: startOfWeek(monthStart),
+      end: endOfWeek(addDays(monthEnd, -1)),
+    };
+  }, [viewMode, selectedDate]);
+
+  // Load real blocks + recurring masters for the view's range, then
+  // materialize phantoms. All driven by viewRange so changing date or
+  // view re-fetches.
+  const refreshBlocks = useCallback(async (start: Date, end: Date) => {
     try {
-      const start = localDayStartIso(date);
-      const end = localDayEndIso(date);
-      const data = await listBlocksForRange(start, end);
-      setBlocks(data);
+      const startIso = start.toISOString();
+      const endIso = end.toISOString();
+      const [real, masters] = await Promise.all([
+        listBlocksForRange(startIso, endIso),
+        listRecurringMasters(endIso),
+      ]);
+      setBlocks(real);
+      setRecurringMasters(masters);
+
+      // Build phantoms from masters whose recur pattern projects into range.
+      const phantoms = expandRecurringInstances(
+        masters.map((m) => ({
+          id: m.id,
+          start_at: m.start_at,
+          end_at: m.end_at,
+          recur: m.recur,
+        })),
+        startIso,
+        endIso,
+      );
+      const phantomInstances: DaybookBlockInstance[] = [];
+      for (const ph of phantoms) {
+        const master = masters.find((m) => m.id === ph.master_id);
+        if (!master) continue;
+        // Synthetic id keeps React keys unique. Format: master_id:date_key.
+        const dateKey = ph.start_at.slice(0, 10);
+        phantomInstances.push({
+          ...master,
+          id: `${master.id}:${dateKey}`,
+          start_at: ph.start_at,
+          end_at: ph.end_at,
+          _phantom: true,
+          _master_id: master.id,
+        });
+      }
+      // Real blocks come first; phantoms are appended.
+      setInstances([...real, ...phantomInstances]);
     } catch (err) {
       console.error(err);
       setStatusMsg('Could not load blocks.');
@@ -111,30 +189,37 @@ export default function Daybook() {
     try {
       const cats = await seedDefaultCategoriesIfEmpty();
       setCategories(cats);
-      await refreshBlocks(selectedDate);
+      await refreshBlocks(viewRange.start, viewRange.end);
       setLoaded(true);
     } catch (err) {
       console.error(err);
       setStatusMsg('Could not load Daybook. Have you run migration 0007?');
       setLoaded(true);
     }
-  }, [selectedDate, refreshBlocks]);
+  }, [viewRange, refreshBlocks]);
 
   useEffect(() => { refreshAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (loaded) refreshBlocks(selectedDate); }, [selectedDate, loaded, refreshBlocks]);
+  useEffect(() => {
+    if (loaded) refreshBlocks(viewRange.start, viewRange.end);
+  }, [viewRange, loaded, refreshBlocks]);
 
   // Status summary
   useEffect(() => {
     if (!loaded) return;
-    if (blocks.length === 0) {
-      setStatusMsg(`No blocks on ${localDateKey(selectedDate)} yet.`);
-    } else {
-      const totalMin = blocks.reduce((acc, b) => acc + minutesBetween(b.start_at, b.end_at), 0);
-      const hours = Math.floor(totalMin / 60);
-      const mins = totalMin % 60;
-      setStatusMsg(`${blocks.length} block${blocks.length === 1 ? '' : 's'} · ${hours}h ${mins}m planned`);
+    const n = instances.length;
+    if (n === 0) {
+      setStatusMsg(`No blocks in this ${viewMode} yet.`);
+      return;
     }
-  }, [blocks, loaded, selectedDate]);
+    const totalMin = instances.reduce((acc, b) => acc + minutesBetween(b.start_at, b.end_at), 0);
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    const phantomCount = instances.filter((b) => b._phantom).length;
+    const phantomNote = phantomCount > 0
+      ? ` · ${phantomCount} recurring`
+      : '';
+    setStatusMsg(`${n} block${n === 1 ? '' : 's'} · ${hours}h ${mins}m planned${phantomNote}`);
+  }, [instances, loaded, viewMode]);
 
   // Categories indexed by id for fast color lookup.
   const catById = useMemo(() => {
@@ -143,15 +228,39 @@ export default function Daybook() {
     return m;
   }, [categories]);
 
-  function shiftDay(delta: number) {
+  function shiftView(delta: number) {
     const d = new Date(selectedDate);
-    d.setDate(d.getDate() + delta);
+    if (viewMode === 'day') d.setDate(d.getDate() + delta);
+    else if (viewMode === 'week') d.setDate(d.getDate() + delta * 7);
+    else d.setMonth(d.getMonth() + delta);
     setSelectedDate(d);
   }
   function goToToday() {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     setSelectedDate(d);
+  }
+
+  // Edit handler that knows about phantoms: editing a phantom routes
+  // to its master (so all occurrences move together). The master may
+  // be outside the current view's date range, so we look it up in the
+  // separate recurringMasters list rather than the day/week/month
+  // `blocks` slice.
+  function onEditBlock(b: DaybookBlockInstance) {
+    if (b._phantom && b._master_id) {
+      const master =
+        recurringMasters.find((m) => m.id === b._master_id) ??
+        blocks.find((real) => real.id === b._master_id);
+      if (master) {
+        setSelectedBlockId(null);
+        setBlockModal({ mode: 'edit', block: master });
+        return;
+      }
+      console.warn('Phantom master not found', b);
+      return;
+    }
+    setSelectedBlockId(null);
+    setBlockModal({ mode: 'edit', block: b });
   }
 
   return (
@@ -164,11 +273,21 @@ export default function Daybook() {
 
       {/* ── Topbar ────────────────────────────────────────── */}
       <div className="db-topbar">
-        <button className="db-icon-btn ghost" onClick={() => shiftDay(-1)} aria-label="Previous day" title="Previous day">‹</button>
+        <button
+          className="db-icon-btn ghost"
+          onClick={() => shiftView(-1)}
+          aria-label={`Previous ${viewMode}`}
+          title={`Previous ${viewMode}`}
+        >‹</button>
         <button className="db-today-pill" onClick={goToToday} title="Jump to today">Today</button>
-        <button className="db-icon-btn ghost" onClick={() => shiftDay(1)} aria-label="Next day" title="Next day">›</button>
+        <button
+          className="db-icon-btn ghost"
+          onClick={() => shiftView(1)}
+          aria-label={`Next ${viewMode}`}
+          title={`Next ${viewMode}`}
+        >›</button>
         <h1 className="db-date-heading">
-          {formatDateHeading(selectedDate)}
+          {formatRangeHeading(viewMode, selectedDate)}
           <span className="db-tz"> · {timezoneAbbr()}</span>
         </h1>
         <div className="db-spacer" />
@@ -176,9 +295,17 @@ export default function Daybook() {
           + Block
         </button>
         <div className="db-view-tabs" role="tablist" aria-label="View">
-          <button className="active" role="tab" aria-selected="true">Day</button>
-          <button disabled role="tab" aria-selected="false" title="Coming in Build 3">Week</button>
-          <button disabled role="tab" aria-selected="false" title="Coming in Build 3">Month</button>
+          {(['day', 'week', 'month'] as ViewMode[]).map((m) => (
+            <button
+              key={m}
+              className={viewMode === m ? 'active' : ''}
+              role="tab"
+              aria-selected={viewMode === m}
+              onClick={() => setViewMode(m)}
+            >
+              {m === 'day' ? 'Day' : m === 'week' ? 'Week' : 'Month'}
+            </button>
+          ))}
         </div>
         <Link to="/" className="db-back" title="Back to hallway">← hallway</Link>
       </div>
@@ -197,21 +324,41 @@ export default function Daybook() {
         />
       </aside>
 
-      {/* ── Main pane (Day view) ─────────────────────────── */}
-      <main className="db-main" aria-label="Day view">
+      {/* ── Main pane ────────────────────────────────────── */}
+      <main className="db-main" aria-label={`${viewMode} view`}>
         {!loaded ? (
           <div className="db-loading">Loading…</div>
-        ) : (
+        ) : viewMode === 'day' ? (
           <DayView
             date={selectedDate}
-            blocks={blocks}
+            blocks={instances}
             catById={catById}
             selectedBlockId={selectedBlockId}
             onSelectBlock={setSelectedBlockId}
-            onEditBlock={(b) => setBlockModal({ mode: 'edit', block: b })}
+            onEditBlock={onEditBlock}
             onCreateAtRange={(startIso, endIso) =>
               setBlockModal({ mode: 'add', defaultStart: startIso, defaultEnd: endIso })
             }
+          />
+        ) : viewMode === 'week' ? (
+          <WeekView
+            anchorDate={selectedDate}
+            blocks={instances}
+            catById={catById}
+            selectedBlockId={selectedBlockId}
+            onSelectBlock={setSelectedBlockId}
+            onEditBlock={onEditBlock}
+            onCreateAtRange={(startIso, endIso) =>
+              setBlockModal({ mode: 'add', defaultStart: startIso, defaultEnd: endIso })
+            }
+            onPickDay={(d) => { setSelectedDate(d); setViewMode('day'); }}
+          />
+        ) : (
+          <MonthView
+            anchorDate={selectedDate}
+            blocks={instances}
+            catById={catById}
+            onPickDay={(d) => { setSelectedDate(d); setViewMode('day'); }}
           />
         )}
       </main>
@@ -227,11 +374,11 @@ export default function Daybook() {
           onClose={() => setBlockModal(null)}
           onSaved={async () => {
             setBlockModal(null);
-            await refreshBlocks(selectedDate);
+            await refreshBlocks(viewRange.start, viewRange.end);
           }}
           onDeleted={async () => {
             setBlockModal(null);
-            await refreshBlocks(selectedDate);
+            await refreshBlocks(viewRange.start, viewRange.end);
           }}
         />
       )}
@@ -250,7 +397,7 @@ export default function Daybook() {
             setCategoryModal(null);
             const cats = await listCategories();
             setCategories(cats);
-            await refreshBlocks(selectedDate);
+            await refreshBlocks(viewRange.start, viewRange.end);
           }}
         />
       )}
@@ -275,11 +422,11 @@ function DayView({
   onCreateAtRange,
 }: {
   date: Date;
-  blocks: DaybookBlock[];
+  blocks: DaybookBlockInstance[];
   catById: Map<string, DaybookCategory>;
   selectedBlockId: string | null;
   onSelectBlock: (id: string | null) => void;
-  onEditBlock: (b: DaybookBlock) => void;
+  onEditBlock: (b: DaybookBlockInstance) => void;
   onCreateAtRange: (startIso: string, endIso: string) => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -451,14 +598,17 @@ function BlockTile({
   block,
   catById,
   selected,
+  compact = false,
   onSelect,
   onEdit,
   onShowTooltip,
   onHideTooltip,
 }: {
-  block: DaybookBlock;
+  block: DaybookBlockInstance;
   catById: Map<string, DaybookCategory>;
   selected: boolean;
+  /** Week view passes compact=true to make blocks narrower and hide cat name. */
+  compact?: boolean;
   onSelect: () => void;
   onEdit: () => void;
   onShowTooltip: (anchor: DOMRect) => void;
@@ -471,13 +621,19 @@ function BlockTile({
   const top = (startMin - HOUR_START * 60) / 60 * ROW_H;
   const height = (endMin - startMin) / 60 * ROW_H;
   const sizeClass = height < 32 ? ' tiny' : height < 55 ? ' short' : '';
+  const isPhantom = !!block._phantom;
   const ref = useRef<HTMLButtonElement>(null);
 
   return (
     <button
       ref={ref}
       type="button"
-      className={`db-block${sizeClass}${selected ? ' selected' : ''}`}
+      className={
+        `db-block${sizeClass}` +
+        (selected ? ' selected' : '') +
+        (compact ? ' compact' : '') +
+        (isPhantom ? ' phantom' : '')
+      }
       style={{
         top: `${top}px`,
         height: `${height}px`,
@@ -492,15 +648,18 @@ function BlockTile({
         if (ref.current) onShowTooltip(ref.current.getBoundingClientRect());
       }}
       onMouseLeave={onHideTooltip}
-      title="Double-click to edit"
+      title={isPhantom ? 'Recurring · double-click to edit all occurrences' : 'Double-click to edit'}
     >
       <span className="db-block-bg" aria-hidden="true" />
       <span className="db-block-content">
-        <span className="db-block-title">{block.title || '(untitled)'}</span>
+        <span className="db-block-title">
+          {isPhantom && <span className="db-block-phantom-mark" aria-hidden="true">↻</span>}
+          {block.title || '(untitled)'}
+        </span>
         <span className="db-block-time">
           {isoToLocalTime12h(block.start_at)} – {isoToLocalTime12h(block.end_at)}
         </span>
-        {height >= 70 && cat && (
+        {!compact && height >= 70 && cat && (
           <span className="db-block-cat">{cat.name}</span>
         )}
       </span>
@@ -600,6 +759,357 @@ function NowLine() {
       <span className="db-now-label">{isoToLocalTime12h(now.toISOString())} {timezoneAbbr()}</span>
     </div>
   );
+}
+
+// ── Week view ─────────────────────────────────────────────────────────
+//
+// A Sunday-anchored 7-column grid with the same time gutter as DayView.
+// Each column is a slim canvas with its own drag-to-create state and
+// blocks filtered to that day. Headers along the top show DOW + DOM and
+// double as "open this day" buttons (click → switch to Day view).
+
+function WeekView({
+  anchorDate,
+  blocks,
+  catById,
+  selectedBlockId,
+  onSelectBlock,
+  onEditBlock,
+  onCreateAtRange,
+  onPickDay,
+}: {
+  anchorDate: Date;
+  blocks: DaybookBlockInstance[];
+  catById: Map<string, DaybookCategory>;
+  selectedBlockId: string | null;
+  onSelectBlock: (id: string | null) => void;
+  onEditBlock: (b: DaybookBlockInstance) => void;
+  onCreateAtRange: (startIso: string, endIso: string) => void;
+  onPickDay: (d: Date) => void;
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+
+  // Same morning-scroll default as DayView so the user lands near 6 AM.
+  useEffect(() => {
+    if (!scrollerRef.current) return;
+    scrollerRef.current.scrollTop = 30 / 60 * ROW_H;
+  }, []);
+
+  const start = useMemo(() => startOfWeek(anchorDate), [anchorDate]);
+  const days = useMemo(() => {
+    const out: Date[] = [];
+    for (let i = 0; i < 7; i++) out.push(addDays(start, i));
+    return out;
+  }, [start]);
+  const todayKey = localDateKey(new Date());
+
+  // Group instances by their local date for fast per-column lookup.
+  const blocksByDay = useMemo(() => {
+    const m = new Map<string, DaybookBlockInstance[]>();
+    for (const b of blocks) {
+      const key = localDateKey(new Date(b.start_at));
+      const list = m.get(key);
+      if (list) list.push(b);
+      else m.set(key, [b]);
+    }
+    return m;
+  }, [blocks]);
+
+  const hours: number[] = [];
+  for (let h = HOUR_START; h <= HOUR_END; h++) hours.push(h);
+
+  // Tooltip lives at the view level (shared across columns).
+  const [tooltip, setTooltip] = useState<{
+    block: DaybookBlock;
+    x: number;
+    y: number;
+    flip: boolean;
+  } | null>(null);
+  const tooltipTimerRef = useRef<number | null>(null);
+  const showTooltip = useCallback((block: DaybookBlock, blockRect: DOMRect) => {
+    if (tooltipTimerRef.current) window.clearTimeout(tooltipTimerRef.current);
+    tooltipTimerRef.current = window.setTimeout(() => {
+      const TOOLTIP_W = 280;
+      const MARGIN = 12;
+      const wouldOverflow = blockRect.right + MARGIN + TOOLTIP_W > window.innerWidth;
+      const x = wouldOverflow ? blockRect.left - MARGIN - TOOLTIP_W : blockRect.right + MARGIN;
+      const y = blockRect.top;
+      setTooltip({ block, x, y, flip: wouldOverflow });
+    }, 220);
+  }, []);
+  const hideTooltip = useCallback(() => {
+    if (tooltipTimerRef.current) {
+      window.clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+    setTooltip(null);
+  }, []);
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const onScroll = () => hideTooltip();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [hideTooltip]);
+
+  return (
+    <>
+      <div className="db-week-scroller" ref={scrollerRef}>
+        <div className="db-week-grid">
+          <div className="db-week-corner" aria-hidden="true" />
+          {days.map((d) => {
+            const isToday = localDateKey(d) === todayKey;
+            return (
+              <button
+                key={localDateKey(d)}
+                className={`db-week-day-header${isToday ? ' today' : ''}`}
+                onClick={() => onPickDay(d)}
+                title="Open this day in Day view"
+              >
+                <span className="db-week-dow">
+                  {d.toLocaleDateString(undefined, { weekday: 'short' }).toUpperCase()}
+                </span>
+                <span className="db-week-dom">{d.getDate()}</span>
+              </button>
+            );
+          })}
+
+          <div className="db-time-gutter db-week-gutter" aria-hidden="true">
+            {hours.map((h) => (
+              <div key={h} className="db-hour-label" style={{ height: `${ROW_H}px` }}>
+                <span>{format12h(h)}</span>
+              </div>
+            ))}
+          </div>
+          {days.map((d) => (
+            <WeekColumn
+              key={localDateKey(d)}
+              date={d}
+              isToday={localDateKey(d) === todayKey}
+              blocks={blocksByDay.get(localDateKey(d)) ?? []}
+              catById={catById}
+              selectedBlockId={selectedBlockId}
+              onSelectBlock={onSelectBlock}
+              onEditBlock={onEditBlock}
+              onCreateAtRange={onCreateAtRange}
+              onShowTooltip={showTooltip}
+              onHideTooltip={hideTooltip}
+            />
+          ))}
+        </div>
+      </div>
+      {tooltip && <BlockTooltip {...tooltip} catById={catById} />}
+    </>
+  );
+}
+
+function WeekColumn({
+  date,
+  isToday,
+  blocks,
+  catById,
+  selectedBlockId,
+  onSelectBlock,
+  onEditBlock,
+  onCreateAtRange,
+  onShowTooltip,
+  onHideTooltip,
+}: {
+  date: Date;
+  isToday: boolean;
+  blocks: DaybookBlockInstance[];
+  catById: Map<string, DaybookCategory>;
+  selectedBlockId: string | null;
+  onSelectBlock: (id: string | null) => void;
+  onEditBlock: (b: DaybookBlockInstance) => void;
+  onCreateAtRange: (startIso: string, endIso: string) => void;
+  onShowTooltip: (b: DaybookBlock, anchor: DOMRect) => void;
+  onHideTooltip: () => void;
+}) {
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<{ startMin: number; endMin: number } | null>(null);
+  const dragRef = useRef<{ startMin: number; endMin: number } | null>(null);
+
+  function yToMinutes(yPxFromCanvasTop: number): number {
+    const totalMin = HOUR_START * 60 + (yPxFromCanvasTop / ROW_H) * 60;
+    return Math.max(HOUR_START * 60, Math.min(HOUR_END * 60 + 59, totalMin));
+  }
+  function snap15(min: number): number {
+    return Math.round(min / 15) * 15;
+  }
+  function localMinToHHMM(min: number): string {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
+  function onCanvasMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    if (!canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const startY = e.clientY - rect.top;
+    const startMin = snap15(yToMinutes(startY));
+    const initial = { startMin, endMin: startMin };
+    setDrag(initial);
+    dragRef.current = initial;
+    onSelectBlock(null);
+
+    const onMove = (ev: MouseEvent) => {
+      if (!canvasRef.current) return;
+      const r = canvasRef.current.getBoundingClientRect();
+      const y = ev.clientY - r.top;
+      const endMin = snap15(yToMinutes(y));
+      const next = { startMin: dragRef.current!.startMin, endMin };
+      dragRef.current = next;
+      setDrag(next);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      const finished = dragRef.current;
+      dragRef.current = null;
+      setDrag(null);
+      if (!finished) return;
+      const lo = Math.min(finished.startMin, finished.endMin);
+      const hi = Math.max(finished.startMin, finished.endMin);
+      if (hi - lo < 15) return;
+      const dateKey = localDateKey(date);
+      const startIso = combineLocalDateTimeToIso(dateKey, localMinToHHMM(lo));
+      const endIso = combineLocalDateTimeToIso(dateKey, localMinToHHMM(hi));
+      onCreateAtRange(startIso, endIso);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  return (
+    <div
+      ref={canvasRef}
+      className={`db-canvas db-week-col${isToday ? ' today' : ''}${drag ? ' dragging' : ''}`}
+      style={{
+        height: `${(HOUR_END - HOUR_START + 1) * ROW_H}px`,
+        backgroundSize: `${ROW_H}px ${ROW_H}px, ${ROW_H / 2}px ${ROW_H / 2}px`,
+      }}
+      onMouseDown={onCanvasMouseDown}
+    >
+      {blocks.map((b) => (
+        <BlockTile
+          key={b.id}
+          block={b}
+          catById={catById}
+          selected={selectedBlockId === b.id}
+          compact
+          onSelect={() => onSelectBlock(b.id)}
+          onEdit={() => { onSelectBlock(null); onEditBlock(b); }}
+          onShowTooltip={(rect) => onShowTooltip(b, rect)}
+          onHideTooltip={onHideTooltip}
+        />
+      ))}
+      {drag && <DraftBlock startMin={drag.startMin} endMin={drag.endMin} />}
+      {isToday && <NowLine />}
+    </div>
+  );
+}
+
+// ── Month view ────────────────────────────────────────────────────────
+//
+// A 7×6 grid showing the visible month. Each cell shows the day number
+// and up to 3 block "pills" (color swatch + start time + title). Cells
+// with more get a "+N more" footer. Click a cell to drop into Day view
+// for that date.
+
+function MonthView({
+  anchorDate,
+  blocks,
+  catById,
+  onPickDay,
+}: {
+  anchorDate: Date;
+  blocks: DaybookBlockInstance[];
+  catById: Map<string, DaybookCategory>;
+  onPickDay: (d: Date) => void;
+}) {
+  const weeks = useMemo(() => buildMonthGrid(anchorDate), [anchorDate]);
+  const todayKey = localDateKey(new Date());
+  const currentMonth = anchorDate.getMonth();
+
+  // Group blocks by local date key, sorted by start time within each.
+  const blocksByDay = useMemo(() => {
+    const m = new Map<string, DaybookBlockInstance[]>();
+    for (const b of blocks) {
+      const key = localDateKey(new Date(b.start_at));
+      const list = m.get(key);
+      if (list) list.push(b);
+      else m.set(key, [b]);
+    }
+    for (const [, list] of m) {
+      list.sort((a, b) => a.start_at.localeCompare(b.start_at));
+    }
+    return m;
+  }, [blocks]);
+
+  return (
+    <div className="db-month">
+      <div className="db-month-dow" aria-hidden="true">
+        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+          <div key={d} className="db-month-dow-cell">{d.toUpperCase()}</div>
+        ))}
+      </div>
+      <div className="db-month-grid">
+        {weeks.flat().map((day) => {
+          const key = localDateKey(day);
+          const inMonth = day.getMonth() === currentMonth;
+          const isToday = key === todayKey;
+          const dayBlocks = blocksByDay.get(key) ?? [];
+          const MAX_VISIBLE = 3;
+          const visible = dayBlocks.slice(0, MAX_VISIBLE);
+          const more = dayBlocks.length - visible.length;
+          return (
+            <button
+              key={key}
+              className={
+                `db-month-cell${inMonth ? '' : ' muted'}${isToday ? ' today' : ''}`
+              }
+              onClick={() => onPickDay(day)}
+              title="Open this day in Day view"
+            >
+              <span className="db-month-cell-date">{day.getDate()}</span>
+              <span className="db-month-cell-blocks">
+                {visible.map((b) => {
+                  const cat = b.category_id ? catById.get(b.category_id) : undefined;
+                  const color = cat?.color ?? ORPHAN_COLOR;
+                  return (
+                    <span
+                      key={b.id}
+                      className={`db-month-pill${b._phantom ? ' phantom' : ''}`}
+                      style={{ ['--cat-color' as 'color']: color }}
+                    >
+                      <span className="db-month-pill-time">
+                        {compactTime(b.start_at)}
+                      </span>
+                      <span className="db-month-pill-title">{b.title || '(untitled)'}</span>
+                    </span>
+                  );
+                })}
+                {more > 0 && <span className="db-month-more">+{more} more</span>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** "8am" / "12:30pm" — tight version of isoToLocalTime12h for month pills. */
+function compactTime(iso: string): string {
+  const d = new Date(iso);
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ap = h >= 12 ? 'p' : 'a';
+  h = h % 12;
+  if (h === 0) h = 12;
+  return m === 0 ? `${h}${ap}` : `${h}:${String(m).padStart(2, '0')}${ap}`;
 }
 
 // ── Mini calendar ─────────────────────────────────────────────────────
@@ -917,7 +1427,7 @@ function BlockModal({
             {recur !== 'none' && (
               <p className="db-recur-hint">
                 Saved as <strong>{RECUR_OPTIONS.find((r) => r.value === recur)?.label.toLowerCase()}</strong> —
-                recurrence isn't materialized in views yet, but the field is preserved.
+                this block will appear on every matching day. Editing any occurrence updates the series.
               </p>
             )}
           </div>
@@ -1097,8 +1607,47 @@ function format12h(h: number): string {
   return `${hh} ${ap}`;
 }
 
-function formatDateHeading(d: Date): string {
-  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+/**
+ * Return a fresh Date `n` days after `d`. Calendar arithmetic only —
+ * never use millisecond math here, since DST transitions would skew the
+ * result. (Same lesson as the Data-room heatmap.)
+ */
+function addDays(d: Date, n: number): Date {
+  const out = new Date(d);
+  out.setHours(0, 0, 0, 0);
+  out.setDate(out.getDate() + n);
+  return out;
+}
+
+/**
+ * Heading text for the topbar based on the current view + anchor date.
+ *   day:   "Sunday, May 24"
+ *   week:  "May 24 – 30, 2026"  (or month/year qualifiers if it spans)
+ *   month: "May 2026"
+ */
+function formatRangeHeading(viewMode: ViewMode, anchor: Date): string {
+  if (viewMode === 'day') {
+    return anchor.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+  if (viewMode === 'week') {
+    const start = startOfWeek(anchor);
+    const end = addDays(start, 6);
+    const sameMonth = start.getMonth() === end.getMonth();
+    const sameYear = start.getFullYear() === end.getFullYear();
+    if (sameMonth) {
+      const month = start.toLocaleDateString(undefined, { month: 'long' });
+      return `${month} ${start.getDate()} – ${end.getDate()}, ${end.getFullYear()}`;
+    }
+    if (sameYear) {
+      const a = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const b = end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      return `${a} – ${b}, ${end.getFullYear()}`;
+    }
+    const a = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    const b = end.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    return `${a} – ${b}`;
+  }
+  return anchor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
 function timezoneAbbr(): string {
