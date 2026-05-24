@@ -136,11 +136,11 @@
 .sphere:hover .sub,
 .sphere:focus-visible .sub { opacity: 1; transform: translateY(0); }
 .sphere:active { transform: scale(0.985); }
-.sphere.big:hover                                       { transform: translate(-50%, -50%) scale(1.02); }
-/* Notes is the only horizontally-centered satellite; keep its
-   translateX so the hover scale doesn't shove it off-center. */
-.sphere.small.s-notes:hover                             { transform: translateX(-50%) scale(1.03); }
-.sphere.small:not(.s-notes):hover                       { transform: scale(1.03); }
+/* All spheres center themselves via translate(-50%, -50%), so hover
+   preserves that transform when scaling — keeps them in place
+   instead of pinning to top-left during the lift. */
+.sphere.big:hover     { transform: translate(-50%, -50%) scale(1.02); }
+.sphere.small:hover   { transform: translate(-50%, -50%) scale(1.03); }
 
 .sphere.big   { width: 30%; aspect-ratio: 1; }
 .sphere.small { width: 18%; aspect-ratio: 1; }
@@ -150,22 +150,29 @@
 .sphere.small .label { font-size: clamp(13px, 1.3vw, 18px); }
 .sphere.small .sub   { font-size: clamp(10px, 0.9vw, 12px); }
 
-/* Flower arrangement — Sanctuary at the geometric center as the flower's
-   heart, five satellites as petals around it: Notes at the top,
-   Timeline and Data on the upper arms, Daybook and Treasury on the
-   lower arms. None overlap Sanctuary's bounding circle.
+/* Flower — Sanctuary at the center, five petals equidistant around it.
+
+   Geometry: each petal's center sits at exactly 0.28W from Sanctuary's
+   center (where W = stage width), evenly spaced at 72° around the
+   ring. Stage aspect ratio is 16:12, so the petal positions in % of
+   stage are computed in pixel space and converted — that's why the
+   vertical numbers aren't symmetric with the horizontal ones at first
+   glance, but in pixels every petal is the same distance away.
+
+   All satellites use translate(-50%, -50%) so left/top are centers
+   (matching Sanctuary), making the math clean.
 
    Column thematics survive the rearrangement:
      LEFT column  = time-related     (Timeline UL ↔ Daybook LL)
      RIGHT column = scripture-related (Data UR ↔ Treasury LR)
      NOTES on top (the daily capture, untethered to either axis)
      SANCTUARY at center (the heart that holds it all). */
-.s-sanctuary { left: 50%; top: 53%; transform: translate(-50%, -50%); }
-.s-notes     { left: 50%; top: 10%; transform: translateX(-50%); }
-.s-timeline  { left: 12%; top: 28%; }
-.s-data      { right: 12%; top: 28%; }
-.s-daybook   { left: 12%; top: 78%; }
-.s-treasury  { right: 12%; top: 78%; }
+.s-sanctuary { left: 50%;   top: 53%;    transform: translate(-50%, -50%); }
+.s-notes     { left: 50%;   top: 15.7%;  transform: translate(-50%, -50%); }
+.s-timeline  { left: 23.4%; top: 41.5%;  transform: translate(-50%, -50%); }
+.s-data      { left: 76.6%; top: 41.5%;  transform: translate(-50%, -50%); }
+.s-daybook   { left: 33.5%; top: 83.2%;  transform: translate(-50%, -50%); }
+.s-treasury  { left: 66.5%; top: 83.2%;  transform: translate(-50%, -50%); }
 
 /* Quiet hairline arc */
 .archline {

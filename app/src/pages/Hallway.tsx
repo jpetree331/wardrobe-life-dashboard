@@ -146,7 +146,7 @@ export default function Hallway() {
         <div className="stage-inner" ref={stageRef}>
           <svg className="archline" viewBox="0 0 1000 700" preserveAspectRatio="none" aria-hidden="true">
             <path
-              d="M120 196 Q 500 30 880 196"
+              d="M234 290 Q 500 60 766 290"
               fill="none"
               stroke="currentColor"
               strokeWidth="0.8"
