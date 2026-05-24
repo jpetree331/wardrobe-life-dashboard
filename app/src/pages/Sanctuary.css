@@ -520,6 +520,59 @@
   padding: 0 4px;
 }
 .sa-refs li button:hover { color: var(--red); }
+/* Keep-verse button — sits between the ref text and remove. The ✦
+   glyph plus warm-gold tint signals creation, distinct from the
+   destructive remove action right next to it. */
+.sa-refs li button.keep {
+  color: color-mix(in oklab, #a0700e 70%, var(--ink-soft) 30%);
+  font-style: italic;
+  margin-left: auto;
+  padding: 0 8px 0 4px;
+}
+.sa-refs li button.keep:hover {
+  color: color-mix(in oklab, #a0700e 90%, var(--ink) 10%);
+}
+.sa-refs li {
+  align-items: baseline;
+}
+.sa-refs li > span:first-child {
+  flex: 1;
+}
+
+/* Keep-verse confirmation toast — appears bottom-center for ~3.5s
+   after a successful keep. The "open Treasury" link lets her jump
+   straight to the room to see the new entry. */
+.sa-keep-toast {
+  position: fixed;
+  bottom: 32px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  background: color-mix(in oklab, var(--ink) 92%, transparent 8%);
+  color: var(--bg);
+  font-family: 'EB Garamond', serif;
+  font-size: 13.5px;
+  font-style: italic;
+  padding: 9px 18px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  box-shadow: 0 8px 28px -8px color-mix(in oklab, var(--ink) 60%, transparent 40%);
+  animation: sa-keep-toast-in 220ms ease-out;
+}
+.sa-keep-toast .open-treasury {
+  margin-left: 6px;
+  color: color-mix(in oklab, var(--bg) 85%, transparent 15%);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in oklab, var(--bg) 40%, transparent 60%);
+  padding-bottom: 1px;
+}
+.sa-keep-toast .open-treasury:hover {
+  color: var(--bg);
+  border-bottom-color: var(--bg);
+}
+@keyframes sa-keep-toast-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
 
 .sa-insp-section .timeline-back {
   font-style: italic; font-size: 13px;

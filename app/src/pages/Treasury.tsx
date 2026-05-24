@@ -8,25 +8,16 @@
 // Schema: app/supabase/migrations/0006_treasury.sql
 // CRUD: src/lib/treasury.ts
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  createTreasuryVerse,
   deleteTreasuryVerse,
   formatReference,
   listTreasuryVerses,
-  updateTreasuryVerse,
-  type TreasuryKind,
   type TreasuryVerse,
 } from '../lib/treasury';
 import { BIBLE_BOOKS } from '../lib/bibleVerseCounts';
-import { parseBibleRef } from '../lib/bibleRef';
-import {
-  fetchScripture,
-  TRANSLATIONS,
-  type Translation,
-} from '../lib/scripture';
-import { localToday } from '../lib/dates';
+import { TreasuryVerseModal } from '../components/TreasuryVerseModal';
 import { useFavicon } from '../hooks/useFavicon';
 import './Treasury.css';
 
@@ -184,13 +175,13 @@ export default function Treasury() {
       <footer className="tr-status">{statusMsg}</footer>
 
       {modal?.mode === 'add' && (
-        <VerseModal
+        <TreasuryVerseModal
           onClose={() => setModal(null)}
           onSaved={async () => { setModal(null); await refresh(); }}
         />
       )}
       {modal?.mode === 'edit' && (
-        <VerseModal
+        <TreasuryVerseModal
           initial={modal.verse}
           onClose={() => setModal(null)}
           onSaved={async () => { setModal(null); await refresh(); }}
@@ -307,6 +298,16 @@ function VerseCard({
         <span className="vc-ref">{formatReference(verse)}</span>
         <span className="vc-translation">{verse.translation}</span>
         {verse.kind === 'promise' && <span className="vc-kind-tag promise">promise</span>}
+        {verse.source_entry_id && (
+          <Link
+            className="vc-source"
+            to={`/sanctuary?id=${verse.source_entry_id}`}
+            title="Open the Sanctuary entry this was kept from"
+            onClick={(e) => e.stopPropagation()}
+          >
+            from Sanctuary
+          </Link>
+        )}
         <button className="vc-edit" onClick={() => onEdit(verse)} aria-label="Edit">edit</button>
       </header>
       <p className="vc-text">{verse.verse_text}</p>
@@ -315,206 +316,3 @@ function VerseCard({
   );
 }
 
-// ── + Keep verse / Edit modal ────────────────────────────────────────
-
-function VerseModal({
-  initial, onClose, onSaved, onDelete,
-}: {
-  initial?: TreasuryVerse;
-  onClose: () => void;
-  onSaved: () => void;
-  onDelete?: () => void;
-}) {
-  const isEdit = !!initial;
-
-  const [date, setDate] = useState(initial?.marked_on ?? localToday());
-  const [reference, setReference] = useState(initial ? formatReference(initial) : '');
-  const [translation, setTranslation] = useState<Translation>(
-    (initial?.translation as Translation) ?? 'esv',
-  );
-  const [kind, setKind] = useState<TreasuryKind>(initial?.kind ?? 'standout');
-  const [verseText, setVerseText] = useState(initial?.verse_text ?? '');
-  const [note, setNote] = useState(initial?.note ?? '');
-  const [fetching, setFetching] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  // Esc closes
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  async function onFetchVerse() {
-    if (fetching) return;
-    const ref = reference.trim();
-    if (!ref) { setErr('Enter a reference first (e.g. "John 3:16").'); return; }
-    const parsed = parseBibleRef(ref);
-    if (!parsed) { setErr(`Could not parse "${ref}".`); return; }
-    setFetching(true); setErr(null);
-    try {
-      const result = await fetchScripture(ref, translation);
-      const text = result.verses
-        .map((v) => v.text.trim())
-        .filter(Boolean)
-        .join(' ');
-      if (!text) {
-        setErr('Got an empty response — try a different reference?');
-      } else {
-        setVerseText(text);
-      }
-    } catch (e: any) {
-      setErr(e?.message || 'Scripture lookup failed.');
-    } finally {
-      setFetching(false);
-    }
-  }
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (saving) return;
-    setErr(null);
-
-    const refTrim = reference.trim();
-    const parsed = parseBibleRef(refTrim);
-    if (!parsed) { setErr(`Could not parse "${refTrim}". Try "John 3:16" or "John 3:16-17".`); return; }
-    if (!verseText.trim()) { setErr('Verse text is empty — fetch or paste it before saving.'); return; }
-
-    setSaving(true);
-    const payload = {
-      marked_on: date,
-      book: parsed.book,
-      chapter: parsed.chapter,
-      verse_from: parsed.verseFrom ?? 1,
-      verse_to: parsed.verseTo ?? null,
-      verse_text: verseText.trim(),
-      translation: translation.toUpperCase(),
-      kind,
-      note: note.trim() || null,
-    };
-    try {
-      if (isEdit && initial) {
-        await updateTreasuryVerse(initial.id, payload);
-      } else {
-        await createTreasuryVerse(payload);
-      }
-      onSaved();
-    } catch (e: any) {
-      console.error(e);
-      setErr(e?.message || 'Could not save.');
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="tr-modal-bg" onClick={onClose}>
-      <div className="tr-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="tr-modal-head">
-          <h2>{isEdit ? 'Edit verse' : '+ Keep verse'}</h2>
-          <button className="x" onClick={onClose} aria-label="Close">×</button>
-        </div>
-        <form className="tr-form" onSubmit={onSubmit}>
-          <div className="row">
-            <label>
-              Date
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
-            </label>
-            <label>
-              Translation
-              <select value={translation} onChange={(e) => setTranslation(e.target.value as Translation)}>
-                {TRANSLATIONS.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <label>
-            Reference
-            <input
-              type="text"
-              value={reference}
-              onChange={(e) => setReference(e.target.value)}
-              placeholder='e.g. "John 3:16" or "Romans 8:38-39"'
-              required
-              autoFocus={!isEdit}
-            />
-          </label>
-
-          <fieldset className="tr-kind">
-            <legend>Type</legend>
-            <label className="tr-kind-option">
-              <input
-                type="radio"
-                name="kind"
-                value="standout"
-                checked={kind === 'standout'}
-                onChange={() => setKind('standout')}
-              />
-              <span>Stand-out</span>
-              <em className="hint">a verse that arrested you</em>
-            </label>
-            <label className="tr-kind-option promise">
-              <input
-                type="radio"
-                name="kind"
-                value="promise"
-                checked={kind === 'promise'}
-                onChange={() => setKind('promise')}
-              />
-              <span>Promise</span>
-              <em className="hint">held in faint yellow</em>
-            </label>
-          </fieldset>
-
-          <label>
-            Verse text
-            <div className="tr-text-row">
-              <textarea
-                value={verseText}
-                onChange={(e) => setVerseText(e.target.value)}
-                rows={4}
-                placeholder="The verse, in your chosen translation. Click 'Fetch' to populate from the reference."
-              />
-              <button
-                type="button"
-                className="btn-quiet"
-                onClick={onFetchVerse}
-                disabled={fetching}
-                title="Look up the verse text from the chosen translation"
-              >
-                {fetching ? 'Fetching…' : 'Fetch'}
-              </button>
-            </div>
-          </label>
-
-          <label>
-            Note (optional)
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              placeholder="Why it landed, what context, anything you want to remember about it."
-            />
-          </label>
-
-          {err && <div className="tr-form-err">{err}</div>}
-
-          <div className="tr-modal-actions">
-            {isEdit && onDelete && (
-              <button type="button" className="danger" onClick={onDelete} disabled={saving}>
-                Delete
-              </button>
-            )}
-            <div className="spacer" />
-            <button type="button" onClick={onClose} disabled={saving}>Cancel</button>
-            <button type="submit" className="primary" disabled={saving}>
-              {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Keep')}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}

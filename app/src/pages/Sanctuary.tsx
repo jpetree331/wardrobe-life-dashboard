@@ -22,6 +22,7 @@ import {
   parseSanctuaryFile,
   type ParsedSanctuaryEntry,
 } from '../lib/sanctuaryImport';
+import { TreasuryVerseModal } from '../components/TreasuryVerseModal';
 import {
   buildBinderTree,
   expansionKeysForEntry,
@@ -70,6 +71,13 @@ export default function Sanctuary() {
   const [scResult, setScResult] = useState<ScriptureResult | null>(null);
   const [scLoading, setScLoading] = useState(false);
   const [scError, setScError] = useState<string | null>(null);
+
+  // ✦ Keep verse — when a scripture ref in the inspector is "kept", we
+  // open the Treasury modal pre-filled with the entry's date + parsed
+  // reference + source_entry_id. The modal handles its own save flow;
+  // we just toggle the prefill payload on/off.
+  const [keepingRef, setKeepingRef] = useState<{ ref: string; entryId: string; entryDate: string } | null>(null);
+  const [keptToast, setKeptToast] = useState<string | null>(null);
 
   const [sel, setSel] = useState<{
     top: number;
@@ -787,6 +795,10 @@ export default function Sanctuary() {
     const refs = (active.scripture_refs || []).filter((r) => r !== ref);
     scheduleSave({ scripture_refs: refs });
   }
+  function keepScriptureRef(ref: string) {
+    if (!active) return;
+    setKeepingRef({ ref, entryId: active.id, entryDate: active.entry_date });
+  }
 
   return (
     <div className="sanctuary-page">
@@ -1205,6 +1217,7 @@ export default function Sanctuary() {
                   onRemoveTag={removeTag}
                   onAddScriptureRef={addScriptureRef}
                   onRemoveScriptureRef={removeScriptureRef}
+                  onKeepScriptureRef={keepScriptureRef}
                   onDelete={deleteActive}
                 />
               </div>
@@ -1229,6 +1242,7 @@ export default function Sanctuary() {
                 onRemoveTag={removeTag}
                 onAddScriptureRef={addScriptureRef}
                 onRemoveScriptureRef={removeScriptureRef}
+                onKeepScriptureRef={keepScriptureRef}
                 onDelete={deleteActive}
               />
             </div>
@@ -1271,6 +1285,30 @@ export default function Sanctuary() {
         />
       )}
 
+      {keepingRef && (
+        <TreasuryVerseModal
+          autoFetch
+          prefill={{
+            marked_on: keepingRef.entryDate,
+            reference: keepingRef.ref,
+            source_entry_id: keepingRef.entryId,
+            translation: 'esv',
+          }}
+          onClose={() => setKeepingRef(null)}
+          onSaved={() => {
+            setKeptToast(`Kept ${keepingRef.ref} in the Treasury.`);
+            setKeepingRef(null);
+            window.setTimeout(() => setKeptToast(null), 3500);
+          }}
+        />
+      )}
+      {keptToast && (
+        <div className="sa-keep-toast" role="status" aria-live="polite">
+          ✦ {keptToast}{' '}
+          <Link to="/treasury" className="open-treasury">open Treasury →</Link>
+        </div>
+      )}
+
       <footer className="sa-status">
         <div>{statusMsg}</div>
         <div className="right">
@@ -1297,6 +1335,7 @@ function Inspector({
   onRemoveTag,
   onAddScriptureRef,
   onRemoveScriptureRef,
+  onKeepScriptureRef,
   onDelete,
 }: {
   active: Entry | null;
@@ -1308,6 +1347,8 @@ function Inspector({
   onRemoveTag: (tag: string) => void;
   onAddScriptureRef: () => void;
   onRemoveScriptureRef: (ref: string) => void;
+  /** Promote this scripture ref to the Treasury. Opens the modal pre-filled. */
+  onKeepScriptureRef: (ref: string) => void;
   onDelete: () => void;
 }) {
   if (!active) {
@@ -1363,6 +1404,13 @@ function Inspector({
             {active.scripture_refs.map((r) => (
               <li key={r}>
                 <span>{r}</span>
+                <button
+                  className="keep"
+                  onClick={() => onKeepScriptureRef(r)}
+                  title="Keep this verse in the Treasury"
+                >
+                  ✦ keep
+                </button>
                 <button onClick={() => onRemoveScriptureRef(r)}>remove</button>
               </li>
             ))}

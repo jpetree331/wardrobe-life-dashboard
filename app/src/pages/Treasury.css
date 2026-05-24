@@ -232,6 +232,27 @@
   color: color-mix(in oklab, #a0700e 70%, var(--ink) 30%);
   background: color-mix(in oklab, var(--highlight-yellow) 22%, transparent 78%);
 }
+/* "from Sanctuary" badge — appears on cards that were promoted from a
+   Sanctuary entry via the ✦ keep button. Warm orange to match the
+   Sanctuary calendar marker / sanctuary-derived-read tag used in the
+   Data room, so the visual cue stays consistent across rooms. */
+.vc-source {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #b8521a;
+  background: color-mix(in oklab, #b8521a 10%, transparent 90%);
+  padding: 1px 8px;
+  border-radius: 999px;
+  text-decoration: none;
+  white-space: nowrap;
+  border: 1px solid color-mix(in oklab, #b8521a 18%, transparent 82%);
+  transition: background 100ms ease, border-color 100ms ease;
+}
+.vc-source:hover {
+  background: color-mix(in oklab, #b8521a 18%, transparent 82%);
+  border-color: color-mix(in oklab, #b8521a 38%, transparent 62%);
+}
 .vc-edit {
   margin-left: auto;
   background: transparent; border: 0;
@@ -279,169 +300,6 @@
   letter-spacing: 0.04em;
 }
 
-/* ── + Keep verse / Edit modal ──────────────────────────────────────── */
-.tr-modal-bg {
-  position: fixed; inset: 0; z-index: 250;
-  background: color-mix(in oklab, var(--ink) 45%, transparent 55%);
-  backdrop-filter: blur(2px);
-  display: flex; align-items: flex-start; justify-content: center;
-  padding: 60px 20px;
-  overflow-y: auto;
-}
-.tr-modal {
-  background: var(--page);
-  border: 1px solid var(--line-strong);
-  width: min(620px, 94vw);
-  max-height: 88vh;
-  display: flex; flex-direction: column;
-  box-shadow: 0 30px 70px -20px color-mix(in oklab, var(--ink) 50%, transparent 50%);
-}
-.tr-modal-head {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 16px 22px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-2);
-}
-.tr-modal-head h2 {
-  margin: 0;
-  font-family: 'Cormorant Garamond', serif;
-  font-weight: 400; font-size: 24px;
-  letter-spacing: 0.04em;
-  color: var(--ink);
-}
-.tr-modal-head .x {
-  background: transparent; border: 0;
-  font-size: 24px; line-height: 1;
-  cursor: pointer;
-  color: var(--ink-faint);
-  padding: 0 6px;
-}
-.tr-modal-head .x:hover { color: var(--ink); }
-
-.tr-form {
-  padding: 22px;
-  display: flex; flex-direction: column; gap: 14px;
-  overflow-y: auto;
-}
-.tr-form label {
-  display: flex; flex-direction: column; gap: 4px;
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
-  color: var(--ink-faint);
-}
-.tr-form input[type=text],
-.tr-form input[type=date],
-.tr-form select,
-.tr-form textarea {
-  font-family: 'EB Garamond', serif; font-size: 14px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  color: var(--ink);
-  padding: 8px 10px;
-  border-radius: 2px;
-  letter-spacing: normal;
-  text-transform: none;
-}
-.tr-form textarea { resize: vertical; min-height: 60px; line-height: 1.5; }
-.tr-form .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-
-.tr-kind {
-  border: 1px solid var(--line);
-  padding: 12px 14px;
-  border-radius: 2px;
-}
-.tr-kind legend {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
-  color: var(--ink-faint);
-  padding: 0 6px;
-}
-.tr-kind-option {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  gap: 10px !important;
-  padding: 6px 4px;
-  cursor: pointer;
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 14px;
-  text-transform: none;
-  letter-spacing: 0.02em;
-  color: var(--ink);
-}
-.tr-kind-option input { margin: 0; }
-.tr-kind-option span { font-weight: 500; }
-.tr-kind-option em.hint {
-  font-family: 'EB Garamond', serif;
-  font-style: italic;
-  font-size: 12px;
-  color: var(--ink-faint);
-  font-weight: 400;
-}
-.tr-kind-option.promise {
-  background: color-mix(in oklab, var(--highlight-yellow) 10%, transparent 90%);
-  border-radius: 2px;
-  padding: 6px 10px;
-}
-
-.tr-text-row {
-  display: flex; gap: 8px; align-items: flex-start;
-}
-.tr-text-row textarea {
-  flex: 1;
-}
-.tr-text-row .btn-quiet {
-  flex-shrink: 0;
-  font-family: 'EB Garamond', serif; font-size: 12px;
-  background: transparent;
-  border: 1px solid var(--line-strong);
-  color: var(--ink-soft);
-  padding: 5px 12px;
-  cursor: pointer;
-  border-radius: 2px;
-  letter-spacing: 0.04em;
-  margin-top: 2px;
-}
-.tr-text-row .btn-quiet:hover:not(:disabled) {
-  color: var(--ink); border-color: var(--ink-soft);
-}
-.tr-text-row .btn-quiet:disabled {
-  opacity: 0.5; cursor: wait;
-}
-
-.tr-form-err {
-  color: var(--red, #a64e2e);
-  font-family: 'EB Garamond', serif; font-size: 13px; font-style: italic;
-}
-
-.tr-modal-actions {
-  display: flex; gap: 10px; align-items: center;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-}
-.tr-modal-actions .spacer { flex: 1; }
-.tr-modal-actions button {
-  font-family: 'EB Garamond', serif; font-size: 13px;
-  background: transparent;
-  border: 1px solid var(--line-strong);
-  color: var(--ink-soft);
-  padding: 6px 14px;
-  cursor: pointer;
-  border-radius: 2px;
-  letter-spacing: 0.04em;
-}
-.tr-modal-actions button.primary {
-  background: var(--ink); color: var(--bg);
-  border-color: var(--ink);
-}
-.tr-modal-actions button.danger {
-  color: color-mix(in oklab, #a64e2e 80%, var(--ink) 20%);
-  border-color: color-mix(in oklab, #a64e2e 60%, var(--line) 40%);
-}
-.tr-modal-actions button.danger:hover {
-  background: color-mix(in oklab, #a64e2e 10%, transparent 90%);
-}
-.tr-modal-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Focus rings for keyboard navigation. */
 .treasury-page :focus-visible {
