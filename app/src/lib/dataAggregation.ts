@@ -789,6 +789,37 @@ export function planTotalSessions(
 }
 
 /**
+ * Inverse of `sessionsThroughDate`: given a start date, a set of weekdays,
+ * and a target number of sessions N, return the YYYY-MM-DD on which the
+ * Nth session lands. Used by the Plans form to auto-fill the end date
+ * when the user fixes a pace.
+ *
+ * Returns `startDateKey` if `sessionsNeeded <= 0` or the dow set is empty
+ * (no session-days possible). Caps the walk at ~100 years as a defensive
+ * stop against degenerate inputs.
+ */
+export function dateForSessionCount(
+  startDateKey: string,
+  daysOfWeek: number[],
+  sessionsNeeded: number,
+): string {
+  if (sessionsNeeded <= 0) return startDateKey;
+  const dowSet = new Set(daysOfWeek);
+  if (dowSet.size === 0) return startDateKey;
+  const cursor = parseLocalDate(startDateKey);
+  const CAP = 365 * 100;
+  let count = 0;
+  for (let i = 0; i < CAP; i++) {
+    if (dowSet.has(cursor.getDay())) {
+      count++;
+      if (count >= sessionsNeeded) return formatLocalDate(cursor);
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return formatLocalDate(cursor);
+}
+
+/**
  * Pace status as of a given date. "Expected" = sessions × per_session.
  * "ahead" if completed exceeds expected; "behind" if under.
  *

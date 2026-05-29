@@ -1421,6 +1421,16 @@
   color: var(--ink-faint); font-size: 12px;
 }
 
+/* "(auto)" tag next to whichever plan-form knob is being derived from the
+   other two. A quiet visual cue so the user knows the field will update
+   when they touch the others. */
+.dt-form .auto-tag {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  color: var(--ink-faint);
+  font-size: 0.92em;
+  font-weight: 400;
+}
+
 .books-picker {
   display: grid;
   grid-template-columns: 1fr 1fr;

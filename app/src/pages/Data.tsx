@@ -37,6 +37,7 @@ import {
   buildCalendarGrid,
   buildHeatGrid,
   computeYearStats,
+  dateForSessionCount,
   daysWithReadingByYear,
   formatLocalDate,
   MONTH_NAMES,
@@ -46,6 +47,7 @@ import {
   otNtVerseSplit,
   planChapterSequence,
   planPaceStatus,
+  planTotalSessions,
   sumByDate,
   topAuthorsByCount,
   topBooksByVerses,
@@ -2378,6 +2380,15 @@ function PlanCreateModal({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Auto-calc — the three inputs (books, [start..end], per_session) form
+  // an over-determined system; given any two, the third can be computed.
+  // We track which one to derive: by default `per_session` (the natural
+  // consequence of "I want to read X books between dates Y and Z"), but
+  // the moment the user types in the pace field we flip to deriving
+  // `end_date` (so changing books afterwards moves the finish line
+  // instead of the pace).
+  const [derived, setDerived] = useState<'per_session' | 'end_date'>('per_session');
+
   function applyPreset(p: PlanPreset) {
     const built = p.build(today);
     setName(built.name);
@@ -2386,6 +2397,9 @@ function PlanCreateModal({
     setEndDate(built.end_date);
     setDaysOfWeek(new Set(built.days_of_week));
     setPerSession(built.per_session);
+    // Presets stamp all three knobs; reset to the default mode so future
+    // book/dow tweaks recompute pace (the usual user intent).
+    setDerived('per_session');
   }
 
   function toggleBook(book: string) {
@@ -2412,6 +2426,33 @@ function PlanCreateModal({
     for (const b of books) t += chapterCount(b);
     return t;
   }, [books]);
+
+  // Auto-fill effect — recompute whichever knob is the dependent one
+  // whenever the others change. Equality-guarded setters prevent the
+  // effect from re-firing itself in a loop.
+  useEffect(() => {
+    if (books.size === 0 || daysOfWeek.size === 0 || !startDate) return;
+    if (totalChapters <= 0) return;
+    const dowArr = Array.from(daysOfWeek);
+
+    if (derived === 'per_session') {
+      if (!endDate || endDate < startDate) return;
+      const sessions = planTotalSessions({
+        start_date: startDate,
+        end_date: endDate,
+        days_of_week: dowArr,
+      });
+      if (sessions <= 0) return;
+      const next = Math.max(1, Math.min(200, Math.ceil(totalChapters / sessions)));
+      if (next !== perSession) setPerSession(next);
+    } else {
+      // derived === 'end_date'
+      if (perSession <= 0) return;
+      const sessionsNeeded = Math.ceil(totalChapters / perSession);
+      const next = dateForSessionCount(startDate, dowArr, sessionsNeeded);
+      if (next !== endDate) setEndDate(next);
+    }
+  }, [books, startDate, endDate, daysOfWeek, perSession, derived, totalChapters]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -2465,11 +2506,28 @@ function PlanCreateModal({
         <div className="row">
           <label>
             Start date
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required />
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                // Touching a date is a date-intent → recompute pace.
+                setDerived('per_session');
+              }}
+              required
+            />
           </label>
           <label>
-            End date
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} required />
+            End date{derived === 'end_date' && <em className="auto-tag"> · auto</em>}
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setDerived('per_session');
+              }}
+              required
+            />
           </label>
         </div>
 
@@ -2490,13 +2548,17 @@ function PlanCreateModal({
         </label>
 
         <label>
-          Chapters per session
+          Chapters per session{derived === 'per_session' && <em className="auto-tag"> · auto</em>}
           <input
             type="number"
             min={1}
             max={200}
             value={perSession}
-            onChange={(e) => setPerSession(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+            onChange={(e) => {
+              setPerSession(Math.max(1, Math.min(200, Number(e.target.value) || 1)));
+              // Typing a pace is a pace-intent → recompute end date.
+              setDerived('end_date');
+            }}
             required
           />
         </label>

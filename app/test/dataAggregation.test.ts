@@ -7,6 +7,7 @@ import {
   buildCalendarGrid,
   buildHeatGrid,
   computeYearStats,
+  dateForSessionCount,
   daysWithReadingByYear,
   formatLocalDate,
   mergeByDate,
@@ -616,6 +617,40 @@ describe('reading plan helpers', () => {
       // Jan 1 - Jan 7 2026, every day → 7 sessions.
       const plan = { start_date: '2026-01-01', end_date: '2026-01-07', days_of_week: everyDay };
       expect(planTotalSessions(plan)).toBe(7);
+    });
+  });
+
+  describe('dateForSessionCount', () => {
+    it('returns the date of the Nth session when reading every day', () => {
+      // Start Jan 1 2026 (Thu), every day, 7 sessions → Jan 7.
+      expect(dateForSessionCount('2026-01-01', everyDay, 7)).toBe('2026-01-07');
+    });
+
+    it('skips days not in the dow set', () => {
+      // Start Jan 1 2026 (Thu), weekdays M-F, 5 sessions:
+      // Jan 1 (Thu), Jan 2 (Fri), Jan 5 (Mon), Jan 6 (Tue), Jan 7 (Wed) → Jan 7
+      expect(dateForSessionCount('2026-01-01', [1, 2, 3, 4, 5], 5)).toBe('2026-01-07');
+    });
+
+    it('returns the start date when sessionsNeeded is 0 or negative', () => {
+      expect(dateForSessionCount('2026-01-01', everyDay, 0)).toBe('2026-01-01');
+      expect(dateForSessionCount('2026-01-01', everyDay, -3)).toBe('2026-01-01');
+    });
+
+    it('returns the start date when dow set is empty', () => {
+      expect(dateForSessionCount('2026-01-01', [], 10)).toBe('2026-01-01');
+    });
+
+    it('round-trips with sessionsThroughDate (planTotalSessions is its right-inverse)', () => {
+      const start = '2026-01-01';
+      const dow = [1, 3, 5]; // M/W/F
+      const endKey = dateForSessionCount(start, dow, 12);
+      // sessionsThroughDate from start..endKey should equal exactly 12.
+      const sessions = sessionsThroughDate(
+        { start_date: start, end_date: endKey, days_of_week: dow },
+        endKey,
+      );
+      expect(sessions).toBe(12);
     });
   });
 
