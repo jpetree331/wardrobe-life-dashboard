@@ -12,6 +12,8 @@ import { BIBLE_BOOKS } from './bibleVerseCounts';
 export type ParsedBibleRef = {
   book: string;          // canonical book name
   chapter: number;
+  /** Inclusive end chapter when the ref spans chapters (e.g., "John 1-3"). */
+  chapterTo?: number;
   verseFrom?: number;    // inclusive, undefined = whole chapter
   verseTo?: number;      // inclusive
 };
@@ -123,16 +125,23 @@ export function resolveBookName(input: string): string | null {
 }
 
 /**
- * Parse a single reference string into a structured form. The string may
- * span multiple chapters or verses; if it's a multi-chapter range we keep
- * just the first chapter (and treat the rest as "whole chapter" — Sanctuary
- * tags rarely span chapters and we don't want to over-engineer).
+ * Parse a single reference string into a structured form. Supported shapes:
+ *   - chapter-only        e.g. "Romans 8"
+ *   - chapter range       e.g. "John 1-3"        → chapter:1, chapterTo:3
+ *   - single verse        e.g. "Genesis 1:1"
+ *   - verse range         e.g. "Luke 24:13-35"
+ *
+ * Chapter ranges and verse ranges are mutually exclusive (Sanctuary tags
+ * either span chapters OR span verses within one chapter; the rare mixed
+ * shape "Gen 1:1-2:5" isn't supported and returns null — split it into
+ * two refs).
  *
  * Examples that parse:
- *   "Luke 24:13-35"    → { book:'Luke', chapter:24, verseFrom:13, verseTo:35 }
+ *   "Luke 24:13-35"    → { book:'Luke',   chapter:24, verseFrom:13, verseTo:35 }
  *   "Luke 24:13–35"    (en-dash)
  *   "Luke 24:13—35"    (em-dash)
  *   "Romans 8"         → { book:'Romans', chapter:8 }
+ *   "John 1-3"         → { book:'John',   chapter:1, chapterTo:3 }
  *   "Ps 23:1"          → { book:'Psalms', chapter:23, verseFrom:1, verseTo:1 }
  *   "Genesis 1:1"      → { book:'Genesis', chapter:1, verseFrom:1, verseTo:1 }
  *   "1 Cor 13"         → { book:'1 Corinthians', chapter:13 }
@@ -142,19 +151,30 @@ export function parseBibleRef(input: string): ParsedBibleRef | null {
   if (!input) return null;
   const trimmed = input.trim();
   if (!trimmed) return null;
-  // Match: optional book-number prefix + book token + chapter[:verses]
-  // Book token is letters / spaces / dots / commas; chapter follows the
-  // last sequence that isn't part of the book name.
-  // Pattern: `(book) (chapter)(:verses)?`
+  // (book) (chapter) ( :verse[-verse]  |  -chapter )?
+  //
+  // The outer optional group has two alternatives: a verse-bearing tail
+  // (with `:` or `.` separator) or a chapter-range tail (bare dash to a
+  // second number). Mixed cases like "1:1-2:5" don't fit either branch
+  // and fall through to a failed match → null.
   const m = trimmed.match(
-    /^\s*(\d?\s*[A-Za-z][A-Za-z\s.]*?)\s+(\d+)(?:\s*[:.]\s*(\d+)(?:\s*[–—\-]\s*(\d+))?)?\s*$/,
+    /^\s*(\d?\s*[A-Za-z][A-Za-z\s.]*?)\s+(\d+)(?:\s*[:.]\s*(\d+)(?:\s*[–—\-]\s*(\d+))?|\s*[–—\-]\s*(\d+))?\s*$/,
   );
   if (!m) return null;
-  const [, bookRaw, chapterRaw, vFromRaw, vToRaw] = m;
+  const [, bookRaw, chapterRaw, vFromRaw, vToRaw, chapterToRaw] = m;
   const book = resolveBookName(bookRaw);
   if (!book) return null;
   const chapter = Number(chapterRaw);
   if (!Number.isInteger(chapter) || chapter < 1) return null;
+  // Chapter range branch — "John 1-3"
+  if (chapterToRaw !== undefined) {
+    const chapterTo = Number(chapterToRaw);
+    if (!Number.isInteger(chapterTo) || chapterTo < chapter) return null;
+    if (chapterTo > chapter) {
+      return { book, chapter, chapterTo };
+    }
+    // chapterTo === chapter → degenerate range; treat as single chapter.
+  }
   const verseFrom = vFromRaw ? Number(vFromRaw) : undefined;
   const verseTo = vToRaw ? Number(vToRaw) : verseFrom; // single verse → from===to
   if (verseFrom !== undefined && verseFrom < 1) return null;
@@ -182,15 +202,23 @@ export function parseBibleRefList(input: string): ParsedBibleRef[] {
 }
 
 /**
- * Verses-read count for a single parsed ref. Returns the verse count of
- * the chapter if no range was given, or (verseTo - verseFrom + 1) if a
- * range was specified.
+ * Verses-read count for a single parsed ref. Returns:
+ *   - the range size (verseTo - verseFrom + 1) if a verse range was given
+ *   - the sum of verse counts across `chapter..chapterTo` for a chapter range
+ *   - the full chapter's verse count otherwise
  *
  * Caller passes a verseCount lookup so this stays a pure function.
  */
 export function versesIn(ref: ParsedBibleRef, lookupVerseCount: (book: string, chapter: number) => number): number {
   if (ref.verseFrom !== undefined && ref.verseTo !== undefined) {
     return Math.max(0, ref.verseTo - ref.verseFrom + 1);
+  }
+  if (ref.chapterTo !== undefined) {
+    let total = 0;
+    for (let ch = ref.chapter; ch <= ref.chapterTo; ch++) {
+      total += lookupVerseCount(ref.book, ch);
+    }
+    return total;
   }
   return lookupVerseCount(ref.book, ref.chapter);
 }

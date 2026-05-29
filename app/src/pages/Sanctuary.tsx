@@ -587,6 +587,51 @@ export default function Sanctuary() {
     scheduleSave({ body: pageRef.current.innerHTML });
   }
 
+  // ── Smart quotes ────────────────────────────────────────────────────
+  // Intercept typed " and ' before they hit the DOM and substitute
+  // direction-aware curly quotes. Decides open vs close by looking at
+  // the character immediately before the caret. Browsers' built-in
+  // smart-quote autocorrect in contenteditable is inconsistent across
+  // OS/IME combinations (sometimes it leaves both ends as the same
+  // glyph, which is what made an opening " visually resemble a
+  // back-tick). Doing it ourselves makes the behavior predictable.
+  //
+  // Only fires on direct keystroke (insertText). Paste / IME composition
+  // pass through untouched, so existing entry content isn't disturbed.
+  function handleSmartQuotes(e: React.FormEvent<HTMLDivElement>) {
+    const ev = e.nativeEvent as InputEvent;
+    if (ev.inputType !== 'insertText') return;
+    const ch = ev.data;
+    if (ch !== '"' && ch !== "'") return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+
+    // Look at the character immediately before the caret.
+    let preceding = '';
+    if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0) {
+      preceding = (range.startContainer as Text).data[range.startOffset - 1] ?? '';
+    } else if (range.startContainer.nodeType === Node.ELEMENT_NODE && range.startOffset > 0) {
+      const prev = range.startContainer.childNodes[range.startOffset - 1];
+      const txt = prev?.textContent ?? '';
+      preceding = txt[txt.length - 1] ?? '';
+    }
+
+    // Opening position: start of input, after whitespace, or after an
+    // opening bracket / dash. Otherwise closing.
+    const isOpening = !preceding || /[\s([{<«¿¡—–-]/.test(preceding);
+    const smart = ch === '"'
+      ? (isOpening ? '“' : '”')   // “ ”
+      : (isOpening ? '‘' : '’');  // ‘ ’
+
+    e.preventDefault();
+    // execCommand is deprecated but still the only built-in that
+    // inserts text into a contenteditable AND fires the input event
+    // (so handleEditorInput runs and the save schedules). Browser
+    // support is universal in 2026.
+    document.execCommand('insertText', false, smart);
+  }
+
   // ── Scripture ──────────────────────────────────────────────────────────
   // Manage the verses cache. When scResult changes:
   //   1. Save the OUTGOING passage's current versesHtml to the cache
@@ -1098,6 +1143,7 @@ export default function Sanctuary() {
                   contentEditable
                   suppressContentEditableWarning
                   spellCheck
+                  onBeforeInput={handleSmartQuotes}
                   onInput={handleEditorInput}
                   data-placeholder="Begin here…"
                   style={{ outline: 'none', minHeight: '40vh' }}

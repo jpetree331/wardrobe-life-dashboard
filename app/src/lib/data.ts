@@ -153,6 +153,30 @@ export async function listSanctuaryScriptureReads(): Promise<ScriptureRead[]> {
     e.scripture_refs.forEach((refStr, i) => {
       const parsed = parseBibleRef(refStr);
       if (!parsed) return;
+      if (parsed.chapterTo !== undefined) {
+        // Multi-chapter ref like "John 1-3" — emit one whole-chapter
+        // ScriptureRead per chapter in the range so the heatmap,
+        // calendar, Book × Chapter view, and KPIs all light up
+        // correctly. The id includes the chapter so each derived row
+        // stays unique for React keys + the dedupe in
+        // `listAllScriptureReads`.
+        for (let ch = parsed.chapter; ch <= parsed.chapterTo; ch++) {
+          out.push({
+            id: `sanctuary:${e.id}:${i}:${ch}`,
+            user_id: e.user_id,
+            read_date: e.entry_date,
+            book: parsed.book,
+            chapter: ch,
+            verse_from: null,
+            verse_to: null,
+            note: e.title || null,
+            source: 'sanctuary',
+            created_at: e.created_at,
+            updated_at: e.updated_at,
+          });
+        }
+        return;
+      }
       out.push({
         id: `sanctuary:${e.id}:${i}`,
         user_id: e.user_id,

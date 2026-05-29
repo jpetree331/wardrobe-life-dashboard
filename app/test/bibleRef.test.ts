@@ -139,6 +139,61 @@ describe('parseBibleRef', () => {
   });
 });
 
+describe('parseBibleRef chapter ranges', () => {
+  it('parses "John 1-3" as a chapter range', () => {
+    expect(parseBibleRef('John 1-3')).toEqual({
+      book: 'John', chapter: 1, chapterTo: 3,
+    });
+  });
+
+  it('accepts en-dash and em-dash for chapter ranges', () => {
+    expect(parseBibleRef('John 1–3')).toEqual({
+      book: 'John', chapter: 1, chapterTo: 3,
+    });
+    expect(parseBibleRef('John 1—3')).toEqual({
+      book: 'John', chapter: 1, chapterTo: 3,
+    });
+  });
+
+  it('parses chapter ranges across numbered and abbreviated books', () => {
+    expect(parseBibleRef('1 Cor 12-14')).toEqual({
+      book: '1 Corinthians', chapter: 12, chapterTo: 14,
+    });
+    expect(parseBibleRef('Ps 23-25')).toEqual({
+      book: 'Psalms', chapter: 23, chapterTo: 25,
+    });
+  });
+
+  it('collapses a degenerate range like "John 1-1" to a single chapter', () => {
+    expect(parseBibleRef('John 1-1')).toEqual({ book: 'John', chapter: 1 });
+  });
+
+  it('returns null for descending chapter ranges', () => {
+    expect(parseBibleRef('John 3-1')).toBeNull();
+  });
+
+  it('returns null for mixed chapter+verse ranges like "Genesis 1:1-2:5"', () => {
+    // Not supported — user should split into two refs.
+    expect(parseBibleRef('Genesis 1:1-2:5')).toBeNull();
+  });
+});
+
+describe('versesIn for chapter ranges', () => {
+  it('sums verse counts across a chapter range (John 1-3 = 51+25+36 = 112)', () => {
+    expect(versesIn(
+      { book: 'John', chapter: 1, chapterTo: 3 },
+      verseCount,
+    )).toBe(112);
+  });
+
+  it('sums short chapters too (Psalms 23-25 = 6+10+22 = 38)', () => {
+    expect(versesIn(
+      { book: 'Psalms', chapter: 23, chapterTo: 25 },
+      verseCount,
+    )).toBe(38);
+  });
+});
+
 describe('parseBibleRefList', () => {
   it('parses a comma-separated list', () => {
     const refs = parseBibleRefList('Luke 24:13-35, Romans 8, Ps 23');
