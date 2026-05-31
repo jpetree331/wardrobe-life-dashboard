@@ -522,6 +522,44 @@ export async function togglePlanCompletion(
   return { created: true };
 }
 
+// ── Sanctuary entries (Writing-stats data source) ───────────────────
+
+/**
+ * Lightweight shape for Writing-stats: only the columns we need to count
+ * words, line up dates, and label the longest-entry table.
+ */
+export type SanctuaryEntryLite = {
+  id: string;
+  entry_date: string;    // YYYY-MM-DD
+  title: string | null;
+  body: string;          // HTML stored by the Sanctuary editor
+};
+
+/**
+ * Fetch every Sanctuary entry the user owns, with the editor body. Only
+ * called by the Writing stats tab — the regular Sanctuary list view does
+ * its own paginated reads. RLS handles the user filter on the server.
+ */
+export async function listAllSanctuaryEntries(): Promise<SanctuaryEntryLite[]> {
+  const { data, error } = await supabase
+    .from('entries')
+    .select('id, entry_date, title, body')
+    .eq('room', 'sanctuary')
+    .order('entry_date', { ascending: false });
+  if (error) throw error;
+  return ((data || []) as Array<{
+    id: string;
+    entry_date: string;
+    title: string | null;
+    body: string | null;
+  }>).map((r) => ({
+    id: r.id,
+    entry_date: r.entry_date,
+    title: r.title,
+    body: r.body ?? '',
+  }));
+}
+
 // ── Cross-room calendar markers ──────────────────────────────────────
 
 /**

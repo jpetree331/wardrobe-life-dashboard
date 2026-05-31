@@ -9,6 +9,7 @@ import {
   deleteReadingPlan,
   listAllPlanCompletions,
   listAllScriptureReads,
+  listAllSanctuaryEntries,
   listBookReads,
   listDailyPageReads,
   listEntryDatesByRoom,
@@ -21,8 +22,16 @@ import {
   type DailyPageRead,
   type PlanCompletion,
   type ReadingPlan,
+  type SanctuaryEntryLite,
   type ScriptureRead,
 } from '../lib/data';
+import {
+  monthlyWordTotals,
+  perEntryStats,
+  topWords,
+  wordsByDate,
+  writingSummary,
+} from '../lib/sanctuaryStats';
 import {
   buildImportPreview,
   dedupAgainstExisting,
@@ -70,7 +79,7 @@ import './Data.css';
 
 // ── Types & constants ────────────────────────────────────────────────
 
-type Tab = 'heatmap' | 'calendar' | 'matrix' | 'stats' | 'plans';
+type Tab = 'heatmap' | 'calendar' | 'matrix' | 'stats' | 'plans' | 'writing';
 
 type Theme = 'sage' | 'rose' | 'sky' | 'violet' | 'saffron' | 'ink';
 
@@ -101,6 +110,7 @@ export default function Data() {
   const [plans, setPlans] = useState<ReadingPlan[]>([]);
   const [planCompletions, setPlanCompletions] = useState<PlanCompletion[]>([]);
   const [sanctuaryDates, setSanctuaryDates] = useState<Set<string>>(new Set());
+  const [sanctuaryEntries, setSanctuaryEntries] = useState<SanctuaryEntryLite[]>([]);
   const [timelineDates, setTimelineDates] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [statusMsg, setStatusMsg] = useState('Loading…');
@@ -128,7 +138,7 @@ export default function Data() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, b, dp, p, pc, sd, td] = await Promise.all([
+      const [s, b, dp, p, pc, sd, td, se] = await Promise.all([
         listAllScriptureReads(),
         listBookReads(),
         listDailyPageReads(),
@@ -136,6 +146,7 @@ export default function Data() {
         listAllPlanCompletions(),
         listEntryDatesByRoom('sanctuary'),
         listEntryDatesByRoom('timeline'),
+        listAllSanctuaryEntries(),
       ]);
       setScriptureReads(s);
       setBookReads(b);
@@ -144,6 +155,7 @@ export default function Data() {
       setPlanCompletions(pc);
       setSanctuaryDates(sd);
       setTimelineDates(td);
+      setSanctuaryEntries(se);
       setLoaded(true);
       const dpPagesTotal = dp.reduce((sum, r) => sum + r.pages, 0);
       setStatusMsg(
@@ -178,6 +190,7 @@ export default function Data() {
         <TabButton current={tab} value="matrix"   setTab={setTab}>Book × Chapter</TabButton>
         <TabButton current={tab} value="stats"    setTab={setTab}>Stats</TabButton>
         <TabButton current={tab} value="plans"    setTab={setTab}>Plans</TabButton>
+        <TabButton current={tab} value="writing"  setTab={setTab}>Writing</TabButton>
       </nav>
 
       <main className="dt-main">
@@ -217,6 +230,8 @@ export default function Data() {
             completions={planCompletions}
             onChanged={refresh}
           />
+        ) : tab === 'writing' ? (
+          <WritingView entries={sanctuaryEntries} />
         ) : null}
       </main>
 
@@ -2354,6 +2369,252 @@ function PlanDetail({
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Writing view ──────────────────────────────────────────────────────
+// Stats over the Sanctuary devotional journal. KPI strip across the top,
+// a year-view heatmap tinted by daily word-count (which days had
+// entries, how much was written), a monthly word-totals bar chart, a
+// table of every entry sorted by length, and a top-words bar chart with
+// a stopword toggle. All driven by the same pure helpers in
+// src/lib/sanctuaryStats.ts — easy to test, no DOM dependencies.
+
+function WritingView({ entries }: { entries: SanctuaryEntryLite[] }) {
+  const todayDate = useMemo(() => new Date(), []);
+  const currentYear = todayDate.getFullYear();
+  const [year, setYear] = useState<number>(currentYear);
+  const [excludeStopwords, setExcludeStopwords] = useState(true);
+  const [tableSort, setTableSort] = useState<'words-desc' | 'words-asc' | 'date-desc' | 'date-asc'>('words-desc');
+  const [tableLimit, setTableLimit] = useState<number>(15);
+
+  // Year-rail: years with any entries.
+  const years = useMemo(() => {
+    const s = new Set<number>();
+    for (const e of entries) {
+      const y = parseInt(e.entry_date.slice(0, 4), 10);
+      if (Number.isFinite(y)) s.add(y);
+    }
+    s.add(currentYear);
+    return Array.from(s).sort((a, b) => b - a);
+  }, [entries, currentYear]);
+
+  // KPIs (this year + all-time blended; we show both)
+  const summary = useMemo(() => writingSummary(entries, year), [entries, year]);
+
+  // Per-date map for the heatmap.
+  const byDate = useMemo(() => {
+    const m = wordsByDate(entries);
+    // buildHeatGrid wants Map<string, number>, so flatten.
+    const flat = new Map<string, number>();
+    for (const [k, v] of m) flat.set(k, v.words);
+    return flat;
+  }, [entries]);
+
+  const grid = useMemo(
+    () => buildHeatGrid(year, byDate, 'words', todayDate),
+    [year, byDate, todayDate],
+  );
+
+  // Monthly bar chart.
+  const monthly = useMemo(() => monthlyWordTotals(entries, year), [entries, year]);
+  const monthlyMax = useMemo(() => Math.max(1, ...monthly), [monthly]);
+
+  // Per-entry table.
+  const tableRows = useMemo(() => {
+    const rows = perEntryStats(entries);
+    switch (tableSort) {
+      case 'words-desc': return rows.sort((a, b) => b.words - a.words || a.entry_date.localeCompare(b.entry_date));
+      case 'words-asc':  return rows.sort((a, b) => a.words - b.words || a.entry_date.localeCompare(b.entry_date));
+      case 'date-desc':  return rows.sort((a, b) => b.entry_date.localeCompare(a.entry_date));
+      case 'date-asc':   return rows.sort((a, b) => a.entry_date.localeCompare(b.entry_date));
+    }
+  }, [entries, tableSort]);
+  const visibleRows = tableRows.slice(0, tableLimit);
+
+  // Top words.
+  const top = useMemo(
+    () => topWords(entries, { topN: 10, excludeStopwords }),
+    [entries, excludeStopwords],
+  );
+  const topMax = top.length > 0 ? top[0].count : 1;
+
+  // Heatmap hover tooltip — same pattern as HeatmapView, scoped here so
+  // we don't need to refactor the shared tooltip out.
+  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
+
+  if (entries.length === 0) {
+    return (
+      <div className="dt-panel">
+        <div className="empty">
+          No Sanctuary entries yet. Write something in the <Link to="/sanctuary">Sanctuary</Link> and your
+          word count will show up here.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="dt-panel wt-panel">
+      {/* ── KPI strip ───────────────────────────────────────────── */}
+      <section className="wt-kpis">
+        <KPI label="Entries" value={summary.entryCount.toLocaleString()} sub="all-time" />
+        <KPI label="Words" value={summary.totalWords.toLocaleString()} sub="all-time" />
+        <KPI label="Avg / entry" value={summary.avgWords.toLocaleString()} sub="words" />
+        <KPI
+          label="Longest entry"
+          value={summary.longestEntry ? summary.longestEntry.words.toLocaleString() : '0'}
+          sub={summary.longestEntry ? `${summary.longestEntry.title} · ${summary.longestEntry.entry_date}` : '—'}
+        />
+        <KPI label="Days written" value={summary.daysWritten.toLocaleString()} sub="all-time" />
+        <KPI label={`${year} words`} value={summary.thisYearWords.toLocaleString()} sub={`${summary.thisYearEntries} entries`} />
+      </section>
+
+      {/* ── Year heatmap ───────────────────────────────────────── */}
+      <section className="wt-section">
+        <header className="wt-section-head">
+          <h3>Days written · <em>{year}</em></h3>
+          <div className="wt-year-rail">
+            {years.map((y) => (
+              <button
+                key={y}
+                className={y === year ? 'active' : ''}
+                onClick={() => setYear(y)}
+              >{y}</button>
+            ))}
+          </div>
+        </header>
+        <p className="wt-section-sub">
+          Each square is one day; intensity shows how many words you wrote that day.
+          {' '}{grid.totalDays} day{grid.totalDays === 1 ? '' : 's'} with writing
+          {' · '}{grid.totalCount.toLocaleString()} words.
+        </p>
+        <div className="wt-heat-wrap" onMouseLeave={() => setTip(null)}>
+          <HeatGrid
+            cells={grid.cells}
+            year={year}
+            onHover={(cell, x, y) => {
+              if (!cell || cell.isFuture) { setTip(null); return; }
+              const w = cell.count;
+              setTip({
+                x, y,
+                text: w > 0
+                  ? `${w.toLocaleString()} word${w === 1 ? '' : 's'} · ${cell.date}`
+                  : `no entry · ${cell.date}`,
+              });
+            }}
+            onLeave={() => setTip(null)}
+          />
+          {tip && (
+            <div className="dt-tooltip" style={{ left: tip.x + 14, top: tip.y + 14 }}>{tip.text}</div>
+          )}
+        </div>
+      </section>
+
+      {/* ── Monthly bar chart ──────────────────────────────────── */}
+      <section className="wt-section">
+        <header className="wt-section-head">
+          <h3>Words by month · <em>{year}</em></h3>
+        </header>
+        <div className="wt-monthly">
+          {monthly.map((w, i) => (
+            <div key={i} className="wt-month-col" title={`${MONTH_NAMES[i]} ${year}: ${w.toLocaleString()} words`}>
+              <div className="wt-month-bar-wrap">
+                <div
+                  className="wt-month-bar"
+                  style={{ height: `${(w / monthlyMax) * 100}%` }}
+                  aria-label={`${w} words`}
+                />
+              </div>
+              <div className="wt-month-label">{MONTH_SHORT[i]}</div>
+              <div className="wt-month-val">{w > 0 ? w.toLocaleString() : '—'}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Top entries table ──────────────────────────────────── */}
+      <section className="wt-section">
+        <header className="wt-section-head">
+          <h3>Entries by length</h3>
+          <div className="wt-table-controls">
+            <Pillbar
+              value={tableSort}
+              options={[
+                { value: 'words-desc', label: 'Longest first' },
+                { value: 'words-asc',  label: 'Shortest first' },
+                { value: 'date-desc',  label: 'Newest first' },
+                { value: 'date-asc',   label: 'Oldest first' },
+              ]}
+              onChange={setTableSort}
+            />
+          </div>
+        </header>
+        <table className="wt-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Title</th>
+              <th className="num">Words</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((r) => (
+              <tr key={r.id}>
+                <td className="mono">{r.entry_date}</td>
+                <td>{r.title}</td>
+                <td className="num mono">{r.words.toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {tableRows.length > tableLimit && (
+          <button className="wt-show-more" onClick={() => setTableLimit((n) => n + 15)}>
+            Show {Math.min(15, tableRows.length - tableLimit)} more
+          </button>
+        )}
+      </section>
+
+      {/* ── Top words ──────────────────────────────────────────── */}
+      <section className="wt-section">
+        <header className="wt-section-head">
+          <h3>Top words across every entry</h3>
+          <label className="wt-stopword-toggle">
+            <input
+              type="checkbox"
+              checked={excludeStopwords}
+              onChange={(e) => setExcludeStopwords(e.target.checked)}
+            />
+            <span>Hide common words <em>(the, and, of, to, …)</em></span>
+          </label>
+        </header>
+        {top.length === 0 ? (
+          <p className="wt-section-sub">No words found yet.</p>
+        ) : (
+          <div className="wt-topwords">
+            {top.map((t) => (
+              <div key={t.word} className="wt-topword-row">
+                <div className="wt-topword-name">{t.word}</div>
+                <div className="wt-topword-bar-wrap">
+                  <div className="wt-topword-bar" style={{ width: `${(t.count / topMax) * 100}%` }} />
+                </div>
+                <div className="wt-topword-count mono">{t.count.toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function KPI({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="wt-kpi">
+      <div className="wt-kpi-label">{label}</div>
+      <div className="wt-kpi-value">{value}</div>
+      <div className="wt-kpi-sub">{sub}</div>
     </div>
   );
 }

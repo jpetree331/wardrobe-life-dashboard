@@ -33,7 +33,10 @@ export type Unit = 'verses' | 'chapters';
  *   <60  → 4
  *   ≥60  → 5
  */
-export function bucketLevel(count: number, scale: 'chapters' | 'verses-or-pages'): HeatLevel {
+export function bucketLevel(
+  count: number,
+  scale: 'chapters' | 'verses-or-pages' | 'words',
+): HeatLevel {
   if (count <= 0 || !Number.isFinite(count)) return 0;
   if (scale === 'chapters') {
     if (count < 1) return 1;
@@ -42,7 +45,18 @@ export function bucketLevel(count: number, scale: 'chapters' | 'verses-or-pages'
     if (count < 8) return 4;
     return 5;
   }
-  if (count < 5) return 1;
+  if (scale === 'words') {
+    // A typical journal sentence is ~15 words; a short paragraph ~50;
+    // a full meditation 200+. Buckets are weighted toward the lower
+    // end so even a brief note registers visually.
+    if (count < 50)  return 1;
+    if (count < 150) return 2;
+    if (count < 400) return 3;
+    if (count < 800) return 4;
+    return 5;
+  }
+  // verses-or-pages
+  if (count < 5)  return 1;
   if (count < 15) return 2;
   if (count < 30) return 3;
   if (count < 60) return 4;
@@ -116,7 +130,7 @@ export type HeatCell = {
 export function buildHeatGrid(
   year: number,
   byDate: Map<string, number>,
-  scale: 'chapters' | 'verses-or-pages',
+  scale: 'chapters' | 'verses-or-pages' | 'words',
   today: Date = new Date(),
 ): { cells: HeatCell[]; totalDays: number; totalCount: number } {
   const cells: HeatCell[] = [];
