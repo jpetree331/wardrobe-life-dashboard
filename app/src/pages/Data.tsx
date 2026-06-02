@@ -661,7 +661,10 @@ function HeatGrid({
         </span>
       ))}
 
-      {/* Cells — rows 2..8, columns 2..N+1. */}
+      {/* Cells — rows 2..8, columns 2..N+1. No `title` attribute here:
+          the parent (HeatmapView / WritingView) renders its own custom
+          tooltip with full data, and the browser's native tooltip from
+          a `title` attribute would appear ~500ms later and cover ours. */}
       {cells.map((c) => (
         <div
           key={c.date}
@@ -671,7 +674,7 @@ function HeatGrid({
             gridRow: c.dow + 2,
           }}
           onMouseMove={(e) => onHover(c, e.clientX, e.clientY)}
-          title={`${c.date} (${year})`}
+          aria-label={`${c.date} (${year})`}
         />
       ))}
     </div>
