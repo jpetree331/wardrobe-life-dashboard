@@ -755,3 +755,63 @@
 .sa-import-actions button:disabled {
   opacity: 0.5; cursor: not-allowed;
 }
+
+/* ── The veil ────────────────────────────────────────────────────── */
+/* The dot (◌) at the right end of the toolbar. Drawn faintly so it
+   reads as punctuation rather than an interactive control. */
+.sa-veil-eye {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--ink-faint);
+  font-family: 'EB Garamond', serif;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 6px;
+  opacity: 0.5;
+  border-radius: 2px;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.sa-veil-eye:hover { opacity: 0.85; }
+.sa-veil-eye.open {
+  opacity: 1;
+  color: var(--ink-soft);
+}
+/* The toggle that appears only when the eye is open. Same italic
+   key as the savedAt indicator next to it, so it visually nests. */
+.sa-veil-toggle {
+  background: transparent;
+  border: 1px dotted var(--ink-faint);
+  border-radius: 2px;
+  padding: 2px 10px;
+  font-family: 'EB Garamond', serif;
+  font-style: italic;
+  font-size: 12px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+.sa-veil-toggle:hover {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+}
+.sa-veil-toggle.on {
+  color: var(--ink);
+  border-style: solid;
+  border-color: var(--ink-soft);
+}
+
+/* The placeholder shown in place of a veiled entry's body. Centered
+   three dots with wide tracking so they read as a deliberate fold,
+   not a loading spinner. */
+.sa-page-veiled {
+  text-align: center;
+  font-family: 'EB Garamond', serif;
+  font-size: 28px;
+  color: var(--ink-faint);
+  letter-spacing: 0.5em;
+  padding: 80px 20px 60px;
+  user-select: none;
+  pointer-events: none;
+  min-height: 40vh;
+}

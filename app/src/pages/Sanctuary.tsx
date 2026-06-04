@@ -38,6 +38,17 @@ import './Sanctuary.css';
 type Mode = 'single' | 'dual';
 type PaneTab = 'scripture' | 'inspector';
 
+/**
+ * Tags prefixed with an underscore are SYSTEM tags — they live in the
+ * normal `tags` array but the UI hides them everywhere a tag would
+ * normally appear (the tag filter pills, the Inspector chips, the tag
+ * search). Only the editor logic looks for them.
+ *
+ * Currently the only system tag is VEIL_TAG, used by the "fold the
+ * page over" feature for intimate entries.
+ */
+const VEIL_TAG = '_veil';
+
 const ENTRY_TYPES: Array<{ value: EntryType; label: string }> = [
   { value: null,        label: '—' },
   { value: 'lectio',    label: 'Lectio Divina' },
@@ -60,6 +71,14 @@ export default function Sanctuary() {
   const [paneTab, setPaneTab] = useState<PaneTab>('scripture');
   const [search, setSearch] = useState('');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  // The veil — a quiet way to fold a page over when the words on it
+  // feel too intimate to look back at. eyeOpen is session-only: refresh
+  // the page and it closes again, so veiled entries return to the
+  // placeholder by default each visit. The "veiled" status itself is
+  // stored as a sentinel tag (VEIL_TAG) on the entry; the UI hides
+  // tags starting with "_" from every tag-display surface, so there's
+  // no visible badge anywhere announcing which entries are folded.
+  const [eyeOpen, setEyeOpen] = useState(false);
   const [savedAt, setSavedAt] = useState<string>('saved');
   const [statusMsg, setStatusMsg] = useState('Loading…');
   const [loaded, setLoaded] = useState(false);
@@ -743,6 +762,25 @@ export default function Sanctuary() {
     scheduleSave({ body: pageRef.current.innerHTML });
   }
 
+  // ── The veil ───────────────────────────────────────────────────────
+  // `isActiveVeiled` is the persistent fact (does this entry carry the
+  // VEIL_TAG?). `shouldShowVeil` is the rendering condition — true only
+  // when the entry is veiled AND the user hasn't opened the eye this
+  // session. Toggling the veil tag schedules a save through the same
+  // optimistic pipeline as every other edit.
+  const isActiveVeiled = !!(active?.tags || []).includes(VEIL_TAG);
+  const shouldShowVeil = isActiveVeiled && !eyeOpen;
+
+  function toggleVeilCurrent() {
+    if (!active) return;
+    const current = active.tags || [];
+    const hasVeil = current.includes(VEIL_TAG);
+    const next = hasVeil
+      ? current.filter((t) => t !== VEIL_TAG)
+      : [...current, VEIL_TAG];
+    scheduleSave({ tags: next });
+  }
+
   // ── Smart quotes ────────────────────────────────────────────────────
   // Intercept typed " and ' before they hit the DOM and substitute
   // direction-aware curly quotes. Decides open vs close by looking at
@@ -945,7 +983,7 @@ export default function Sanctuary() {
         (e) =>
           (e.title || '').toLowerCase().includes(q) ||
           (e.body || '').toLowerCase().includes(q) ||
-          (e.tags || []).some((t) => t.toLowerCase().includes(q)) ||
+          (e.tags || []).some((t) => !t.startsWith('_') && t.toLowerCase().includes(q)) ||
           e.entry_date.includes(q),
       );
     }
@@ -953,10 +991,16 @@ export default function Sanctuary() {
   }, [orderedEntries, search, tagFilter]);
 
   // Sorted union of every tag the user has used across all entries.
-  // Drives the tag-filter pill row at the top of the binder.
+  // Drives the tag-filter pill row at the top of the binder. System
+  // tags (prefix `_`, like the veil) are filtered out — they live in
+  // the data but never surface as visible chips.
   const allTags = useMemo(() => {
     const s = new Set<string>();
-    for (const e of entries) for (const t of e.tags || []) s.add(t);
+    for (const e of entries) {
+      for (const t of e.tags || []) {
+        if (!t.startsWith('_')) s.add(t);
+      }
+    }
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [entries]);
 
@@ -1309,6 +1353,37 @@ export default function Sanctuary() {
 
             <div className="spacer" />
             <span className="muted">{savedAt}</span>
+            {/* The veil. The ◌ glyph below looks like punctuation —
+                it's an inconspicuous toggle for the privacy controls.
+                Clicking it doesn't change any entry, only unlocks a
+                second control (the "veil/veiled" pill) that the user
+                can then use to fold the current page over. Resets
+                every session. */}
+            {active && (
+              <>
+                <button
+                  type="button"
+                  className={`sa-veil-eye${eyeOpen ? ' open' : ''}`}
+                  onClick={() => setEyeOpen((o) => !o)}
+                  aria-label="Privacy controls"
+                  aria-pressed={eyeOpen}
+                >
+                  ◌
+                </button>
+                {eyeOpen && (
+                  <button
+                    type="button"
+                    className={`sa-veil-toggle${isActiveVeiled ? ' on' : ''}`}
+                    onClick={toggleVeilCurrent}
+                    title={isActiveVeiled
+                      ? 'Currently veiled. Click to unveil this entry.'
+                      : 'Click to veil this entry (folds the page over by default each session).'}
+                  >
+                    {isActiveVeiled ? 'veiled' : 'veil'}
+                  </button>
+                )}
+              </>
+            )}
           </div>
 
           <div
@@ -1343,6 +1418,10 @@ export default function Sanctuary() {
                     </span>
                   ))}
                 </div>
+                {/* The body editor — always mounted so hydration of
+                    `active.body` lands correctly, but visually hidden
+                    when the entry is veiled and the eye is closed.
+                    The placeholder `· · ·` renders in its place. */}
                 <div
                   ref={pageRef}
                   contentEditable
@@ -1351,8 +1430,15 @@ export default function Sanctuary() {
                   onBeforeInput={handleSmartQuotes}
                   onInput={handleEditorInput}
                   data-placeholder="Begin here…"
-                  style={{ outline: 'none', minHeight: '40vh' }}
+                  style={{
+                    outline: 'none',
+                    minHeight: '40vh',
+                    display: shouldShowVeil ? 'none' : undefined,
+                  }}
                 />
+                {shouldShowVeil && (
+                  <div className="sa-page-veiled" aria-hidden="true">· · ·</div>
+                )}
               </article>
             ) : (
               <article className="sa-page">
@@ -1637,7 +1723,7 @@ function Inspector({
       <div className="sa-insp-section">
         <h3>Tags</h3>
         <div>
-          {(active.tags || []).map((t) => (
+          {(active.tags || []).filter((t) => !t.startsWith('_')).map((t) => (
             <span key={t} className="sa-tag" onClick={() => onRemoveTag(t)} title="Click to remove">
               {t}
             </span>

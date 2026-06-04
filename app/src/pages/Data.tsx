@@ -2436,9 +2436,17 @@ function WritingView({ entries }: { entries: SanctuaryEntryLite[] }) {
   }, [entries, tableSort]);
   const visibleRows = tableRows.slice(0, tableLimit);
 
-  // Top words.
+  // Top words. Entries marked as veiled in Sanctuary (sentinel tag
+  // `_veil`) are excluded from the word-frequency pass — their bodies
+  // are intimate writing the user has chosen to fold over, so we don't
+  // surface the words from them in a public-facing chart. Veiled
+  // entries still count in totals, the heatmap, and the per-entry
+  // table (titles aren't veiled), per the user's chosen behavior.
   const top = useMemo(
-    () => topWords(entries, { topN: 10, excludeStopwords }),
+    () => topWords(
+      entries.filter((e) => !(e.tags || []).includes('_veil')),
+      { topN: 10, excludeStopwords },
+    ),
     [entries, excludeStopwords],
   );
   const topMax = top.length > 0 ? top[0].count : 1;
