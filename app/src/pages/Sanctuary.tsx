@@ -59,6 +59,7 @@ export default function Sanctuary() {
   const [mode, setMode] = useState<Mode>('single');
   const [paneTab, setPaneTab] = useState<PaneTab>('scripture');
   const [search, setSearch] = useState('');
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string>('saved');
   const [statusMsg, setStatusMsg] = useState('Loading…');
   const [loaded, setLoaded] = useState(false);
@@ -524,6 +525,161 @@ export default function Sanctuary() {
     handleEditorInput();
   }
 
+  // The single yellow highlight color. Kept as a constant so the
+  // toggle-off check can compare against it cleanly.
+  const HIGHLIGHT_COLOR = 'rgba(218, 181, 86, 0.35)';
+
+  /**
+   * Toggle highlight on the current selection. If any part of the
+   * selection already sits inside a highlight span (a <span> carrying an
+   * inline background-color), the highlight is removed by unwrapping
+   * those spans. Otherwise the standard hiliteColor execCommand is run.
+   *
+   * This is the "click again to clear" behavior the design wants —
+   * execCommand's hiliteColor on its own just stacks more spans.
+   */
+  function toggleHighlight() {
+    if (!pageRef.current) return;
+    pageRef.current.focus();
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    if (!pageRef.current.contains(sel.anchorNode)) return;
+    if (selectionHasHighlight(sel)) {
+      unwrapHighlightSpans(sel.getRangeAt(0));
+      handleEditorInput();
+    } else {
+      exec('hiliteColor', HIGHLIGHT_COLOR);
+    }
+  }
+
+  /**
+   * Does the current selection touch any highlight span? Checks both
+   * the endpoints' ancestors (so a collapsed caret inside a highlight
+   * counts) and any descendants intersecting a non-collapsed range.
+   */
+  function selectionHasHighlight(sel: Selection): boolean {
+    if (sel.rangeCount === 0) return false;
+    const range = sel.getRangeAt(0);
+    const endpoints = [
+      range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.startContainer as Element)
+        : range.startContainer.parentElement,
+      range.endContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.endContainer as Element)
+        : range.endContainer.parentElement,
+    ];
+    for (const el of endpoints) {
+      if (el?.closest('span[style*="background-color"]')) return true;
+    }
+    if (!sel.isCollapsed && pageRef.current) {
+      const root = pageRef.current;
+      const spans = root.querySelectorAll<HTMLElement>('span[style*="background-color"]');
+      for (const span of spans) {
+        if (range.intersectsNode(span)) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Unwrap highlight spans that intersect `range` — replaces each span
+   * with its children, so the text survives but the inline background
+   * goes away. Also unwraps any highlight-span ancestor of either
+   * endpoint (which `intersectsNode` doesn't catch for collapsed or
+   * fully-contained-in-an-ancestor ranges).
+   */
+  function unwrapHighlightSpans(range: Range) {
+    if (!pageRef.current) return;
+    const root = pageRef.current;
+    const victims = new Set<HTMLElement>();
+    // Walk up from both endpoints — catches "selection sits entirely
+    // inside one highlight span" and the collapsed-caret case.
+    for (const endpoint of [range.startContainer, range.endContainer]) {
+      let n: Node | null = endpoint;
+      while (n && root.contains(n)) {
+        if (
+          n instanceof HTMLElement &&
+          n.tagName === 'SPAN' &&
+          n.style.backgroundColor
+        ) {
+          victims.add(n);
+        }
+        n = n.parentNode;
+      }
+    }
+    // Plus any highlight span the range actually crosses.
+    root.querySelectorAll<HTMLElement>('span[style*="background-color"]').forEach((span) => {
+      if (range.intersectsNode(span)) victims.add(span);
+    });
+    for (const span of victims) {
+      const parent = span.parentNode;
+      if (!parent) continue;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+    }
+  }
+
+  /**
+   * Clear formatting on the current selection — or on the whole entry
+   * when nothing is selected. Strips native styles (bold / italic /
+   * underline / strikethrough / background color) via execCommand,
+   * converts headings & blockquotes to plain paragraphs, then unwraps
+   * the editor's custom-class spans (verse-num, red-letter, rubric,
+   * <mark>) within scope, and clears any `.dropcap` from paragraphs.
+   *
+   * The text and paragraph breaks survive untouched; only formatting is
+   * removed. Doesn't reach scripture refs, tags, or anything outside
+   * the body editor.
+   */
+  function clearFormatting() {
+    if (!pageRef.current) return;
+    pageRef.current.focus();
+    const sel = window.getSelection();
+    const hasSelection = !!(
+      sel &&
+      sel.rangeCount > 0 &&
+      !sel.isCollapsed &&
+      pageRef.current.contains(sel.anchorNode)
+    );
+
+    // Without a selection, work on the whole entry — Ctrl+A would do
+    // the same thing, but the button is the affordance the user asked
+    // for ("selected or all text").
+    if (!hasSelection) {
+      const range = document.createRange();
+      range.selectNodeContents(pageRef.current);
+      const s = window.getSelection();
+      s?.removeAllRanges();
+      s?.addRange(range);
+    }
+
+    document.execCommand('removeFormat');
+    document.execCommand('formatBlock', false, 'p');
+
+    // Unwrap custom-class spans and <mark>, and strip dropcap, all
+    // limited to whatever the selection now covers.
+    const finalSel = window.getSelection();
+    if (finalSel && finalSel.rangeCount > 0 && pageRef.current) {
+      const range = finalSel.getRangeAt(0);
+      const root = pageRef.current;
+      const selectors = 'span.red-letter, span.rubric, span.verse-num, mark, span[style*="background-color"]';
+      const victims: Element[] = [];
+      root.querySelectorAll(selectors).forEach((el) => {
+        if (range.intersectsNode(el)) victims.push(el);
+      });
+      for (const el of victims) {
+        const parent = el.parentNode;
+        if (!parent) continue;
+        while (el.firstChild) parent.insertBefore(el.firstChild, el);
+        parent.removeChild(el);
+      }
+      root.querySelectorAll('p.dropcap').forEach((p) => {
+        if (range.intersectsNode(p)) p.classList.remove('dropcap');
+      });
+    }
+    handleEditorInput();
+  }
+
   function wrapSelection(tag: string, className?: string) {
     const s = window.getSelection();
     if (!s || s.rangeCount === 0 || s.isCollapsed) return;
@@ -779,23 +935,37 @@ export default function Sanctuary() {
   }, [entries, sortOrder]);
 
   const visibleEntries = useMemo(() => {
-    if (!search.trim()) return orderedEntries;
-    const q = search.toLowerCase();
-    return orderedEntries.filter(
-      (e) =>
-        (e.title || '').toLowerCase().includes(q) ||
-        (e.body || '').toLowerCase().includes(q) ||
-        (e.tags || []).some((t) => t.toLowerCase().includes(q)) ||
-        e.entry_date.includes(q),
-    );
-  }, [orderedEntries, search]);
+    let list = orderedEntries;
+    if (tagFilter) {
+      list = list.filter((e) => (e.tags || []).includes(tagFilter));
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (e) =>
+          (e.title || '').toLowerCase().includes(q) ||
+          (e.body || '').toLowerCase().includes(q) ||
+          (e.tags || []).some((t) => t.toLowerCase().includes(q)) ||
+          e.entry_date.includes(q),
+      );
+    }
+    return list;
+  }, [orderedEntries, search, tagFilter]);
 
-  // Tree view of the binder. Only built when no search is active — when the
-  // user is searching, we collapse to a flat hit list (matches across years
-  // shouldn't be hidden behind closed folders).
+  // Sorted union of every tag the user has used across all entries.
+  // Drives the tag-filter pill row at the top of the binder.
+  const allTags = useMemo(() => {
+    const s = new Set<string>();
+    for (const e of entries) for (const t of e.tags || []) s.add(t);
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [entries]);
+
+  // Tree view of the binder. Only built when no search or tag filter is
+  // active — once the user is narrowing, we collapse to a flat hit list
+  // so matches across years aren't hidden behind closed folders.
   const tree = useMemo(
-    () => (search.trim() ? null : buildBinderTree(visibleEntries, sortOrder)),
-    [visibleEntries, search, sortOrder],
+    () => (search.trim() || tagFilter ? null : buildBinderTree(visibleEntries, sortOrder)),
+    [visibleEntries, search, tagFilter, sortOrder],
   );
 
   const wordCount = useMemo(() => {
@@ -919,6 +1089,33 @@ export default function Sanctuary() {
               </button>
             </div>
           </div>
+          {allTags.length > 0 && (
+            <div className="sa-tag-filter" role="group" aria-label="Filter by tag">
+              <span className="sa-tag-filter-label">tags</span>
+              <div className="sa-tag-filter-pills">
+                {allTags.map((t) => (
+                  <button
+                    key={t}
+                    className={`sa-tag-pill${tagFilter === t ? ' active' : ''}`}
+                    onClick={() => setTagFilter((cur) => (cur === t ? null : t))}
+                    title={tagFilter === t ? 'Click to clear filter' : `Filter by "${t}"`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+              {tagFilter && (
+                <button
+                  className="sa-tag-filter-clear"
+                  onClick={() => setTagFilter(null)}
+                  title="Clear tag filter"
+                  aria-label="Clear tag filter"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          )}
           <nav className="sa-binder">
             {visibleEntries.length === 0 ? (
               <div className="sa-entries">
@@ -1069,8 +1266,8 @@ export default function Sanctuary() {
               <button
                 className="btn hl"
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => exec('hiliteColor', 'rgba(218, 181, 86, 0.35)')}
-                title="Highlight"
+                onClick={toggleHighlight}
+                title="Highlight (click again on highlighted text to clear)"
               >
                 H
               </button>
@@ -1081,6 +1278,14 @@ export default function Sanctuary() {
                 title="Red-letter"
               >
                 ✝
+              </button>
+              <button
+                className="btn clear-fmt"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={clearFormatting}
+                title="Clear formatting (selection — or whole entry if nothing is selected)"
+              >
+                ⌫
               </button>
             </div>
 

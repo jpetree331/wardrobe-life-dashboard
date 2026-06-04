@@ -241,6 +241,59 @@
   background: var(--bg-2);
   flex-wrap: wrap;
 }
+
+/* ── Tag filter ──────────────────────────────────────────────────── */
+.sa-tag-filter {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 14px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.sa-tag-filter-label {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--ink-faint);
+  padding-top: 4px;
+  flex-shrink: 0;
+}
+.sa-tag-filter-pills {
+  display: flex; flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  max-height: 96px;        /* ~3 rows of pills; scrolls if more */
+  overflow-y: auto;
+}
+.sa-tag-pill {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-family: 'EB Garamond', serif;
+  font-size: 12px; font-style: italic;
+  color: var(--ink-soft);
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.sa-tag-pill:hover { color: var(--ink); border-color: var(--ink-soft); }
+.sa-tag-pill.active {
+  background: var(--ink);
+  color: var(--bg);
+  border-color: var(--ink);
+  font-style: normal;
+}
+.sa-tag-filter-clear {
+  flex-shrink: 0;
+  background: transparent; border: 0;
+  color: var(--ink-faint);
+  font-size: 16px; line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  align-self: flex-start;
+  margin-top: 2px;
+}
+.sa-tag-filter-clear:hover { color: var(--ink); }
 .sa-binder-foot input {
   flex: 1;
   min-width: 0;
