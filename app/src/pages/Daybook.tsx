@@ -102,17 +102,41 @@ export default function Daybook() {
   // edit modal opens directly without disturbing it.
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
 
+  // Right-click context menu state. `source` is the actual instance
+  // that was clicked (phantom or real); `master` is the persisted row
+  // the menu should operate on (= source if not phantom). Position is
+  // viewport coords.
+  const [contextMenu, setContextMenu] = useState<{
+    source: DaybookBlockInstance;
+    master: DaybookBlock;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  // "Copy to another day" popover. We keep the source's start/end ISO
+  // around so the copy preserves time-of-day exactly, even for phantoms
+  // (whose start_at differs from their master's).
+  const [copyToDate, setCopyToDate] = useState<{
+    master: DaybookBlock;
+    fromIso: string;
+    toIso: string;
+  } | null>(null);
+
   // Esc deselects, OR closes any open modal. Modals already trap Esc
   // via their own handlers, so this only fires when no modal is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !blockModal && !categoryModal && selectedBlockId) {
+      if (e.key !== 'Escape') return;
+      // Layered Esc: close the topmost dismissible thing.
+      if (contextMenu) { setContextMenu(null); return; }
+      if (copyToDate)  { setCopyToDate(null);  return; }
+      if (!blockModal && !categoryModal && selectedBlockId) {
         setSelectedBlockId(null);
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [blockModal, categoryModal, selectedBlockId]);
+  }, [blockModal, categoryModal, selectedBlockId, contextMenu, copyToDate]);
 
   // Compute the date range the current view covers, in local time. For
   // the Month view we expand to the visible 6×7 grid (not just the
@@ -263,6 +287,105 @@ export default function Daybook() {
     setBlockModal({ mode: 'edit', block: b });
   }
 
+  // Right-click handler shared across DayView / WeekColumn / MonthView.
+  // Resolves the persisted master before opening the menu so every
+  // action downstream can ignore the phantom-vs-real distinction.
+  function onContextMenuBlock(b: DaybookBlockInstance, x: number, y: number) {
+    let master: DaybookBlock | null = null;
+    if (b._phantom && b._master_id) {
+      master =
+        recurringMasters.find((m) => m.id === b._master_id) ??
+        blocks.find((real) => real.id === b._master_id) ??
+        null;
+    } else {
+      master = b;
+    }
+    if (!master) return;
+    setContextMenu({ source: b, master, x, y });
+  }
+
+  /**
+   * Copy a block to another day. Preserves title / category / notes /
+   * time-of-day; sets recur='none' so the copy doesn't propagate a
+   * recurring series (even if the source is a phantom from one).
+   *
+   * Cross-midnight blocks (source end-time is on the next calendar day)
+   * are handled by pushing the copy's end forward a day too.
+   */
+  async function copyBlockToDate(
+    source: { master: DaybookBlock; fromIso: string; toIso: string },
+    targetDateKey: string,
+  ) {
+    const { master, fromIso, toIso } = source;
+    const startHHMM = isoToLocalTimeHHMM(fromIso);
+    const endHHMM = isoToLocalTimeHHMM(toIso);
+    const newStart = combineLocalDateTimeToIso(targetDateKey, startHHMM);
+    let newEnd = combineLocalDateTimeToIso(targetDateKey, endHHMM);
+    if (new Date(newEnd) <= new Date(newStart)) {
+      const next = new Date(newEnd);
+      next.setDate(next.getDate() + 1);
+      newEnd = next.toISOString();
+    }
+    try {
+      await createBlock({
+        title: master.title,
+        category_id: master.category_id,
+        notes: master.notes,
+        start_at: newStart,
+        end_at: newEnd,
+        recur: 'none',
+      });
+      await refreshBlocks(viewRange.start, viewRange.end);
+      setStatusMsg(`Copied to ${targetDateKey}.`);
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Could not copy the block.');
+    }
+  }
+
+  function copyToTomorrow() {
+    if (!contextMenu) return;
+    const source = {
+      master: contextMenu.master,
+      fromIso: contextMenu.source.start_at,
+      toIso: contextMenu.source.end_at,
+    };
+    // "Tomorrow" relative to the source instance's own date, not the
+    // currently viewed date — that's the intuition when you right-click
+    // a block from last Tuesday and ask for "tomorrow".
+    const sourceDate = new Date(contextMenu.source.start_at);
+    sourceDate.setHours(0, 0, 0, 0);
+    sourceDate.setDate(sourceDate.getDate() + 1);
+    const targetDateKey = localDateKey(sourceDate);
+    setContextMenu(null);
+    copyBlockToDate(source, targetDateKey);
+  }
+
+  function openCopyToDate() {
+    if (!contextMenu) return;
+    setCopyToDate({
+      master: contextMenu.master,
+      fromIso: contextMenu.source.start_at,
+      toIso: contextMenu.source.end_at,
+    });
+    setContextMenu(null);
+  }
+
+  async function deleteFromContextMenu() {
+    if (!contextMenu) return;
+    const master = contextMenu.master;
+    setContextMenu(null);
+    if (!window.confirm(`Delete "${master.title || '(untitled)'}"?`)) return;
+    try {
+      await deleteBlock(master.id);
+      await refreshBlocks(viewRange.start, viewRange.end);
+      if (selectedBlockId === master.id) setSelectedBlockId(null);
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Could not delete the block.');
+    }
+  }
+
   return (
     <div className="daybook-page" data-theme="vibrant">
       {/* ── Brand cell (top-left) ─────────────────────────── */}
@@ -336,6 +459,7 @@ export default function Daybook() {
             selectedBlockId={selectedBlockId}
             onSelectBlock={setSelectedBlockId}
             onEditBlock={onEditBlock}
+            onContextMenuBlock={onContextMenuBlock}
             onCreateAtRange={(startIso, endIso) =>
               setBlockModal({ mode: 'add', defaultStart: startIso, defaultEnd: endIso })
             }
@@ -348,6 +472,7 @@ export default function Daybook() {
             selectedBlockId={selectedBlockId}
             onSelectBlock={setSelectedBlockId}
             onEditBlock={onEditBlock}
+            onContextMenuBlock={onContextMenuBlock}
             onCreateAtRange={(startIso, endIso) =>
               setBlockModal({ mode: 'add', defaultStart: startIso, defaultEnd: endIso })
             }
@@ -401,6 +526,43 @@ export default function Daybook() {
           }}
         />
       )}
+
+      {/* ── Right-click context menu ───────────────────────── */}
+      {contextMenu && (
+        <BlockContextMenu
+          source={contextMenu.source}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onCopyToTomorrow={copyToTomorrow}
+          onCopyToDate={openCopyToDate}
+          onEdit={() => {
+            const b = contextMenu.source;
+            setContextMenu(null);
+            onEditBlock(b);
+          }}
+          onDelete={deleteFromContextMenu}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* ── Copy-to-another-day popover ────────────────────── */}
+      {copyToDate && (
+        <CopyToDateModal
+          state={copyToDate}
+          defaultDateKey={(() => {
+            const d = new Date(copyToDate.fromIso);
+            d.setHours(0, 0, 0, 0);
+            d.setDate(d.getDate() + 1);
+            return localDateKey(d);
+          })()}
+          onClose={() => setCopyToDate(null)}
+          onSubmit={async (targetDateKey) => {
+            const src = copyToDate;
+            setCopyToDate(null);
+            await copyBlockToDate(src, targetDateKey);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -419,6 +581,7 @@ function DayView({
   selectedBlockId,
   onSelectBlock,
   onEditBlock,
+  onContextMenuBlock,
   onCreateAtRange,
 }: {
   date: Date;
@@ -427,6 +590,7 @@ function DayView({
   selectedBlockId: string | null;
   onSelectBlock: (id: string | null) => void;
   onEditBlock: (b: DaybookBlockInstance) => void;
+  onContextMenuBlock: (b: DaybookBlockInstance, x: number, y: number) => void;
   onCreateAtRange: (startIso: string, endIso: string) => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -578,6 +742,7 @@ function DayView({
                 selected={selectedBlockId === b.id}
                 onSelect={() => onSelectBlock(b.id)}
                 onEdit={() => { onSelectBlock(null); onEditBlock(b); }}
+                onContextMenu={(x, y) => onContextMenuBlock(b, x, y)}
                 onShowTooltip={(rect) => showTooltip(b, rect)}
                 onHideTooltip={hideTooltip}
               />
@@ -601,6 +766,7 @@ function BlockTile({
   compact = false,
   onSelect,
   onEdit,
+  onContextMenu,
   onShowTooltip,
   onHideTooltip,
 }: {
@@ -611,6 +777,8 @@ function BlockTile({
   compact?: boolean;
   onSelect: () => void;
   onEdit: () => void;
+  /** Right-click → open the page-level context menu at viewport (x, y). */
+  onContextMenu: (x: number, y: number) => void;
   onShowTooltip: (anchor: DOMRect) => void;
   onHideTooltip: () => void;
 }) {
@@ -644,11 +812,16 @@ function BlockTile({
       onMouseDown={(e) => e.stopPropagation()}
       onClick={onSelect}
       onDoubleClick={onEdit}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onHideTooltip();
+        onContextMenu(e.clientX, e.clientY);
+      }}
       onMouseEnter={() => {
         if (ref.current) onShowTooltip(ref.current.getBoundingClientRect());
       }}
       onMouseLeave={onHideTooltip}
-      title={isPhantom ? 'Recurring · double-click to edit all occurrences' : 'Double-click to edit'}
+      title={isPhantom ? 'Recurring · double-click to edit · right-click for more' : 'Double-click to edit · right-click for more'}
     >
       <span className="db-block-bg" aria-hidden="true" />
       <span className="db-block-content">
@@ -775,6 +948,7 @@ function WeekView({
   selectedBlockId,
   onSelectBlock,
   onEditBlock,
+  onContextMenuBlock,
   onCreateAtRange,
   onPickDay,
 }: {
@@ -784,6 +958,7 @@ function WeekView({
   selectedBlockId: string | null;
   onSelectBlock: (id: string | null) => void;
   onEditBlock: (b: DaybookBlockInstance) => void;
+  onContextMenuBlock: (b: DaybookBlockInstance, x: number, y: number) => void;
   onCreateAtRange: (startIso: string, endIso: string) => void;
   onPickDay: (d: Date) => void;
 }) {
@@ -891,6 +1066,7 @@ function WeekView({
               selectedBlockId={selectedBlockId}
               onSelectBlock={onSelectBlock}
               onEditBlock={onEditBlock}
+              onContextMenuBlock={onContextMenuBlock}
               onCreateAtRange={onCreateAtRange}
               onShowTooltip={showTooltip}
               onHideTooltip={hideTooltip}
@@ -911,6 +1087,7 @@ function WeekColumn({
   selectedBlockId,
   onSelectBlock,
   onEditBlock,
+  onContextMenuBlock,
   onCreateAtRange,
   onShowTooltip,
   onHideTooltip,
@@ -922,6 +1099,7 @@ function WeekColumn({
   selectedBlockId: string | null;
   onSelectBlock: (id: string | null) => void;
   onEditBlock: (b: DaybookBlockInstance) => void;
+  onContextMenuBlock: (b: DaybookBlockInstance, x: number, y: number) => void;
   onCreateAtRange: (startIso: string, endIso: string) => void;
   onShowTooltip: (b: DaybookBlock, anchor: DOMRect) => void;
   onHideTooltip: () => void;
@@ -1001,6 +1179,7 @@ function WeekColumn({
           compact
           onSelect={() => onSelectBlock(b.id)}
           onEdit={() => { onSelectBlock(null); onEditBlock(b); }}
+          onContextMenu={(x, y) => onContextMenuBlock(b, x, y)}
           onShowTooltip={(rect) => onShowTooltip(b, rect)}
           onHideTooltip={onHideTooltip}
         />
@@ -1583,6 +1762,166 @@ function CategoryModal({
             <button type="submit" className="db-btn primary" disabled={saving}>
               {saving ? 'Saving…' : isEdit ? 'Save' : 'Create'}
             </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Right-click context menu ──────────────────────────────────────────
+//
+// A small floating menu anchored to the cursor position. The menu's
+// own dimensions aren't known until it mounts, so we compute a flip
+// adjustment after first render to keep it on-screen near the viewport
+// edges. Closes on any outside click, on Escape (handled at the page
+// level), or after any action.
+
+function BlockContextMenu({
+  source,
+  x,
+  y,
+  onCopyToTomorrow,
+  onCopyToDate,
+  onEdit,
+  onDelete,
+  onClose,
+}: {
+  source: DaybookBlockInstance;
+  x: number;
+  y: number;
+  onCopyToTomorrow: () => void;
+  onCopyToDate: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: x, top: y });
+
+  // Keep the menu inside the viewport. Re-measure after mount.
+  useEffect(() => {
+    if (!menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const MARGIN = 8;
+    let left = x;
+    let top = y;
+    if (left + rect.width + MARGIN > window.innerWidth) {
+      left = window.innerWidth - rect.width - MARGIN;
+    }
+    if (top + rect.height + MARGIN > window.innerHeight) {
+      top = window.innerHeight - rect.height - MARGIN;
+    }
+    if (left < MARGIN) left = MARGIN;
+    if (top < MARGIN) top = MARGIN;
+    setPosition({ left, top });
+  }, [x, y]);
+
+  // Suppress the browser's native context menu when re-right-clicking
+  // on top of our own menu (which would otherwise overlay both).
+  const sourceDateKey = source.start_at.slice(0, 10);
+  const isPhantom = !!source._phantom;
+
+  return (
+    <>
+      <div
+        className="db-context-shield"
+        onClick={onClose}
+        onContextMenu={(e) => { e.preventDefault(); onClose(); }}
+      />
+      <div
+        ref={menuRef}
+        className="db-context-menu"
+        role="menu"
+        style={{ left: position.left, top: position.top }}
+      >
+        <div className="db-context-header">
+          <span className="db-context-title">
+            {source.title || '(untitled)'}
+          </span>
+          <span className="db-context-meta">
+            {sourceDateKey} · {isoToLocalTime12h(source.start_at)}
+            {isPhantom && ' · recurring'}
+          </span>
+        </div>
+        <button type="button" role="menuitem" onClick={onCopyToTomorrow}>
+          Copy to tomorrow
+        </button>
+        <button type="button" role="menuitem" onClick={onCopyToDate}>
+          Copy to another day…
+        </button>
+        <div className="db-context-divider" />
+        <button type="button" role="menuitem" onClick={onEdit}>
+          {isPhantom ? 'Edit series…' : 'Edit…'}
+        </button>
+        <button type="button" role="menuitem" className="danger" onClick={onDelete}>
+          {isPhantom ? 'Delete series' : 'Delete'}
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ── Copy-to-another-day popover ──────────────────────────────────────
+//
+// Tiny modal — just a date picker and a Copy button. The default date
+// is whatever the page passed (tomorrow relative to the source's own
+// date), so the user can just hit Enter for the most common case.
+
+function CopyToDateModal({
+  state,
+  defaultDateKey,
+  onClose,
+  onSubmit,
+}: {
+  state: { master: DaybookBlock; fromIso: string; toIso: string };
+  defaultDateKey: string;
+  onClose: () => void;
+  onSubmit: (dateKey: string) => void;
+}) {
+  const [dateKey, setDateKey] = useState(defaultDateKey);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!dateKey) return;
+    onSubmit(dateKey);
+  }
+
+  const startLabel = isoToLocalTime12h(state.fromIso);
+  const endLabel = isoToLocalTime12h(state.toIso);
+
+  return (
+    <div className="db-modal-bg" onClick={onClose}>
+      <div className="db-modal db-modal-small" onClick={(e) => e.stopPropagation()}>
+        <div className="db-modal-head">
+          <h2>Copy to <i>another day</i></h2>
+          <button className="x" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        <form className="db-modal-body" onSubmit={handleSubmit}>
+          <p className="db-copy-summary">
+            <strong>{state.master.title || '(untitled)'}</strong>
+            <span className="db-copy-meta"> · {startLabel} – {endLabel}</span>
+          </p>
+          <div className="db-field">
+            <label className="db-field-label">Date</label>
+            <input
+              type="date"
+              value={dateKey}
+              onChange={(e) => setDateKey(e.target.value)}
+              required
+              autoFocus
+            />
+          </div>
+          <div className="db-modal-actions">
+            <div className="spacer" />
+            <button type="button" className="db-btn" onClick={onClose}>Cancel</button>
+            <button type="submit" className="db-btn primary">Copy</button>
           </div>
         </form>
       </div>
