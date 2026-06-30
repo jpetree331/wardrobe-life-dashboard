@@ -1071,6 +1071,14 @@
 .daybook-page .db-context-menu button.danger:hover {
   background: color-mix(in oklab, var(--margin) 8%, transparent 92%);
 }
+.daybook-page .db-context-menu button.db-context-disabled {
+  color: var(--db-ink-faint);
+  cursor: default;
+  font-style: italic;
+}
+.daybook-page .db-context-menu button.db-context-disabled:hover {
+  background: transparent;
+}
 .daybook-page .db-context-divider {
   height: 1px;
   background: var(--paper-edge);

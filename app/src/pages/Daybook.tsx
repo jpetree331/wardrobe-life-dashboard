@@ -122,12 +122,35 @@ export default function Daybook() {
     toIso: string;
   } | null>(null);
 
+  // Agnostic clipboard: "Copy" a block here, then right-click any empty
+  // canvas spot on any day to paste it at the cursor's time. Session-only
+  // (clears on refresh) and survives day/week/month navigation. Stores a
+  // self-contained payload (not a live block reference) plus the source
+  // duration so the paste lands with the same length wherever it goes.
+  const [clipboard, setClipboard] = useState<{
+    title: string;
+    category_id: string | null;
+    notes: string | null;
+    durationMs: number;
+  } | null>(null);
+
+  // The empty-canvas right-click menu (offers Paste / New block at the
+  // clicked time). `dateKey` is the day of the column clicked; `startHHMM`
+  // is the cursor-Y time snapped to 15 minutes.
+  const [pasteMenu, setPasteMenu] = useState<{
+    dateKey: string;
+    startHHMM: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
   // Esc deselects, OR closes any open modal. Modals already trap Esc
   // via their own handlers, so this only fires when no modal is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       // Layered Esc: close the topmost dismissible thing.
+      if (pasteMenu)   { setPasteMenu(null);   return; }
       if (contextMenu) { setContextMenu(null); return; }
       if (copyToDate)  { setCopyToDate(null);  return; }
       if (!blockModal && !categoryModal && selectedBlockId) {
@@ -136,7 +159,7 @@ export default function Daybook() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [blockModal, categoryModal, selectedBlockId, contextMenu, copyToDate]);
+  }, [blockModal, categoryModal, selectedBlockId, contextMenu, copyToDate, pasteMenu]);
 
   // Compute the date range the current view covers, in local time. For
   // the Month view we expand to the visible 6×7 grid (not just the
@@ -371,6 +394,54 @@ export default function Daybook() {
     setContextMenu(null);
   }
 
+  // "Copy" → stash a self-contained payload on the clipboard. Paste is
+  // available afterward from any empty-canvas right-click.
+  function copyToClipboard() {
+    if (!contextMenu) return;
+    const { master, source } = contextMenu;
+    const durationMs =
+      new Date(source.end_at).getTime() - new Date(source.start_at).getTime();
+    setClipboard({
+      title: master.title,
+      category_id: master.category_id,
+      notes: master.notes,
+      durationMs: durationMs > 0 ? durationMs : 60 * 60 * 1000,
+    });
+    setContextMenu(null);
+    setStatusMsg(
+      `Copied "${master.title || '(untitled)'}" — right-click an empty spot on any day to paste.`,
+    );
+  }
+
+  // Open the empty-canvas menu. Called by DayView / WeekColumn with the
+  // day's date key and the cursor-Y time (already snapped to 15 min).
+  function onContextMenuEmpty(dateKey: string, startHHMM: string, x: number, y: number) {
+    setPasteMenu({ dateKey, startHHMM, x, y });
+  }
+
+  // Paste the clipboard block at a given day + start time, preserving the
+  // copied duration. One-off (recur='none').
+  async function pasteBlockAt(dateKey: string, startHHMM: string) {
+    if (!clipboard) return;
+    const newStart = combineLocalDateTimeToIso(dateKey, startHHMM);
+    const newEnd = new Date(new Date(newStart).getTime() + clipboard.durationMs).toISOString();
+    try {
+      await createBlock({
+        title: clipboard.title,
+        category_id: clipboard.category_id,
+        notes: clipboard.notes,
+        start_at: newStart,
+        end_at: newEnd,
+        recur: 'none',
+      });
+      await refreshBlocks(viewRange.start, viewRange.end);
+      setStatusMsg(`Pasted to ${dateKey}.`);
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Could not paste the block.');
+    }
+  }
+
   async function deleteFromContextMenu() {
     if (!contextMenu) return;
     const master = contextMenu.master;
@@ -460,6 +531,7 @@ export default function Daybook() {
             onSelectBlock={setSelectedBlockId}
             onEditBlock={onEditBlock}
             onContextMenuBlock={onContextMenuBlock}
+            onContextMenuEmpty={onContextMenuEmpty}
             onCreateAtRange={(startIso, endIso) =>
               setBlockModal({ mode: 'add', defaultStart: startIso, defaultEnd: endIso })
             }
@@ -473,6 +545,7 @@ export default function Daybook() {
             onSelectBlock={setSelectedBlockId}
             onEditBlock={onEditBlock}
             onContextMenuBlock={onContextMenuBlock}
+            onContextMenuEmpty={onContextMenuEmpty}
             onCreateAtRange={(startIso, endIso) =>
               setBlockModal({ mode: 'add', defaultStart: startIso, defaultEnd: endIso })
             }
@@ -533,6 +606,7 @@ export default function Daybook() {
           source={contextMenu.source}
           x={contextMenu.x}
           y={contextMenu.y}
+          onCopy={copyToClipboard}
           onCopyToTomorrow={copyToTomorrow}
           onCopyToDate={openCopyToDate}
           onEdit={() => {
@@ -542,6 +616,30 @@ export default function Daybook() {
           }}
           onDelete={deleteFromContextMenu}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* ── Empty-canvas right-click menu (paste / new) ────── */}
+      {pasteMenu && (
+        <CanvasContextMenu
+          x={pasteMenu.x}
+          y={pasteMenu.y}
+          dateKey={pasteMenu.dateKey}
+          startHHMM={pasteMenu.startHHMM}
+          clipboardLabel={clipboard?.title || null}
+          onPaste={() => {
+            const { dateKey, startHHMM } = pasteMenu;
+            setPasteMenu(null);
+            pasteBlockAt(dateKey, startHHMM);
+          }}
+          onNewBlock={() => {
+            const { dateKey, startHHMM } = pasteMenu;
+            const startIso = combineLocalDateTimeToIso(dateKey, startHHMM);
+            const endIso = new Date(new Date(startIso).getTime() + 60 * 60 * 1000).toISOString();
+            setPasteMenu(null);
+            setBlockModal({ mode: 'add', defaultStart: startIso, defaultEnd: endIso });
+          }}
+          onClose={() => setPasteMenu(null)}
         />
       )}
 
@@ -582,6 +680,7 @@ function DayView({
   onSelectBlock,
   onEditBlock,
   onContextMenuBlock,
+  onContextMenuEmpty,
   onCreateAtRange,
 }: {
   date: Date;
@@ -591,6 +690,7 @@ function DayView({
   onSelectBlock: (id: string | null) => void;
   onEditBlock: (b: DaybookBlockInstance) => void;
   onContextMenuBlock: (b: DaybookBlockInstance, x: number, y: number) => void;
+  onContextMenuEmpty: (dateKey: string, startHHMM: string, x: number, y: number) => void;
   onCreateAtRange: (startIso: string, endIso: string) => void;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -623,6 +723,18 @@ function DayView({
     const h = Math.floor(min / 60);
     const m = min % 60;
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
+  // Right-click on empty canvas → open the paste / new-block menu at the
+  // cursor's snapped time. Block tiles stopPropagation on their own
+  // contextmenu so this only fires for true empty-canvas clicks.
+  function onCanvasContextMenu(e: React.MouseEvent<HTMLDivElement>) {
+    if (!canvasRef.current) return;
+    e.preventDefault();
+    const rect = canvasRef.current.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const startMin = snap15(yToMinutes(y));
+    onContextMenuEmpty(localDateKey(date), localMinToHHMM(startMin), e.clientX, e.clientY);
   }
 
   function onCanvasMouseDown(e: React.MouseEvent<HTMLDivElement>) {
@@ -733,6 +845,7 @@ function DayView({
               backgroundSize: `${ROW_H}px ${ROW_H}px, ${ROW_H / 2}px ${ROW_H / 2}px`,
             }}
             onMouseDown={onCanvasMouseDown}
+            onContextMenu={onCanvasContextMenu}
           >
             {blocks.map((b) => (
               <BlockTile
@@ -814,6 +927,7 @@ function BlockTile({
       onDoubleClick={onEdit}
       onContextMenu={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         onHideTooltip();
         onContextMenu(e.clientX, e.clientY);
       }}
@@ -949,6 +1063,7 @@ function WeekView({
   onSelectBlock,
   onEditBlock,
   onContextMenuBlock,
+  onContextMenuEmpty,
   onCreateAtRange,
   onPickDay,
 }: {
@@ -959,6 +1074,7 @@ function WeekView({
   onSelectBlock: (id: string | null) => void;
   onEditBlock: (b: DaybookBlockInstance) => void;
   onContextMenuBlock: (b: DaybookBlockInstance, x: number, y: number) => void;
+  onContextMenuEmpty: (dateKey: string, startHHMM: string, x: number, y: number) => void;
   onCreateAtRange: (startIso: string, endIso: string) => void;
   onPickDay: (d: Date) => void;
 }) {
@@ -1067,6 +1183,7 @@ function WeekView({
               onSelectBlock={onSelectBlock}
               onEditBlock={onEditBlock}
               onContextMenuBlock={onContextMenuBlock}
+              onContextMenuEmpty={onContextMenuEmpty}
               onCreateAtRange={onCreateAtRange}
               onShowTooltip={showTooltip}
               onHideTooltip={hideTooltip}
@@ -1088,6 +1205,7 @@ function WeekColumn({
   onSelectBlock,
   onEditBlock,
   onContextMenuBlock,
+  onContextMenuEmpty,
   onCreateAtRange,
   onShowTooltip,
   onHideTooltip,
@@ -1100,6 +1218,7 @@ function WeekColumn({
   onSelectBlock: (id: string | null) => void;
   onEditBlock: (b: DaybookBlockInstance) => void;
   onContextMenuBlock: (b: DaybookBlockInstance, x: number, y: number) => void;
+  onContextMenuEmpty: (dateKey: string, startHHMM: string, x: number, y: number) => void;
   onCreateAtRange: (startIso: string, endIso: string) => void;
   onShowTooltip: (b: DaybookBlock, anchor: DOMRect) => void;
   onHideTooltip: () => void;
@@ -1160,6 +1279,15 @@ function WeekColumn({
     document.addEventListener('mouseup', onUp);
   }
 
+  function onCanvasContextMenu(e: React.MouseEvent<HTMLDivElement>) {
+    if (!canvasRef.current) return;
+    e.preventDefault();
+    const rect = canvasRef.current.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const startMin = snap15(yToMinutes(y));
+    onContextMenuEmpty(localDateKey(date), localMinToHHMM(startMin), e.clientX, e.clientY);
+  }
+
   return (
     <div
       ref={canvasRef}
@@ -1169,6 +1297,7 @@ function WeekColumn({
         backgroundSize: `${ROW_H}px ${ROW_H}px, ${ROW_H / 2}px ${ROW_H / 2}px`,
       }}
       onMouseDown={onCanvasMouseDown}
+      onContextMenu={onCanvasContextMenu}
     >
       {blocks.map((b) => (
         <BlockTile
@@ -1781,6 +1910,7 @@ function BlockContextMenu({
   source,
   x,
   y,
+  onCopy,
   onCopyToTomorrow,
   onCopyToDate,
   onEdit,
@@ -1790,6 +1920,7 @@ function BlockContextMenu({
   source: DaybookBlockInstance;
   x: number;
   y: number;
+  onCopy: () => void;
   onCopyToTomorrow: () => void;
   onCopyToDate: () => void;
   onEdit: () => void;
@@ -1844,6 +1975,9 @@ function BlockContextMenu({
             {isPhantom && ' · recurring'}
           </span>
         </div>
+        <button type="button" role="menuitem" onClick={onCopy}>
+          Copy
+        </button>
         <button type="button" role="menuitem" onClick={onCopyToTomorrow}>
           Copy to tomorrow
         </button>
@@ -1856,6 +1990,88 @@ function BlockContextMenu({
         </button>
         <button type="button" role="menuitem" className="danger" onClick={onDelete}>
           {isPhantom ? 'Delete series' : 'Delete'}
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ── Empty-canvas context menu (paste / new) ──────────────────────────
+//
+// Opened by right-clicking an empty spot on a day. Offers "Paste here"
+// (when something's on the clipboard) and "New block here". Same
+// viewport-clamping + shield pattern as BlockContextMenu.
+
+function CanvasContextMenu({
+  x,
+  y,
+  dateKey,
+  startHHMM,
+  clipboardLabel,
+  onPaste,
+  onNewBlock,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  dateKey: string;
+  startHHMM: string;
+  /** Title of the block on the clipboard, or null if the clipboard is empty. */
+  clipboardLabel: string | null;
+  onPaste: () => void;
+  onNewBlock: () => void;
+  onClose: () => void;
+}) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: x, top: y });
+
+  useEffect(() => {
+    if (!menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const MARGIN = 8;
+    let left = x;
+    let top = y;
+    if (left + rect.width + MARGIN > window.innerWidth) {
+      left = window.innerWidth - rect.width - MARGIN;
+    }
+    if (top + rect.height + MARGIN > window.innerHeight) {
+      top = window.innerHeight - rect.height - MARGIN;
+    }
+    if (left < MARGIN) left = MARGIN;
+    if (top < MARGIN) top = MARGIN;
+    setPosition({ left, top });
+  }, [x, y]);
+
+  const timeLabel = isoToLocalTime12h(combineLocalDateTimeToIso(dateKey, startHHMM));
+
+  return (
+    <>
+      <div
+        className="db-context-shield"
+        onClick={onClose}
+        onContextMenu={(e) => { e.preventDefault(); onClose(); }}
+      />
+      <div
+        ref={menuRef}
+        className="db-context-menu"
+        role="menu"
+        style={{ left: position.left, top: position.top }}
+      >
+        <div className="db-context-header">
+          <span className="db-context-meta">{dateKey} · {timeLabel}</span>
+        </div>
+        {clipboardLabel !== null ? (
+          <button type="button" role="menuitem" onClick={onPaste}>
+            Paste “{clipboardLabel || '(untitled)'}” here
+          </button>
+        ) : (
+          <button type="button" role="menuitem" disabled className="db-context-disabled">
+            Nothing copied yet
+          </button>
+        )}
+        <div className="db-context-divider" />
+        <button type="button" role="menuitem" onClick={onNewBlock}>
+          New block here…
         </button>
       </div>
     </>
