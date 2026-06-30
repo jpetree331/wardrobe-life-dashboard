@@ -9,8 +9,14 @@ import {
   updateSanctuaryEntry,
   type Entry,
   type EntryType,
+  type StillnessSession,
   type TimelineRow,
 } from '../lib/entries';
+import {
+  formatMinutes,
+  sessionMinutesFromClock,
+  totalStillnessMinutes,
+} from '../lib/sanctuaryPractice';
 import {
   fetchScripture,
   TRANSLATIONS,
@@ -360,7 +366,10 @@ export default function Sanctuary() {
   const scheduleSave = useCallback(
     (
       patch: Partial<
-        Pick<Entry, 'title' | 'body' | 'entry_type' | 'tags' | 'scripture_refs' | 'entry_date'>
+        Pick<Entry,
+          | 'title' | 'body' | 'entry_type' | 'tags' | 'scripture_refs' | 'entry_date'
+          | 'listening_prayer' | 'stillness_sessions'
+        >
       >,
     ) => {
       if (!active) return;
@@ -1059,6 +1068,16 @@ export default function Sanctuary() {
     setKeepingRef({ ref, entryId: active.id, entryDate: active.entry_date });
   }
 
+  // ── Practice (stillness + listening prayer) ────────────────────────────
+  function setListeningPrayer(on: boolean) {
+    if (!active) return;
+    scheduleSave({ listening_prayer: on });
+  }
+  function setStillnessSessions(sessions: StillnessSession[]) {
+    if (!active) return;
+    scheduleSave({ stillness_sessions: sessions });
+  }
+
   return (
     <div className="sanctuary-page">
       <header className="sa-ribbon">
@@ -1555,6 +1574,8 @@ export default function Sanctuary() {
                   onAddScriptureRef={addScriptureRef}
                   onRemoveScriptureRef={removeScriptureRef}
                   onKeepScriptureRef={keepScriptureRef}
+                  onSetListeningPrayer={setListeningPrayer}
+                  onSetStillnessSessions={setStillnessSessions}
                   onDelete={deleteActive}
                 />
               </div>
@@ -1580,6 +1601,8 @@ export default function Sanctuary() {
                 onAddScriptureRef={addScriptureRef}
                 onRemoveScriptureRef={removeScriptureRef}
                 onKeepScriptureRef={keepScriptureRef}
+                onSetListeningPrayer={setListeningPrayer}
+                onSetStillnessSessions={setStillnessSessions}
                 onDelete={deleteActive}
               />
             </div>
@@ -1673,6 +1696,8 @@ function Inspector({
   onAddScriptureRef,
   onRemoveScriptureRef,
   onKeepScriptureRef,
+  onSetListeningPrayer,
+  onSetStillnessSessions,
   onDelete,
 }: {
   active: Entry | null;
@@ -1686,6 +1711,8 @@ function Inspector({
   onRemoveScriptureRef: (ref: string) => void;
   /** Promote this scripture ref to the Treasury. Opens the modal pre-filled. */
   onKeepScriptureRef: (ref: string) => void;
+  onSetListeningPrayer: (on: boolean) => void;
+  onSetStillnessSessions: (sessions: StillnessSession[]) => void;
   onDelete: () => void;
 }) {
   if (!active) {
@@ -1733,6 +1760,12 @@ function Inspector({
           </span>
         </div>
       </div>
+
+      <PracticeSection
+        active={active}
+        onSetListeningPrayer={onSetListeningPrayer}
+        onSetStillnessSessions={onSetStillnessSessions}
+      />
 
       <div className="sa-insp-section">
         <h3>Scripture References</h3>
@@ -1786,6 +1819,168 @@ function Inspector({
         </button>
       </div>
     </>
+  );
+}
+
+// ── Practice section (stillness + listening prayer) ─────────────────────
+//
+// Two quiet checkboxes — a signpost for the user's own contemplative
+// rhythm, not a scoreboard. Stillness reveals a session editor where
+// each sitting is a start/end time (minutes auto-computed) or a typed
+// duration if the clock wasn't watched; multiple sittings sum. All
+// edits flow through the entry's optimistic save, same as tags.
+
+function PracticeSection({
+  active,
+  onSetListeningPrayer,
+  onSetStillnessSessions,
+}: {
+  active: Entry;
+  onSetListeningPrayer: (on: boolean) => void;
+  onSetStillnessSessions: (sessions: StillnessSession[]) => void;
+}) {
+  const sessions = active.stillness_sessions || [];
+  const hasStillness = sessions.length > 0;
+  const total = totalStillnessMinutes(sessions);
+
+  function toggleStillness(on: boolean) {
+    if (on) {
+      onSetStillnessSessions([{ start: null, end: null, minutes: 0 }]);
+    } else {
+      const hasRecorded = sessions.some((s) => s.minutes > 0);
+      if (hasRecorded && !window.confirm(
+        'Remove stillness for this day? The recorded minutes will be cleared.',
+      )) return;
+      onSetStillnessSessions([]);
+    }
+  }
+  function updateSession(i: number, next: StillnessSession) {
+    onSetStillnessSessions(sessions.map((s, idx) => (idx === i ? next : s)));
+  }
+  function addSession() {
+    onSetStillnessSessions([...sessions, { start: null, end: null, minutes: 0 }]);
+  }
+  function removeSession(i: number) {
+    onSetStillnessSessions(sessions.filter((_, idx) => idx !== i));
+  }
+
+  return (
+    <div className="sa-insp-section">
+      <h3>Practice</h3>
+      <label className="sa-practice-check">
+        <input
+          type="checkbox"
+          checked={!!active.listening_prayer}
+          onChange={(e) => onSetListeningPrayer(e.target.checked)}
+        />
+        <span>Listening prayer</span>
+      </label>
+      <label className="sa-practice-check">
+        <input
+          type="checkbox"
+          checked={hasStillness}
+          onChange={(e) => toggleStillness(e.target.checked)}
+        />
+        <span>Stillness</span>
+      </label>
+
+      {hasStillness && (
+        <div className="sa-still-editor">
+          {sessions.map((s, i) => (
+            <SessionRow
+              key={i}
+              session={s}
+              onChange={(next) => updateSession(i, next)}
+              onRemove={() => removeSession(i)}
+            />
+          ))}
+          <div className="sa-still-foot">
+            <button type="button" className="sa-still-add" onClick={addSession}>
+              + add session
+            </button>
+            <span className="sa-still-total">Total {formatMinutes(total)}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SessionRow({
+  session,
+  onChange,
+  onRemove,
+}: {
+  session: StillnessSession;
+  onChange: (next: StillnessSession) => void;
+  onRemove: () => void;
+}) {
+  // When both clock times are present, minutes is computed and the
+  // duration field is read-only. Otherwise the user types minutes
+  // directly (a sitting they didn't watch the clock for).
+  const bothTimes = !!session.start && !!session.end;
+  const computed = sessionMinutesFromClock(session.start, session.end);
+  const displayMin = bothTimes ? computed : session.minutes;
+
+  function changeStart(v: string) {
+    const start = v || null;
+    const next: StillnessSession = { ...session, start };
+    if (start && next.end) next.minutes = sessionMinutesFromClock(start, next.end);
+    onChange(next);
+  }
+  function changeEnd(v: string) {
+    const end = v || null;
+    const next: StillnessSession = { ...session, end };
+    if (session.start && end) next.minutes = sessionMinutesFromClock(session.start, end);
+    onChange(next);
+  }
+  function changeDuration(v: string) {
+    const minutes = Math.max(0, Math.round(Number(v) || 0));
+    onChange({ ...session, minutes });
+  }
+
+  const invalid = bothTimes && computed === 0;
+
+  return (
+    <div className="sa-still-row">
+      <input
+        type="time"
+        className="sa-still-time"
+        value={session.start ?? ''}
+        onChange={(e) => changeStart(e.target.value)}
+        aria-label="Start time"
+      />
+      <span className="sa-still-dash">–</span>
+      <input
+        type="time"
+        className="sa-still-time"
+        value={session.end ?? ''}
+        onChange={(e) => changeEnd(e.target.value)}
+        aria-label="End time"
+      />
+      <input
+        type="number"
+        min={0}
+        className="sa-still-dur"
+        value={displayMin || ''}
+        disabled={bothTimes}
+        onChange={(e) => changeDuration(e.target.value)}
+        placeholder="min"
+        aria-label="Duration in minutes"
+        title={bothTimes ? 'Computed from start/end' : 'Type minutes directly'}
+      />
+      <span className="sa-still-unit">min</span>
+      <button
+        type="button"
+        className="sa-still-remove"
+        onClick={onRemove}
+        aria-label="Remove session"
+        title="Remove session"
+      >
+        ✕
+      </button>
+      {invalid && <span className="sa-still-warn" title="End must be after start">!</span>}
+    </div>
   );
 }
 

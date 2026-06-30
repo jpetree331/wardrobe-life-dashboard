@@ -559,6 +559,82 @@
   cursor: pointer; color: var(--ink-faint);
 }
 .sa-tag.add:hover { color: var(--ink); border-color: var(--ink-soft); }
+
+/* ── Practice (stillness + listening prayer) ─────────────────────── */
+.sa-practice-check {
+  display: flex; align-items: center; gap: 8px;
+  font-family: 'EB Garamond', serif; font-size: 14px;
+  color: var(--ink);
+  padding: 4px 0;
+  cursor: pointer;
+}
+.sa-practice-check input[type="checkbox"] {
+  width: 14px; height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.sa-still-editor {
+  margin: 8px 0 2px;
+  padding: 10px 12px;
+  background: var(--page);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.sa-still-row {
+  display: flex; align-items: center; gap: 5px;
+}
+.sa-still-time {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  background: var(--bg); border: 1px solid var(--line);
+  color: var(--ink); padding: 3px 5px; border-radius: 2px;
+  width: 92px;
+}
+.sa-still-dash { color: var(--ink-faint); }
+.sa-still-dur {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  background: var(--bg); border: 1px solid var(--line);
+  color: var(--ink); padding: 3px 5px; border-radius: 2px;
+  width: 48px;
+  text-align: right;
+}
+.sa-still-dur:disabled {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-soft);
+}
+.sa-still-unit {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 12px; color: var(--ink-faint);
+}
+.sa-still-remove {
+  margin-left: auto;
+  background: transparent; border: 0;
+  color: var(--ink-faint); cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 2px 4px;
+}
+.sa-still-remove:hover { color: var(--red); }
+.sa-still-warn {
+  color: var(--red); font-weight: 700; font-size: 13px;
+}
+.sa-still-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 3px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--line);
+}
+.sa-still-add {
+  background: transparent; border: 0;
+  font-family: 'EB Garamond', serif; font-style: italic; font-size: 13px;
+  color: var(--ink-faint); cursor: pointer; padding: 0;
+}
+.sa-still-add:hover { color: var(--ink); }
+.sa-still-total {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11.5px; color: var(--ink-soft);
+}
 .sa-refs { list-style: none; padding: 0; margin: 0; }
 .sa-refs li {
   font-family: 'EB Garamond', serif; font-size: 13.5px;
