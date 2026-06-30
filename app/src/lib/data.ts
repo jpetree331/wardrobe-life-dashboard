@@ -7,6 +7,7 @@
 import { supabase } from './supabase';
 import { parseBibleRef, type ParsedBibleRef } from './bibleRef';
 import { verseCount } from './bibleVerseCounts';
+import type { StillnessSession } from './entries';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -525,9 +526,9 @@ export async function togglePlanCompletion(
 // ── Sanctuary entries (Writing-stats data source) ───────────────────
 
 /**
- * Lightweight shape for Writing-stats: only the columns we need to count
- * words, line up dates, label the longest-entry table, and check the
- * veil sentinel tag.
+ * Lightweight shape for the Writing + Stillness stats tabs: the columns
+ * needed to count words, line up dates, label tables, check the veil
+ * sentinel tag, and aggregate practice (stillness + listening prayer).
  */
 export type SanctuaryEntryLite = {
   id: string;
@@ -535,18 +536,20 @@ export type SanctuaryEntryLite = {
   title: string | null;
   body: string;          // HTML stored by the Sanctuary editor
   tags: string[];        // includes system tags like '_veil'
+  listening_prayer: boolean;
+  stillness_sessions: StillnessSession[];
 };
 
 /**
- * Fetch every Sanctuary entry the user owns, with the editor body and
- * tags. Only called by the Writing stats tab — the regular Sanctuary
- * list view does its own paginated reads. RLS handles the user filter
- * on the server.
+ * Fetch every Sanctuary entry the user owns, with the editor body,
+ * tags, and practice fields. Called by the Writing + Stillness stats
+ * tabs — the regular Sanctuary list view does its own paginated reads.
+ * RLS handles the user filter on the server.
  */
 export async function listAllSanctuaryEntries(): Promise<SanctuaryEntryLite[]> {
   const { data, error } = await supabase
     .from('entries')
-    .select('id, entry_date, title, body, tags')
+    .select('id, entry_date, title, body, tags, listening_prayer, stillness_sessions')
     .eq('room', 'sanctuary')
     .order('entry_date', { ascending: false });
   if (error) throw error;
@@ -556,12 +559,16 @@ export async function listAllSanctuaryEntries(): Promise<SanctuaryEntryLite[]> {
     title: string | null;
     body: string | null;
     tags: string[] | null;
+    listening_prayer: boolean | null;
+    stillness_sessions: StillnessSession[] | null;
   }>).map((r) => ({
     id: r.id,
     entry_date: r.entry_date,
     title: r.title,
     body: r.body ?? '',
     tags: r.tags ?? [],
+    listening_prayer: !!r.listening_prayer,
+    stillness_sessions: r.stillness_sessions ?? [],
   }));
 }
 

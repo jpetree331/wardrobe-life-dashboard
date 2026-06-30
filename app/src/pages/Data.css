@@ -1981,3 +1981,29 @@
   font-size: 12px; color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Stillness view ────────────────────────────────────────────────── */
+/* Monthly bars in the stillness blue rather than the heatmap theme. */
+.st-monthly .st-month-bar {
+  background: #5d89af;   /* mid-deep stillness blue (matches STILLNESS_BLUE[7]) */
+}
+
+.st-legend {
+  display: flex; flex-wrap: wrap; gap: 22px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dotted var(--line);
+}
+.st-legend-item {
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.st-swatch {
+  width: 12px; height: 12px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.st-legend-label {
+  font-family: 'EB Garamond', serif; font-style: italic;
+  font-size: 12.5px; color: var(--ink-faint);
+  margin-left: 3px;
+}

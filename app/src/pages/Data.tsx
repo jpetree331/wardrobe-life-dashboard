@@ -33,6 +33,15 @@ import {
   writingSummary,
 } from '../lib/sanctuaryStats';
 import {
+  bucketStillness,
+  formatMinutes,
+  listeningPrayerDates,
+  monthlyStillnessMinutes,
+  practiceByDate,
+  practiceSummary,
+  stillnessMinutesByDate,
+} from '../lib/sanctuaryPractice';
+import {
   buildImportPreview,
   dedupAgainstExisting,
   parseCSV,
@@ -79,7 +88,7 @@ import './Data.css';
 
 // ── Types & constants ────────────────────────────────────────────────
 
-type Tab = 'heatmap' | 'calendar' | 'matrix' | 'stats' | 'plans' | 'writing';
+type Tab = 'heatmap' | 'calendar' | 'matrix' | 'stats' | 'plans' | 'writing' | 'stillness';
 
 type Theme = 'sage' | 'rose' | 'sky' | 'violet' | 'saffron' | 'ink';
 
@@ -191,6 +200,7 @@ export default function Data() {
         <TabButton current={tab} value="stats"    setTab={setTab}>Stats</TabButton>
         <TabButton current={tab} value="plans"    setTab={setTab}>Plans</TabButton>
         <TabButton current={tab} value="writing"  setTab={setTab}>Writing</TabButton>
+        <TabButton current={tab} value="stillness" setTab={setTab}>Stillness</TabButton>
       </nav>
 
       <main className="dt-main">
@@ -232,6 +242,8 @@ export default function Data() {
           />
         ) : tab === 'writing' ? (
           <WritingView entries={sanctuaryEntries} />
+        ) : tab === 'stillness' ? (
+          <StillnessView entries={sanctuaryEntries} />
         ) : null}
       </main>
 
@@ -597,11 +609,16 @@ function HeatGrid({
   year,
   onHover,
   onLeave,
+  cellColor,
 }: {
   cells: ReturnType<typeof buildHeatGrid>['cells'];
   year: number;
   onHover: (cell: any, x: number, y: number) => void;
   onLeave: () => void;
+  /** Optional per-cell background (e.g. the Stillness tab's blend).
+   *  When provided, the l1..l5 theme classes are skipped and this color
+   *  is applied inline; return null/'' for an empty cell. */
+  cellColor?: (cell: ReturnType<typeof buildHeatGrid>['cells'][number]) => string | null;
 }) {
   // Compute total weeks (columns) for the grid template.
   const maxWeek = cells.length === 0 ? 0 : Math.max(...cells.map((c) => c.weekIndex));
@@ -665,18 +682,25 @@ function HeatGrid({
           the parent (HeatmapView / WritingView) renders its own custom
           tooltip with full data, and the browser's native tooltip from
           a `title` attribute would appear ~500ms later and cover ours. */}
-      {cells.map((c) => (
-        <div
-          key={c.date}
-          className={`heat-cell l${c.level}${c.isFuture ? ' future' : ''}`}
-          style={{
-            gridColumn: c.weekIndex + 2,
-            gridRow: c.dow + 2,
-          }}
-          onMouseMove={(e) => onHover(c, e.clientX, e.clientY)}
-          aria-label={`${c.date} (${year})`}
-        />
-      ))}
+      {cells.map((c) => {
+        const custom = cellColor ? cellColor(c) : null;
+        const cls = cellColor
+          ? `heat-cell${c.isFuture ? ' future' : ''}`
+          : `heat-cell l${c.level}${c.isFuture ? ' future' : ''}`;
+        return (
+          <div
+            key={c.date}
+            className={cls}
+            style={{
+              gridColumn: c.weekIndex + 2,
+              gridRow: c.dow + 2,
+              ...(custom ? { background: custom } : {}),
+            }}
+            onMouseMove={(e) => onHover(c, e.clientX, e.clientY)}
+            aria-label={`${c.date} (${year})`}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -2626,6 +2650,174 @@ function KPI({ label, value, sub }: { label: string; value: string; sub: string 
       <div className="wt-kpi-label">{label}</div>
       <div className="wt-kpi-value">{value}</div>
       <div className="wt-kpi-sub">{sub}</div>
+    </div>
+  );
+}
+
+// ── Stillness view ────────────────────────────────────────────────────
+//
+// A signpost, not a scoreboard. The year-heatmap tints each day by
+// stillness time (deeper = more, 8 steps of 15 min up to 120) and lays
+// a warm rose over listening-prayer days; days with both blend toward a
+// quiet violet. Subdued pastels throughout — this is meant to be looked
+// at gently. A monthly bar chart shows the longer rhythm.
+
+// Stillness depth ramp — index 1..8, light → deeper, subdued dusty blue.
+const STILLNESS_BLUE = [
+  '',         // 0 unused (empty cell handled separately)
+  '#dde7ee',
+  '#cbdce8',
+  '#b6cde0',
+  '#9fbdd6',
+  '#88abc9',
+  '#7099bc',
+  '#5d89af',
+  '#4d7aa1',
+] as const;
+// Listening prayer — a single warm pinkish-rose pastel (binary, no depth).
+const LISTENING_ROSE = '#e2b3ac';
+
+function StillnessView({ entries }: { entries: SanctuaryEntryLite[] }) {
+  const todayDate = useMemo(() => new Date(), []);
+  const currentYear = todayDate.getFullYear();
+  const [year, setYear] = useState<number>(currentYear);
+
+  // Practice keyed by date (sums minutes, ORs listening prayer).
+  const byDay = useMemo(() => practiceByDate(entries), [entries]);
+  const minutesByDate = useMemo(() => stillnessMinutesByDate(entries), [entries]);
+  const lpDates = useMemo(() => listeningPrayerDates(entries), [entries]);
+
+  const grid = useMemo(
+    () => buildHeatGrid(year, minutesByDate, 'words', todayDate),
+    [year, minutesByDate, todayDate],
+  );
+  const summary = useMemo(() => practiceSummary(entries, year), [entries, year]);
+  const monthly = useMemo(() => monthlyStillnessMinutes(entries, year), [entries, year]);
+  const monthlyMax = useMemo(() => Math.max(1, ...monthly), [monthly]);
+
+  // Years that have any practice, plus the current year.
+  const years = useMemo(() => {
+    const s = new Set<number>();
+    for (const d of minutesByDate.keys()) s.add(parseInt(d.slice(0, 4), 10));
+    for (const d of lpDates) s.add(parseInt(d.slice(0, 4), 10));
+    s.add(currentYear);
+    return Array.from(s).filter(Number.isFinite).sort((a, b) => b - a);
+  }, [minutesByDate, lpDates, currentYear]);
+
+  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
+
+  // Per-cell color: blue depth for stillness, rose for listening prayer,
+  // a blend toward violet when both are present (deepening with time).
+  function cellColor(cell: ReturnType<typeof buildHeatGrid>['cells'][number]): string | null {
+    const p = byDay.get(cell.date);
+    if (!p) return null;
+    const step = bucketStillness(p.stillnessMin);
+    const lp = p.listeningPrayer;
+    if (step === 0 && !lp) return null;
+    if (step > 0 && lp) {
+      return `color-mix(in oklab, ${STILLNESS_BLUE[step]} 55%, ${LISTENING_ROSE} 45%)`;
+    }
+    if (lp) return LISTENING_ROSE;
+    return STILLNESS_BLUE[step];
+  }
+
+  const nothingYet = summary.totalStillnessMin === 0 && summary.listeningPrayerDays === 0;
+  if (entries.length === 0 || nothingYet) {
+    return (
+      <div className="dt-panel">
+        <div className="empty">
+          No stillness or listening prayer recorded yet. In the{' '}
+          <Link to="/sanctuary">Sanctuary</Link> inspector, check <em>Stillness</em> or{' '}
+          <em>Listening prayer</em> on an entry and it will show up here.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="dt-panel wt-panel">
+      {/* ── KPIs ───────────────────────────────────────────────── */}
+      <section className="wt-kpis st-kpis">
+        <KPI label={`${year} stillness`} value={formatMinutes(summary.thisYearStillnessMin)} sub={`${summary.thisYearStillnessDays} days`} />
+        <KPI label="Stillness" value={formatMinutes(summary.totalStillnessMin)} sub="all-time" />
+        <KPI label="Days still" value={summary.stillnessDays.toLocaleString()} sub="all-time" />
+        <KPI label="Listening prayer" value={summary.listeningPrayerDays.toLocaleString()} sub="days, all-time" />
+        <KPI label="Longest sitting" value={formatMinutes(summary.longestSessionMin)} sub="single session" />
+        <KPI label="Avg sitting" value={formatMinutes(summary.avgSessionMin)} sub="per session" />
+      </section>
+
+      {/* ── Year heatmap ───────────────────────────────────────── */}
+      <section className="wt-section">
+        <header className="wt-section-head">
+          <h3>Stillness &amp; listening prayer · <em>{year}</em></h3>
+          <div className="wt-year-rail">
+            {years.map((y) => (
+              <button key={y} className={y === year ? 'active' : ''} onClick={() => setYear(y)}>{y}</button>
+            ))}
+          </div>
+        </header>
+        <p className="wt-section-sub">
+          Each square is a day; deeper blue is more time in stillness. Listening-prayer
+          days carry a warm rose, and days with both blend toward violet.
+        </p>
+        <div className="wt-heat-wrap" onMouseLeave={() => setTip(null)}>
+          <HeatGrid
+            cells={grid.cells}
+            year={year}
+            cellColor={cellColor}
+            onHover={(cell, x, y) => {
+              if (!cell || cell.isFuture) { setTip(null); return; }
+              const p = byDay.get(cell.date);
+              const parts: string[] = [];
+              if (p && p.stillnessMin > 0) parts.push(`${formatMinutes(p.stillnessMin)} stillness`);
+              if (p && p.listeningPrayer) parts.push('listening prayer');
+              setTip({
+                x, y,
+                text: parts.length ? `${parts.join(' · ')} · ${cell.date}` : `nothing · ${cell.date}`,
+              });
+            }}
+            onLeave={() => setTip(null)}
+          />
+          {tip && (
+            <div className="dt-tooltip" style={{ left: tip.x + 14, top: tip.y + 14 }}>{tip.text}</div>
+          )}
+        </div>
+        {/* Legend */}
+        <div className="st-legend">
+          <span className="st-legend-item">
+            <span className="st-swatch" style={{ background: STILLNESS_BLUE[2] }} />
+            <span className="st-swatch" style={{ background: STILLNESS_BLUE[5] }} />
+            <span className="st-swatch" style={{ background: STILLNESS_BLUE[8] }} />
+            <span className="st-legend-label">stillness (more time → deeper)</span>
+          </span>
+          <span className="st-legend-item">
+            <span className="st-swatch" style={{ background: LISTENING_ROSE }} />
+            <span className="st-legend-label">listening prayer</span>
+          </span>
+          <span className="st-legend-item">
+            <span className="st-swatch" style={{ background: `color-mix(in oklab, ${STILLNESS_BLUE[6]} 55%, ${LISTENING_ROSE} 45%)` }} />
+            <span className="st-legend-label">both</span>
+          </span>
+        </div>
+      </section>
+
+      {/* ── Monthly bars ───────────────────────────────────────── */}
+      <section className="wt-section">
+        <header className="wt-section-head">
+          <h3>Stillness by month · <em>{year}</em></h3>
+        </header>
+        <div className="wt-monthly st-monthly">
+          {monthly.map((min, i) => (
+            <div key={i} className="wt-month-col" title={`${MONTH_NAMES[i]} ${year}: ${formatMinutes(min)}`}>
+              <div className="wt-month-bar-wrap">
+                <div className="wt-month-bar st-month-bar" style={{ height: `${(min / monthlyMax) * 100}%` }} aria-label={`${min} minutes`} />
+              </div>
+              <div className="wt-month-label">{MONTH_SHORT[i]}</div>
+              <div className="wt-month-val">{min > 0 ? formatMinutes(min) : '—'}</div>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
