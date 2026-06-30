@@ -76,11 +76,10 @@
    persisted to localStorage. The splitter occupies its own 4px column. */
 .sa-grid {
   display: grid;
-  grid-template-columns: var(--sa-binder-width, 280px) 4px 1fr 280px;
+  /* binder | split | editor | split | right pane (Inspector / Scripture) */
+  grid-template-columns:
+    var(--sa-binder-width, 280px) 4px 1fr 4px var(--sa-right-width, 320px);
   min-height: 0;
-}
-.sa-grid.dual {
-  grid-template-columns: var(--sa-binder-width, 280px) 4px 1fr 1fr;
 }
 .sa-grid.dual .sa-inspector { display: none; }
 
@@ -249,11 +248,26 @@
   border-bottom: 1px solid var(--line);
   background: var(--bg-2);
 }
+/* The ▸/▾ toggle — looks like the binder's folder rows for consistency. */
+.sa-tag-filter-toggle {
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent; border: 0; cursor: pointer;
+  padding: 3px 0 0;
+}
+.sa-tag-filter-toggle .chev {
+  font-size: 10px; color: var(--ink-faint); width: 9px;
+}
+.sa-tag-filter-toggle:hover .chev,
+.sa-tag-filter-toggle:hover .sa-tag-filter-label { color: var(--ink); }
+.sa-tag-filter-count {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9.5px; color: var(--ink-faint);
+}
 .sa-tag-filter-label {
   font-family: 'Cormorant Garamond', serif;
   font-size: 10.5px; letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--ink-faint);
-  padding-top: 4px;
   flex-shrink: 0;
 }
 .sa-tag-filter-pills {
@@ -583,13 +597,19 @@
 }
 .sa-still-row {
   display: flex; align-items: center; gap: 5px;
+  /* Wrap so the trailing duration + remove button always stay visible
+     even in a narrow pane — they drop to a second line instead of
+     clipping off the right edge. */
+  flex-wrap: wrap;
+  row-gap: 5px;
 }
 .sa-still-time {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 12px;
   background: var(--bg); border: 1px solid var(--line);
   color: var(--ink); padding: 3px 5px; border-radius: 2px;
-  width: 92px;
+  width: 84px;
+  flex-shrink: 0;
 }
 .sa-still-dash { color: var(--ink-faint); }
 .sa-still-dur {

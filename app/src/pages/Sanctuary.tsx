@@ -77,6 +77,17 @@ export default function Sanctuary() {
   const [paneTab, setPaneTab] = useState<PaneTab>('scripture');
   const [search, setSearch] = useState('');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  // The binder's tag-filter row collapses behind a ▸ toggle so a growing
+  // tag list never pushes the entry tree down. Collapsed by default;
+  // persisted. An active filter still shows (and stays clearable) when
+  // collapsed.
+  const [tagsExpanded, setTagsExpanded] = useState<boolean>(() => {
+    return typeof window !== 'undefined'
+      && window.localStorage.getItem('sa-tags-expanded') === '1';
+  });
+  useEffect(() => {
+    window.localStorage.setItem('sa-tags-expanded', tagsExpanded ? '1' : '0');
+  }, [tagsExpanded]);
   // The veil — a quiet way to fold a page over when the words on it
   // feel too intimate to look back at. eyeOpen is session-only: refresh
   // the page and it closes again, so veiled entries return to the
@@ -132,6 +143,17 @@ export default function Sanctuary() {
       typeof window !== 'undefined' ? window.localStorage.getItem('sa-binder-width') : null;
     const n = saved ? Number(saved) : NaN;
     return Number.isFinite(n) && n >= 180 && n <= 600 ? n : 280;
+  });
+
+  // Resizable right pane (Inspector in single mode, Scripture + Prayer in
+  // dual). Same persistence + clamp pattern as the binder. Default 320 is
+  // wide enough that the stillness session row never clips its remove
+  // button. Clamped to [240, 620] in the drag handler.
+  const [rightWidth, setRightWidth] = useState<number>(() => {
+    const saved =
+      typeof window !== 'undefined' ? window.localStorage.getItem('sa-right-width') : null;
+    const n = saved ? Number(saved) : NaN;
+    return Number.isFinite(n) && n >= 240 && n <= 620 ? n : 320;
   });
 
   // Year / month folder expansion in the binder. Set of keys ("2024" or
@@ -214,6 +236,11 @@ export default function Sanctuary() {
     window.localStorage.setItem('sa-binder-width', String(binderWidth));
   }, [binderWidth]);
 
+  // Persist right-pane width
+  useEffect(() => {
+    window.localStorage.setItem('sa-right-width', String(rightWidth));
+  }, [rightWidth]);
+
   // Persist expanded folders
   useEffect(() => {
     window.localStorage.setItem('sa-binder-expanded', JSON.stringify([...expanded]));
@@ -262,6 +289,28 @@ export default function Sanctuary() {
     const onMove = (ev: MouseEvent) => {
       const next = Math.max(180, Math.min(600, startW + (ev.clientX - startX)));
       setBinderWidth(next);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  // The right splitter drags the OPPOSITE direction — moving the handle
+  // left widens the pane — so the delta is negated vs. the binder.
+  function startRightResize(e: React.MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = rightWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.max(240, Math.min(620, startW - (ev.clientX - startX)));
+      setRightWidth(next);
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -1113,7 +1162,10 @@ export default function Sanctuary() {
 
       <div
         className={`sa-grid${mode === 'dual' ? ' dual' : ''}`}
-        style={{ ['--sa-binder-width' as any]: `${binderWidth}px` }}
+        style={{
+          ['--sa-binder-width' as any]: `${binderWidth}px`,
+          ['--sa-right-width' as any]: `${rightWidth}px`,
+        }}
       >
         {/* Binder */}
         <aside className="sa-panel sa-binder-panel" aria-label="Binder">
@@ -1153,20 +1205,49 @@ export default function Sanctuary() {
             </div>
           </div>
           {allTags.length > 0 && (
-            <div className="sa-tag-filter" role="group" aria-label="Filter by tag">
-              <span className="sa-tag-filter-label">tags</span>
-              <div className="sa-tag-filter-pills">
-                {allTags.map((t) => (
+            <div
+              className={`sa-tag-filter${tagsExpanded ? ' expanded' : ''}`}
+              role="group"
+              aria-label="Filter by tag"
+            >
+              <button
+                className="sa-tag-filter-toggle"
+                onClick={() => setTagsExpanded((v) => !v)}
+                aria-expanded={tagsExpanded}
+                title={tagsExpanded ? 'Hide tags' : `Show ${allTags.length} tags`}
+              >
+                <span className="chev">{tagsExpanded ? '▾' : '▸'}</span>
+                <span className="sa-tag-filter-label">tags</span>
+                <span className="sa-tag-filter-count">{allTags.length}</span>
+              </button>
+
+              {tagsExpanded ? (
+                <div className="sa-tag-filter-pills">
+                  {allTags.map((t) => (
+                    <button
+                      key={t}
+                      className={`sa-tag-pill${tagFilter === t ? ' active' : ''}`}
+                      onClick={() => setTagFilter((cur) => (cur === t ? null : t))}
+                      title={tagFilter === t ? 'Click to clear filter' : `Filter by "${t}"`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                // Collapsed: surface only the active filter (if any) so it
+                // stays visible and clearable without expanding.
+                tagFilter && (
                   <button
-                    key={t}
-                    className={`sa-tag-pill${tagFilter === t ? ' active' : ''}`}
-                    onClick={() => setTagFilter((cur) => (cur === t ? null : t))}
-                    title={tagFilter === t ? 'Click to clear filter' : `Filter by "${t}"`}
+                    className="sa-tag-pill active"
+                    onClick={() => setTagFilter(null)}
+                    title="Click to clear filter"
                   >
-                    {t}
+                    {tagFilter}
                   </button>
-                ))}
-              </div>
+                )
+              )}
+
               {tagFilter && (
                 <button
                   className="sa-tag-filter-clear"
@@ -1469,6 +1550,17 @@ export default function Sanctuary() {
             )}
           </div>
         </section>
+
+        {/* Right splitter — resizes the Inspector / Scripture pane. */}
+        <div
+          className="sa-binder-splitter sa-right-splitter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize right pane"
+          onMouseDown={startRightResize}
+          onDoubleClick={() => setRightWidth(320)}
+          title="Drag to resize · double-click to reset"
+        />
 
         {/* Scripture pane (dual mode) */}
         {mode === 'dual' && (
