@@ -1925,13 +1925,24 @@ function SessionRow({
   function changeStart(v: string) {
     const start = v || null;
     const next: StillnessSession = { ...session, start };
-    if (start && next.end) next.minutes = sessionMinutesFromClock(start, next.end);
+    if (start && next.end) {
+      next.minutes = sessionMinutesFromClock(start, next.end);
+    } else if (!start) {
+      // Clearing a time drops the row back to manual-duration mode —
+      // wipe the stale clock-computed value so it can't be silently
+      // saved as the duration.
+      next.minutes = 0;
+    }
     onChange(next);
   }
   function changeEnd(v: string) {
     const end = v || null;
     const next: StillnessSession = { ...session, end };
-    if (session.start && end) next.minutes = sessionMinutesFromClock(session.start, end);
+    if (session.start && end) {
+      next.minutes = sessionMinutesFromClock(session.start, end);
+    } else if (!end) {
+      next.minutes = 0;
+    }
     onChange(next);
   }
   function changeDuration(v: string) {
