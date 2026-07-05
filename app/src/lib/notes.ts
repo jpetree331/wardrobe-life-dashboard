@@ -14,7 +14,7 @@ export const SWATCHES: SwatchKey[] = [
   'paper', 'saffron', 'rose', 'sage', 'sky', 'violet', 'clay',
 ];
 
-export type CardType = 'note' | 'todo' | 'heading' | 'link' | 'document' | 'board';
+export type CardType = 'note' | 'todo' | 'heading' | 'link' | 'document' | 'board' | 'image';
 
 export type Board = {
   id: string;
@@ -32,12 +32,21 @@ export type Board = {
 
 export type TodoItem = { id: string; text: string; done: boolean };
 
+export type ImagePayload = {
+  storagePath: string;      // original, in the notes-media bucket
+  thumbPath?: string;       // downscaled canvas rendition (large originals)
+  caption?: string;
+  naturalW: number;
+  naturalH: number;
+};
+
 export type CardPayload =
   | { body: string }                                                   // note, heading
   | { title: string; items: TodoItem[] }                               // todo
   | { title: string; url: string }                                     // link
   | { title: string; body: string; mode: 'icon' | 'preview' }          // document
   | { name: string }                                                   // board tile mirror
+  | ImagePayload                                                        // image
   | Record<string, unknown>;                                            // catch-all
 
 export type Card = {

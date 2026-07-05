@@ -32,6 +32,14 @@ import {
   updateCard,
 } from '../lib/notes';
 import { BoardHistory, BurstCoalescer, hasUserContent, type Command } from '../lib/notesHistory';
+import type { ImagePayload } from '../lib/notes';
+import {
+  aspectResize,
+  fanOutOffsets,
+  initialCardSize,
+  isImageFile,
+} from '../lib/notesImages';
+import { removeStorageObjects, signedMediaUrl, uploadImage } from '../lib/notesMedia';
 import {
   fitView,
   type View,
@@ -61,6 +69,7 @@ const TOOLBAR_TYPES: Array<{
   { type: 'heading',  label: 'Heading',  hint: 'Drag onto canvas' },
   { type: 'board',    label: 'Board',    hint: 'Drag onto canvas (folder)' },
   { type: 'document', label: 'Document', hint: 'Drag onto canvas' },
+  { type: 'image',    label: 'Image',    hint: 'Click to pick, or drop image files on the canvas' },
 ];
 
 const DEFAULT_W: Record<CardType, number> = {
@@ -70,6 +79,7 @@ const DEFAULT_W: Record<CardType, number> = {
   link: 240,
   document: 140,
   board: 130,
+  image: 240,
 };
 const DEFAULT_H: Record<CardType, number> = {
   note: 140,
@@ -78,6 +88,7 @@ const DEFAULT_H: Record<CardType, number> = {
   link: 90,
   document: 110,
   board: 130,
+  image: 180,
 };
 
 export default function Notes() {
@@ -98,6 +109,9 @@ export default function Notes() {
   const [trashOpen, setTrashOpen] = useState(false);
   const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [docOverlayId, setDocOverlayId] = useState<string | null>(null);
+  const [lightboxId, setLightboxId] = useState<string | null>(null);
+  // In-flight image uploads, shown as shimmer placeholders on the canvas.
+  const [uploads, setUploads] = useState<Array<{ id: string; x: number; y: number; w: number; h: number }>>([]);
   const [statusMsg, setStatusMsg] = useState('Drag a card type onto the canvas. Scroll to pan, ⌘+scroll to zoom.');
   // Theme: parchment (default) or the Milanote skin. Device-local choice.
   const [theme, setTheme] = useState<'parchment' | 'milanote'>(() => {
@@ -424,6 +438,99 @@ export default function Notes() {
     document.addEventListener('mouseup', onUp);
   }
 
+  // ── Image cards: upload pipeline (Sprint 5) ───────────────────────────
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingImagePointRef = useRef<{ x: number; y: number } | null>(null);
+
+  /** Canvas-space point at the middle of the viewport (paste target). */
+  function centerCanvasPoint(): { x: number; y: number } {
+    const wrap = wrapRef.current;
+    if (!wrap) return { x: 200, y: 200 };
+    const r = wrap.getBoundingClientRect();
+    const pt = wrapperToCanvas(view, r.width / 2, r.height / 2);
+    return { x: Math.round(pt.x - 140), y: Math.round(pt.y - 100) };
+  }
+
+  /**
+   * Upload files and create image cards fanned out from `at`. Optimistic
+   * shimmer placeholders while uploading; a failed upload (or a failed
+   * card insert, whose storage objects get removed) leaves no orphans.
+   * One composite history command for the whole batch.
+   */
+  async function createImageCards(files: File[], at: { x: number; y: number }) {
+    if (!currentBoardId) return;
+    const images = files.filter(isImageFile);
+    if (images.length === 0) return;
+    const offsets = fanOutOffsets(images.length);
+    const created: Card[] = [];
+    for (let i = 0; i < images.length; i++) {
+      const ph = {
+        id: `up-${i}-${Date.now()}`,
+        x: at.x + offsets[i].dx,
+        y: at.y + offsets[i].dy,
+        w: 240,
+        h: 180,
+      };
+      setUploads((prev) => [...prev, ph]);
+      try {
+        const up = await uploadImage(images[i]);
+        const size = initialCardSize(up.naturalW, up.naturalH);
+        let card: Card;
+        try {
+          card = await createCard({
+            board_id: currentBoardId,
+            type: 'image',
+            x: ph.x, y: ph.y, w: size.w, h: size.h,
+            payload: {
+              storagePath: up.storagePath,
+              thumbPath: up.thumbPath,
+              naturalW: up.naturalW,
+              naturalH: up.naturalH,
+            },
+          });
+        } catch (err) {
+          // Card row failed after upload → remove the objects (no orphans).
+          const paths = [up.storagePath, ...(up.thumbPath ? [up.thumbPath] : [])];
+          await removeStorageObjects(paths).catch(() => {});
+          throw err;
+        }
+        created.push(card);
+        upsertCardLocal(card);
+      } catch (err) {
+        console.error(err);
+        setStatusMsg(`Could not add image "${images[i].name}".`);
+      } finally {
+        setUploads((prev) => prev.filter((u) => u.id !== ph.id));
+      }
+    }
+    if (created.length > 0) {
+      setSelectedIds(new Set(created.map((c) => c.id)));
+      getHistory(currentBoardId)?.push(
+        makeCreateCommand(created, created.length > 1 ? 'Add images' : 'Add image'),
+      );
+      setStatusMsg(created.length > 1 ? `Added ${created.length} images.` : 'Added image.');
+    }
+  }
+  // Stable handle for the document-level paste listener.
+  const createImageCardsRef = useRef(createImageCards);
+  createImageCardsRef.current = createImageCards;
+  const centerCanvasPointRef = useRef(centerCanvasPoint);
+  centerCanvasPointRef.current = centerCanvasPoint;
+
+  // Paste an image from the clipboard (canvas scope only — typing keeps
+  // its native paste) → image card at the viewport center.
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      if (isTypingContext(e.target)) return;
+      const files = [...(e.clipboardData?.files ?? [])].filter(isImageFile);
+      if (files.length === 0) return;
+      e.preventDefault();
+      createImageCardsRef.current(files, centerCanvasPointRef.current());
+    }
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, []);
+
   // ── Toolbar drag (drop on canvas creates a card) ──────────────────────
   const dropDataRef = useRef<CardType | null>(null);
   function onToolbarDragStart(type: CardType, e: React.DragEvent) {
@@ -443,19 +550,41 @@ export default function Notes() {
   async function onCanvasDrop(e: React.DragEvent) {
     e.preventDefault();
     wrapRef.current?.classList.remove('adding');
-    const type = (dropDataRef.current ||
-      (e.dataTransfer.getData('text/plain') as CardType)) as CardType;
-    if (!type || !currentBoardId) return;
+    if (!currentBoardId) return;
     const wrap = wrapRef.current;
     if (!wrap) return;
     const r = wrap.getBoundingClientRect();
     const wrapperPt = { x: e.clientX - r.left, y: e.clientY - r.top };
     const pt = wrapperToCanvas(view, wrapperPt.x, wrapperPt.y);
+
+    // Desktop file drop → image cards at the drop point.
+    const droppedFiles = [...e.dataTransfer.files];
+    if (droppedFiles.length > 0) {
+      dropDataRef.current = null;
+      const images = droppedFiles.filter(isImageFile);
+      if (images.length > 0) {
+        createImageCards(images, { x: Math.round(pt.x - 120), y: Math.round(pt.y - 90) });
+      }
+      if (images.length < droppedFiles.length) {
+        setStatusMsg('Only image files can be dropped for now — file cards arrive in a later sprint.');
+      }
+      return;
+    }
+
+    const type = (dropDataRef.current ||
+      (e.dataTransfer.getData('text/plain') as CardType)) as CardType;
+    if (!type) return;
     // Center the card around the drop point
     const w = DEFAULT_W[type];
     const h = DEFAULT_H[type];
     const x = Math.round(pt.x - w / 2);
     const y = Math.round(pt.y - h / 2);
+    // The Image tool opens the file picker; cards appear on file selection.
+    if (type === 'image') {
+      pendingImagePointRef.current = { x, y };
+      fileInputRef.current?.click();
+      return;
+    }
     try {
       if (type === 'board') {
         const name = window.prompt('Board name', 'New board') || 'New board';
@@ -771,6 +900,8 @@ export default function Notes() {
       if (e.key === 'Escape') {
         if (typing) {
           (document.activeElement as HTMLElement | null)?.blur();
+        } else if (lightboxId) {
+          setLightboxId(null);
         } else if (docOverlayId) {
           setDocOverlayId(null);
         } else if (ctxMenu) {
@@ -784,6 +915,18 @@ export default function Notes() {
       }
 
       if (typing) return;
+
+      // Lightbox open: ←/→ step through the board's image cards.
+      if (lightboxId && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        const imgs = cards.filter((c) => c.type === 'image');
+        const i = imgs.findIndex((c) => c.id === lightboxId);
+        if (i !== -1 && imgs.length > 1) {
+          const step = e.key === 'ArrowRight' ? 1 : imgs.length - 1;
+          setLightboxId(imgs[(i + step) % imgs.length].id);
+        }
+        return;
+      }
 
       // Mod shortcuts: zoom, select-all, duplicate.
       if (e.ctrlKey || e.metaKey) {
@@ -876,7 +1019,7 @@ export default function Notes() {
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge]);
+  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge]);
 
   // ── Floating format toolbar ───────────────────────────────────────────
   // Show when the user makes a non-collapsed selection inside a Note body
@@ -954,7 +1097,7 @@ export default function Notes() {
     });
   }
 
-  // ── Resize handle ─────────────────────────────────────────────────────
+  // ── Resize handle (aspect-locked for image cards) ─────────────────────
   function startResize(card: Card, e: React.MouseEvent) {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -964,11 +1107,16 @@ export default function Notes() {
     const startW = card.w ?? 240;
     const startH = card.h ?? 140;
     const k = view.k;
+    const img = card.type === 'image' ? (card.payload as ImagePayload) : null;
+    const aspect = img && img.naturalH > 0 ? img.naturalW / img.naturalH : null;
+    const size = (dx: number, dy: number) =>
+      aspect !== null
+        ? aspectResize(startW, dx, aspect)
+        : { w: Math.max(140, startW + dx), h: Math.max(60, startH + dy) };
     const onMove = (ev: MouseEvent) => {
       const dx = (ev.clientX - startX) / k;
       const dy = (ev.clientY - startY) / k;
-      const w = Math.max(140, startW + dx);
-      const h = Math.max(60, startH + dy);
+      const { w, h } = size(dx, dy);
       patchCardLocal(card.id, { w, h });
     };
     const onUp = (ev: MouseEvent) => {
@@ -976,8 +1124,7 @@ export default function Notes() {
       document.removeEventListener('mouseup', onUp);
       const dx = (ev.clientX - startX) / k;
       const dy = (ev.clientY - startY) / k;
-      const w = Math.max(140, startW + dx);
-      const h = Math.max(60, startH + dy);
+      const { w, h } = size(dx, dy);
       updateCard(card.id, { w, h }).catch(console.error);
       if (w !== startW || h !== startH) {
         getHistory(currentBoardId)?.push({
@@ -1222,6 +1369,12 @@ export default function Notes() {
               draggable
               onDragStart={(e) => onToolbarDragStart(t.type, e)}
               onDragEnd={onToolbarDragEnd}
+              onClick={() => {
+                if (t.type === 'image') {
+                  pendingImagePointRef.current = null; // → viewport center
+                  fileInputRef.current?.click();
+                }
+              }}
               title={t.hint}
             >
               <span className="ic">{toolIcon(t.type)}</span>
@@ -1259,6 +1412,8 @@ export default function Notes() {
                     setCurrentBoardId(card.board_ref);
                   } else if (card.type === 'document') {
                     setDocOverlayId(card.id);
+                  } else if (card.type === 'image') {
+                    setLightboxId(card.id);
                   }
                 }}
                 onPatch={(patch) => scheduleCardSave(card.id, patch)}
@@ -1270,6 +1425,13 @@ export default function Notes() {
                   const url = (card.payload as any).url;
                   if (url) window.open(url, '_blank', 'noopener');
                 }}
+              />
+            ))}
+            {uploads.map((u) => (
+              <div
+                key={u.id}
+                className="nt-upload-ph"
+                style={{ left: u.x, top: u.y, width: u.w, height: u.h } as CSSProperties}
               />
             ))}
             {cards.length === 0 && (
@@ -1393,6 +1555,37 @@ export default function Notes() {
           onPatch={(patch) => scheduleCardSave(docCard.id, patch)}
         />
       )}
+
+      {lightboxId && (() => {
+        const imgs = cards.filter((c) => c.type === 'image');
+        const idx = imgs.findIndex((c) => c.id === lightboxId);
+        if (idx === -1) return null;
+        return (
+          <ImageLightbox
+            card={imgs[idx]}
+            index={idx}
+            count={imgs.length}
+            onClose={() => setLightboxId(null)}
+            onNavigate={(dir) => setLightboxId(imgs[(idx + dir + imgs.length) % imgs.length].id)}
+          />
+        );
+      })()}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])];
+          e.target.value = '';
+          if (files.length === 0) return;
+          const at = pendingImagePointRef.current ?? centerCanvasPoint();
+          pendingImagePointRef.current = null;
+          createImageCards(files, at);
+        }}
+      />
     </div>
   );
 }
@@ -1461,6 +1654,7 @@ function CardView({
       )}
       {card.type === 'document' && <DocumentTile card={card} onPatch={onPatch} />}
       {card.type === 'board' && <BoardTile card={card} />}
+      {card.type === 'image' && <ImageBody card={card} onPatch={onPatch} />}
       {showResize && (
         <div
           className="nt-resize-se"
@@ -1828,6 +2022,100 @@ function BoardTile({ card }: { card: Card }) {
   );
 }
 
+// ── Image card body + lightbox ──────────────────────────────────────────
+
+function ImageBody({ card, onPatch }: { card: Card; onPatch: (p: Partial<Card>) => void }) {
+  const payload = card.payload as ImagePayload;
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    signedMediaUrl(payload.thumbPath ?? payload.storagePath)
+      .then((u) => { if (alive) setUrl(u); })
+      .catch(console.error);
+    return () => { alive = false; };
+  }, [payload.thumbPath, payload.storagePath]);
+
+  const captionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (captionRef.current && document.activeElement !== captionRef.current) {
+      captionRef.current.textContent = payload.caption || '';
+    }
+  }, [payload.caption]);
+
+  return (
+    <div className="img-wrap">
+      {url ? (
+        <img src={url} alt={payload.caption || ''} draggable={false} />
+      ) : (
+        <div className="img-loading" />
+      )}
+      <div
+        ref={captionRef}
+        className={`img-caption${payload.caption ? '' : ' empty'}`}
+        contentEditable
+        suppressContentEditableWarning
+        data-placeholder="add a caption"
+        onInput={(e) =>
+          onPatch({ payload: { ...payload, caption: (e.target as HTMLDivElement).textContent || '' } })
+        }
+        onKeyDown={(e) => {
+          // Single-line caption: Enter commits instead of inserting breaks.
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            (e.target as HTMLElement).blur();
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+function ImageLightbox({
+  card,
+  index,
+  count,
+  onClose,
+  onNavigate,
+}: {
+  card: Card;
+  index: number;
+  count: number;
+  onClose: () => void;
+  onNavigate: (dir: 1 | -1) => void;
+}) {
+  const payload = card.payload as ImagePayload;
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setUrl(null);
+    // Lightbox always shows the ORIGINAL, not the canvas rendition.
+    signedMediaUrl(payload.storagePath)
+      .then((u) => { if (alive) setUrl(u); })
+      .catch(console.error);
+    return () => { alive = false; };
+  }, [payload.storagePath]);
+  return (
+    <div className="nt-lightbox" onClick={onClose}>
+      {count > 1 && (
+        <button className="lb-nav prev" onClick={(e) => { e.stopPropagation(); onNavigate(-1); }} title="Previous (←)">‹</button>
+      )}
+      <figure className="lb-inner" onClick={(e) => e.stopPropagation()}>
+        {url ? <img src={url} alt={payload.caption || ''} /> : <div className="img-loading" />}
+        {(payload.caption || count > 1) && (
+          <figcaption>
+            <span className="lb-caption">{payload.caption || ''}</span>
+            {count > 1 && <span className="lb-count">{index + 1} / {count}</span>}
+          </figcaption>
+        )}
+      </figure>
+      {count > 1 && (
+        <button className="lb-nav next" onClick={(e) => { e.stopPropagation(); onNavigate(1); }} title="Next (→)">›</button>
+      )}
+      <button className="lb-close" onClick={onClose} title="Close (Esc)">close</button>
+    </div>
+  );
+}
+
 // ── Trash drawer ────────────────────────────────────────────────────────
 
 function TrashDrawer({
@@ -1971,6 +2259,7 @@ function trashPreview(t: TrashEntry): string {
     if (c.type === 'heading')  return p.body || '(heading)';
     if (c.type === 'link')     return p.title || p.url || '(link)';
     if (c.type === 'document') return p.title || '(document)';
+    if (c.type === 'image')    return p.caption || '(image)';
     return c.type;
   }
   if (t.kind === 'board') {
@@ -2044,6 +2333,14 @@ function toolIcon(type: CardType): JSX.Element {
           <line x1="8.5" y1="12" x2="15.5" y2="12" />
           <line x1="8.5" y1="15" x2="15.5" y2="15" />
           <line x1="8.5" y1="18" x2="13" y2="18" />
+        </svg>
+      );
+    case 'image':
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <rect x="4" y="5" width="16" height="14" rx="1.5" />
+          <circle cx="9" cy="10" r="1.6" />
+          <path d="M4 17l5-5 4 4 3-3 4 4" />
         </svg>
       );
   }

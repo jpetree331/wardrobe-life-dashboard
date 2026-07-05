@@ -516,6 +516,105 @@
   font-size: 11px; color: var(--ink-faint);
 }
 
+/* Image card */
+.nt-card.type-image {
+  padding: 0; overflow: hidden;
+  min-width: 80px; min-height: 60px;
+}
+.nt-card.type-image .img-wrap {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  position: relative;
+}
+.nt-card.type-image img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  flex: 1; min-height: 0;
+  user-select: none;
+}
+.nt-card.type-image .img-caption {
+  font-family: var(--notes-font-body);
+  font-size: 12px; color: var(--ink-soft);
+  line-height: 1.35;
+  padding: 6px 10px;
+  background: var(--c-paper);
+  border-top: 1px solid var(--line);
+  outline: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Empty caption collapses; the affordance appears on hover or focus. */
+.nt-card.type-image .img-caption.empty:not(:focus) { display: none; }
+.nt-card.type-image:hover .img-caption.empty:not(:focus) {
+  display: block;
+  font-style: italic; color: var(--ink-faint);
+}
+.nt-card.type-image .img-caption:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint); font-style: italic;
+}
+.img-loading {
+  flex: 1; min-height: 60px;
+  background: linear-gradient(100deg, var(--bg-3) 30%, var(--bg-2) 50%, var(--bg-3) 70%);
+  background-size: 200% 100%;
+  animation: nt-shimmer 1.2s ease-in-out infinite;
+}
+
+/* Upload placeholder on the canvas */
+.nt-upload-ph {
+  position: absolute;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--notes-card-radius);
+  background: linear-gradient(100deg, var(--bg-3) 30%, var(--bg-2) 50%, var(--bg-3) 70%);
+  background-size: 200% 100%;
+  animation: nt-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes nt-shimmer {
+  from { background-position: 180% 0; }
+  to   { background-position: -20% 0; }
+}
+
+/* Image lightbox */
+.nt-lightbox {
+  position: fixed; inset: 0; z-index: 220;
+  background: var(--notes-scrim);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  gap: 18px;
+}
+.nt-lightbox .lb-inner {
+  margin: 0;
+  max-width: calc(100vw - 160px); max-height: calc(100vh - 80px);
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.nt-lightbox .lb-inner img {
+  max-width: 100%; max-height: calc(100vh - 140px);
+  object-fit: contain;
+  box-shadow: 0 30px 90px -30px rgba(0,0,0,0.6);
+  background: var(--page);
+}
+.nt-lightbox figcaption {
+  display: flex; gap: 14px; align-items: baseline;
+  font-family: var(--notes-font-body);
+  color: var(--page); font-size: 14px;
+}
+.nt-lightbox .lb-caption { font-style: italic; }
+.nt-lightbox .lb-count { font-size: 12px; opacity: 0.75; }
+.nt-lightbox .lb-nav {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--page); font-size: 44px; line-height: 1;
+  padding: 10px 14px; opacity: 0.7;
+  font-family: var(--notes-font-display);
+}
+.nt-lightbox .lb-nav:hover { opacity: 1; }
+.nt-lightbox .lb-close {
+  position: fixed; top: 18px; right: 22px;
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--page); font-family: var(--notes-font-body);
+  font-style: italic; font-size: 14px; opacity: 0.8;
+}
+.nt-lightbox .lb-close:hover { opacity: 1; }
+
 /* Context menu */
 .nt-ctx {
   position: fixed; z-index: 100;
