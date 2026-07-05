@@ -96,6 +96,40 @@ export async function uploadImage(file: File): Promise<UploadedImage> {
   }
 }
 
+export type UploadedFile = {
+  storagePath: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+/** Upload a non-image file to the shared bucket (file cards). */
+export async function uploadFile(file: File): Promise<UploadedFile> {
+  const uid = await currentUserId();
+  const dot = file.name.lastIndexOf('.');
+  const ext = dot > 0 ? file.name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '') : 'bin';
+  const path = `${uid}/${crypto.randomUUID()}-file.${ext || 'bin'}`;
+  const { error } = await supabase.storage
+    .from(BUCKET)
+    .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+  if (error) throw error;
+  return {
+    storagePath: path,
+    filename: file.name,
+    mimeType: file.type || 'application/octet-stream',
+    sizeBytes: file.size,
+  };
+}
+
+/** Signed URL that triggers a download with the card's original filename. */
+export async function signedDownloadUrl(path: string, filename: string): Promise<string> {
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrl(path, SIGN_TTL_S, { download: filename });
+  if (error || !data?.signedUrl) throw error ?? new Error('Could not sign URL');
+  return data.signedUrl;
+}
+
 /** Delete storage objects (upload-failure cleanup; Sprint 18 uses it for permanent delete). */
 export async function removeStorageObjects(paths: string[]): Promise<void> {
   if (!paths.length) return;

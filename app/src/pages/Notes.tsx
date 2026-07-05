@@ -32,14 +32,21 @@ import {
   updateCard,
 } from '../lib/notes';
 import { BoardHistory, BurstCoalescer, hasUserContent, type Command } from '../lib/notesHistory';
-import type { ImagePayload } from '../lib/notes';
+import type { FilePayload, ImagePayload } from '../lib/notes';
 import {
   aspectResize,
   fanOutOffsets,
   initialCardSize,
   isImageFile,
 } from '../lib/notesImages';
-import { removeStorageObjects, signedMediaUrl, uploadImage } from '../lib/notesMedia';
+import { fileGroup, humanSize, truncateMiddle } from '../lib/notesFiles';
+import {
+  removeStorageObjects,
+  signedDownloadUrl,
+  signedMediaUrl,
+  uploadFile,
+  uploadImage,
+} from '../lib/notesMedia';
 import {
   fitView,
   type View,
@@ -70,6 +77,7 @@ const TOOLBAR_TYPES: Array<{
   { type: 'board',    label: 'Board',    hint: 'Drag onto canvas (folder)' },
   { type: 'document', label: 'Document', hint: 'Drag onto canvas' },
   { type: 'image',    label: 'Image',    hint: 'Click to pick, or drop image files on the canvas' },
+  { type: 'file',     label: 'File',     hint: 'Click to pick, or drop any file on the canvas' },
 ];
 
 const DEFAULT_W: Record<CardType, number> = {
@@ -80,6 +88,7 @@ const DEFAULT_W: Record<CardType, number> = {
   document: 140,
   board: 130,
   image: 240,
+  file: 250,
 };
 const DEFAULT_H: Record<CardType, number> = {
   note: 140,
@@ -89,6 +98,7 @@ const DEFAULT_H: Record<CardType, number> = {
   document: 110,
   board: 130,
   image: 180,
+  file: 96,
 };
 
 export default function Notes() {
@@ -438,8 +448,11 @@ export default function Notes() {
     document.addEventListener('mouseup', onUp);
   }
 
-  // ── Image cards: upload pipeline (Sprint 5) ───────────────────────────
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // ── Media cards: shared upload pipeline (Sprints 5–6) ─────────────────
+  // Images → image cards; everything else → file cards. Same bucket, same
+  // trash rule (storage objects survive soft-delete).
+  const fileInputRef = useRef<HTMLInputElement>(null);      // image picker
+  const anyFileInputRef = useRef<HTMLInputElement>(null);   // any-file picker
   const pendingImagePointRef = useRef<{ x: number; y: number } | null>(null);
 
   /** Canvas-space point at the middle of the viewport (paste target). */
@@ -452,80 +465,98 @@ export default function Notes() {
   }
 
   /**
-   * Upload files and create image cards fanned out from `at`. Optimistic
-   * shimmer placeholders while uploading; a failed upload (or a failed
-   * card insert, whose storage objects get removed) leaves no orphans.
-   * One composite history command for the whole batch.
+   * Upload files and create media cards fanned out from `at` — image
+   * cards for images, file cards for everything else. Optimistic shimmer
+   * placeholders while uploading; a failed upload (or a failed card
+   * insert, whose storage objects get removed) leaves no orphans. One
+   * composite history command for the whole batch.
    */
-  async function createImageCards(files: File[], at: { x: number; y: number }) {
-    if (!currentBoardId) return;
-    const images = files.filter(isImageFile);
-    if (images.length === 0) return;
-    const offsets = fanOutOffsets(images.length);
+  async function createMediaCards(files: File[], at: { x: number; y: number }) {
+    if (!currentBoardId || files.length === 0) return;
+    const offsets = fanOutOffsets(files.length);
     const created: Card[] = [];
-    for (let i = 0; i < images.length; i++) {
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const isImg = isImageFile(f);
       const ph = {
         id: `up-${i}-${Date.now()}`,
         x: at.x + offsets[i].dx,
         y: at.y + offsets[i].dy,
         w: 240,
-        h: 180,
+        h: isImg ? 180 : DEFAULT_H.file,
       };
       setUploads((prev) => [...prev, ph]);
       try {
-        const up = await uploadImage(images[i]);
-        const size = initialCardSize(up.naturalW, up.naturalH);
         let card: Card;
-        try {
-          card = await createCard({
-            board_id: currentBoardId,
-            type: 'image',
-            x: ph.x, y: ph.y, w: size.w, h: size.h,
-            payload: {
-              storagePath: up.storagePath,
-              thumbPath: up.thumbPath,
-              naturalW: up.naturalW,
-              naturalH: up.naturalH,
-            },
-          });
-        } catch (err) {
-          // Card row failed after upload → remove the objects (no orphans).
-          const paths = [up.storagePath, ...(up.thumbPath ? [up.thumbPath] : [])];
-          await removeStorageObjects(paths).catch(() => {});
-          throw err;
+        if (isImg) {
+          const up = await uploadImage(f);
+          const size = initialCardSize(up.naturalW, up.naturalH);
+          try {
+            card = await createCard({
+              board_id: currentBoardId,
+              type: 'image',
+              x: ph.x, y: ph.y, w: size.w, h: size.h,
+              payload: {
+                storagePath: up.storagePath,
+                thumbPath: up.thumbPath,
+                naturalW: up.naturalW,
+                naturalH: up.naturalH,
+              },
+            });
+          } catch (err) {
+            // Card row failed after upload → remove the objects (no orphans).
+            const paths = [up.storagePath, ...(up.thumbPath ? [up.thumbPath] : [])];
+            await removeStorageObjects(paths).catch(() => {});
+            throw err;
+          }
+        } else {
+          const up = await uploadFile(f);
+          try {
+            card = await createCard({
+              board_id: currentBoardId,
+              type: 'file',
+              x: ph.x, y: ph.y, w: DEFAULT_W.file, h: DEFAULT_H.file,
+              payload: up,
+            });
+          } catch (err) {
+            await removeStorageObjects([up.storagePath]).catch(() => {});
+            throw err;
+          }
         }
         created.push(card);
         upsertCardLocal(card);
       } catch (err) {
         console.error(err);
-        setStatusMsg(`Could not add image "${images[i].name}".`);
+        setStatusMsg(`Could not add "${f.name}".`);
       } finally {
         setUploads((prev) => prev.filter((u) => u.id !== ph.id));
       }
     }
     if (created.length > 0) {
       setSelectedIds(new Set(created.map((c) => c.id)));
-      getHistory(currentBoardId)?.push(
-        makeCreateCommand(created, created.length > 1 ? 'Add images' : 'Add image'),
-      );
-      setStatusMsg(created.length > 1 ? `Added ${created.length} images.` : 'Added image.');
+      const allImages = created.every((c) => c.type === 'image');
+      const label = created.length === 1
+        ? (allImages ? 'Add image' : 'Add file')
+        : (allImages ? 'Add images' : 'Add files');
+      getHistory(currentBoardId)?.push(makeCreateCommand(created, label));
+      setStatusMsg(created.length > 1 ? `Added ${created.length} cards.` : label + '.');
     }
   }
   // Stable handle for the document-level paste listener.
-  const createImageCardsRef = useRef(createImageCards);
-  createImageCardsRef.current = createImageCards;
+  const createMediaCardsRef = useRef(createMediaCards);
+  createMediaCardsRef.current = createMediaCards;
   const centerCanvasPointRef = useRef(centerCanvasPoint);
   centerCanvasPointRef.current = centerCanvasPoint;
 
-  // Paste an image from the clipboard (canvas scope only — typing keeps
-  // its native paste) → image card at the viewport center.
+  // Paste files from the clipboard (canvas scope only — typing keeps its
+  // native paste) → media cards at the viewport center.
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
       if (isTypingContext(e.target)) return;
-      const files = [...(e.clipboardData?.files ?? [])].filter(isImageFile);
+      const files = [...(e.clipboardData?.files ?? [])];
       if (files.length === 0) return;
       e.preventDefault();
-      createImageCardsRef.current(files, centerCanvasPointRef.current());
+      createMediaCardsRef.current(files, centerCanvasPointRef.current());
     }
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
@@ -557,17 +588,12 @@ export default function Notes() {
     const wrapperPt = { x: e.clientX - r.left, y: e.clientY - r.top };
     const pt = wrapperToCanvas(view, wrapperPt.x, wrapperPt.y);
 
-    // Desktop file drop → image cards at the drop point.
+    // Desktop file drop → media cards at the drop point (images become
+    // image cards, everything else file cards).
     const droppedFiles = [...e.dataTransfer.files];
     if (droppedFiles.length > 0) {
       dropDataRef.current = null;
-      const images = droppedFiles.filter(isImageFile);
-      if (images.length > 0) {
-        createImageCards(images, { x: Math.round(pt.x - 120), y: Math.round(pt.y - 90) });
-      }
-      if (images.length < droppedFiles.length) {
-        setStatusMsg('Only image files can be dropped for now — file cards arrive in a later sprint.');
-      }
+      createMediaCards(droppedFiles, { x: Math.round(pt.x - 120), y: Math.round(pt.y - 90) });
       return;
     }
 
@@ -579,10 +605,10 @@ export default function Notes() {
     const h = DEFAULT_H[type];
     const x = Math.round(pt.x - w / 2);
     const y = Math.round(pt.y - h / 2);
-    // The Image tool opens the file picker; cards appear on file selection.
-    if (type === 'image') {
+    // The Image/File tools open a picker; cards appear on file selection.
+    if (type === 'image' || type === 'file') {
       pendingImagePointRef.current = { x, y };
-      fileInputRef.current?.click();
+      (type === 'image' ? fileInputRef : anyFileInputRef).current?.click();
       return;
     }
     try {
@@ -1370,9 +1396,9 @@ export default function Notes() {
               onDragStart={(e) => onToolbarDragStart(t.type, e)}
               onDragEnd={onToolbarDragEnd}
               onClick={() => {
-                if (t.type === 'image') {
+                if (t.type === 'image' || t.type === 'file') {
                   pendingImagePointRef.current = null; // → viewport center
-                  fileInputRef.current?.click();
+                  (t.type === 'image' ? fileInputRef : anyFileInputRef).current?.click();
                 }
               }}
               title={t.hint}
@@ -1413,6 +1439,11 @@ export default function Notes() {
                   } else if (card.type === 'document') {
                     setDocOverlayId(card.id);
                   } else if (card.type === 'image') {
+                    setLightboxId(card.id);
+                  } else if (
+                    card.type === 'file' &&
+                    fileGroup((card.payload as FilePayload).mimeType, (card.payload as FilePayload).filename) === 'video'
+                  ) {
                     setLightboxId(card.id);
                   }
                 }}
@@ -1557,11 +1588,25 @@ export default function Notes() {
       )}
 
       {lightboxId && (() => {
+        const lbCard = cards.find((c) => c.id === lightboxId);
+        if (!lbCard) return null;
+        if (lbCard.type === 'file') {
+          // Video lightbox: single item, no stepping.
+          return (
+            <MediaLightbox
+              card={lbCard}
+              index={0}
+              count={1}
+              onClose={() => setLightboxId(null)}
+              onNavigate={() => {}}
+            />
+          );
+        }
         const imgs = cards.filter((c) => c.type === 'image');
         const idx = imgs.findIndex((c) => c.id === lightboxId);
         if (idx === -1) return null;
         return (
-          <ImageLightbox
+          <MediaLightbox
             card={imgs[idx]}
             index={idx}
             count={imgs.length}
@@ -1583,7 +1628,21 @@ export default function Notes() {
           if (files.length === 0) return;
           const at = pendingImagePointRef.current ?? centerCanvasPoint();
           pendingImagePointRef.current = null;
-          createImageCards(files, at);
+          createMediaCards(files, at);
+        }}
+      />
+      <input
+        ref={anyFileInputRef}
+        type="file"
+        multiple
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const files = [...(e.target.files ?? [])];
+          e.target.value = '';
+          if (files.length === 0) return;
+          const at = pendingImagePointRef.current ?? centerCanvasPoint();
+          pendingImagePointRef.current = null;
+          createMediaCards(files, at);
         }}
       />
     </div>
@@ -1655,6 +1714,7 @@ function CardView({
       {card.type === 'document' && <DocumentTile card={card} onPatch={onPatch} />}
       {card.type === 'board' && <BoardTile card={card} />}
       {card.type === 'image' && <ImageBody card={card} onPatch={onPatch} />}
+      {card.type === 'file' && <FileBody card={card} />}
       {showResize && (
         <div
           className="nt-resize-se"
@@ -2070,7 +2130,7 @@ function ImageBody({ card, onPatch }: { card: Card; onPatch: (p: Partial<Card>) 
   );
 }
 
-function ImageLightbox({
+function MediaLightbox({
   card,
   index,
   count,
@@ -2083,27 +2143,40 @@ function ImageLightbox({
   onClose: () => void;
   onNavigate: (dir: 1 | -1) => void;
 }) {
-  const payload = card.payload as ImagePayload;
+  const isVideo = card.type === 'file';
+  const imgPayload = card.payload as ImagePayload;
+  const filePayload = card.payload as FilePayload;
+  const storagePath = isVideo ? filePayload.storagePath : imgPayload.storagePath;
+  const caption = isVideo ? filePayload.filename : imgPayload.caption || '';
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     setUrl(null);
     // Lightbox always shows the ORIGINAL, not the canvas rendition.
-    signedMediaUrl(payload.storagePath)
+    signedMediaUrl(storagePath)
       .then((u) => { if (alive) setUrl(u); })
       .catch(console.error);
     return () => { alive = false; };
-  }, [payload.storagePath]);
+  }, [storagePath]);
   return (
     <div className="nt-lightbox" onClick={onClose}>
       {count > 1 && (
         <button className="lb-nav prev" onClick={(e) => { e.stopPropagation(); onNavigate(-1); }} title="Previous (←)">‹</button>
       )}
       <figure className="lb-inner" onClick={(e) => e.stopPropagation()}>
-        {url ? <img src={url} alt={payload.caption || ''} /> : <div className="img-loading" />}
-        {(payload.caption || count > 1) && (
+        {url ? (
+          isVideo ? (
+            // eslint-disable-next-line jsx-a11y/media-has-caption
+            <video src={url} controls autoPlay />
+          ) : (
+            <img src={url} alt={caption} />
+          )
+        ) : (
+          <div className="img-loading" />
+        )}
+        {(caption || count > 1) && (
           <figcaption>
-            <span className="lb-caption">{payload.caption || ''}</span>
+            <span className="lb-caption">{caption}</span>
             {count > 1 && <span className="lb-count">{index + 1} / {count}</span>}
           </figcaption>
         )}
@@ -2114,6 +2187,115 @@ function ImageLightbox({
       <button className="lb-close" onClick={onClose} title="Close (Esc)">close</button>
     </div>
   );
+}
+
+// ── File card body ──────────────────────────────────────────────────────
+
+function FileBody({ card }: { card: Card }) {
+  const payload = card.payload as FilePayload;
+  const group = fileGroup(payload.mimeType, payload.filename);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
+  // Audio cards get an inline player.
+  useEffect(() => {
+    if (group !== 'audio') return;
+    let alive = true;
+    signedMediaUrl(payload.storagePath)
+      .then((u) => { if (alive) setAudioUrl(u); })
+      .catch(console.error);
+    return () => { alive = false; };
+  }, [group, payload.storagePath]);
+
+  async function download() {
+    try {
+      const url = await signedDownloadUrl(payload.storagePath, payload.filename);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = payload.filename;
+      a.click();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+  async function openInTab() {
+    try {
+      const url = await signedMediaUrl(payload.storagePath);
+      window.open(url, '_blank', 'noopener');
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  return (
+    <div className={`file-body group-${group}`}>
+      <div className="file-row">
+        <span className="file-icon">{fileGroupIcon(group)}</span>
+        <div className="file-meta">
+          <div className="file-name" title={payload.filename}>{truncateMiddle(payload.filename)}</div>
+          <div className="file-size">
+            {humanSize(payload.sizeBytes)}
+            {group === 'video' && <span className="file-hint"> · double-click to play</span>}
+          </div>
+        </div>
+        <div className="file-actions">
+          {group === 'pdf' && (
+            <button onClick={openInTab} title="Open PDF in a new tab">open</button>
+          )}
+          <button onClick={download} title="Download">↓</button>
+        </div>
+      </div>
+      {group === 'audio' && audioUrl && (
+        // eslint-disable-next-line jsx-a11y/media-has-caption
+        <audio src={audioUrl} controls preload="none" />
+      )}
+    </div>
+  );
+}
+
+function fileGroupIcon(group: string): JSX.Element {
+  switch (group) {
+    case 'pdf':
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" />
+          <text x="7.5" y="17" fontSize="6.2" stroke="none" fill="currentColor">PDF</text>
+        </svg>
+      );
+    case 'archive':
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <rect x="5" y="4" width="14" height="16" rx="1.5" />
+          <line x1="12" y1="4" x2="12" y2="9" /><rect x="10.5" y="9" width="3" height="3" />
+        </svg>
+      );
+    case 'audio':
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <circle cx="8" cy="17" r="2.5" /><circle cx="17" cy="15" r="2.5" />
+          <path d="M10.5 17V7l9-2v10" />
+        </svg>
+      );
+    case 'video':
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <rect x="4" y="5" width="16" height="14" rx="1.5" />
+          <path d="M10 9.5v5l4.5-2.5z" />
+        </svg>
+      );
+    case 'doc':
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" />
+          <line x1="8.5" y1="12" x2="15.5" y2="12" /><line x1="8.5" y1="15" x2="15.5" y2="15" />
+        </svg>
+      );
+    default:
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <path d="M6 3h8l4 4v14H6z" /><path d="M14 3v4h4" />
+        </svg>
+      );
+  }
 }
 
 // ── Trash drawer ────────────────────────────────────────────────────────
@@ -2260,6 +2442,7 @@ function trashPreview(t: TrashEntry): string {
     if (c.type === 'link')     return p.title || p.url || '(link)';
     if (c.type === 'document') return p.title || '(document)';
     if (c.type === 'image')    return p.caption || '(image)';
+    if (c.type === 'file')     return p.filename || '(file)';
     return c.type;
   }
   if (t.kind === 'board') {
@@ -2341,6 +2524,14 @@ function toolIcon(type: CardType): JSX.Element {
           <rect x="4" y="5" width="16" height="14" rx="1.5" />
           <circle cx="9" cy="10" r="1.6" />
           <path d="M4 17l5-5 4 4 3-3 4 4" />
+        </svg>
+      );
+    case 'file':
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <path d="M6 3h8l4 4v14H6z" />
+          <path d="M14 3v4h4" />
+          <path d="M9 14l2 2 4-4" />
         </svg>
       );
   }

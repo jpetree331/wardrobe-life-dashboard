@@ -560,6 +560,40 @@
   animation: nt-shimmer 1.2s ease-in-out infinite;
 }
 
+/* File card */
+.nt-card.type-file { padding: 12px 14px; min-width: 200px; }
+.nt-card.type-file .file-body { display: flex; flex-direction: column; gap: 8px; }
+.nt-card.type-file .file-row { display: flex; align-items: center; gap: 10px; }
+.nt-card.type-file .file-icon { flex-shrink: 0; color: var(--ink-soft); }
+.nt-card.type-file .file-icon .ic-svg { width: 26px; height: 26px; }
+.nt-card.type-file .file-meta { flex: 1; min-width: 0; }
+.nt-card.type-file .file-name {
+  font-family: var(--notes-font-body);
+  font-size: 13.5px; color: var(--ink);
+  white-space: nowrap; overflow: hidden;
+}
+.nt-card.type-file .file-size {
+  font-family: var(--notes-font-body); font-style: italic;
+  font-size: 11px; color: var(--ink-faint);
+}
+.nt-card.type-file .file-hint { font-size: 10.5px; }
+.nt-card.type-file .file-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.nt-card.type-file .file-actions button {
+  background: transparent; border: 1px solid var(--line);
+  color: var(--ink-soft); cursor: pointer;
+  font-family: var(--notes-font-body); font-size: 11.5px;
+  padding: 3px 8px; border-radius: var(--notes-control-radius);
+}
+.nt-card.type-file .file-actions button:hover { color: var(--ink); border-color: var(--ink-soft); }
+.nt-card.type-file audio { width: 100%; height: 32px; }
+
+/* Video in the lightbox */
+.nt-lightbox .lb-inner video {
+  max-width: 100%; max-height: calc(100vh - 140px);
+  box-shadow: 0 30px 90px -30px rgba(0,0,0,0.6);
+  background: #000;
+}
+
 /* Upload placeholder on the canvas */
 .nt-upload-ph {
   position: absolute;
