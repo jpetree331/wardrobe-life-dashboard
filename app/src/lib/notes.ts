@@ -485,6 +485,20 @@ export async function softDeleteTodoItem(
   return { card: updated, trashId: (tRow as { id: string }).id };
 }
 
+/** Every board of the current user (client-side search index). */
+export async function listAllBoards(): Promise<Board[]> {
+  const { data, error } = await supabase.from('notes_boards').select('*');
+  if (error) throw error;
+  return (data as Board[]) || [];
+}
+
+/** Every card of the current user (client-side search index). */
+export async function listAllCards(): Promise<Card[]> {
+  const { data, error } = await supabase.from('notes_cards').select('*');
+  if (error) throw error;
+  return (data as Card[]) || [];
+}
+
 // ── Arrows ─────────────────────────────────────────────────────────────
 
 export async function listArrows(boardId: string): Promise<Arrow[]> {

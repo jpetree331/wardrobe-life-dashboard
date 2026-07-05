@@ -42,3 +42,31 @@ export function saveSavedView(boardId: string, view: View): void {
     // Best-effort; losing the saved view is harmless.
   }
 }
+
+// ── Recently visited boards (quick-switcher + sidebar) ─────────────────
+
+const RECENTS_KEY = 'notes-recent-boards';
+const RECENTS_MAX = 8;
+
+export type RecentBoard = { id: string; name: string };
+
+export function loadRecentBoards(): RecentBoard[] {
+  try {
+    const raw = window.localStorage.getItem(RECENTS_KEY);
+    const list = raw ? (JSON.parse(raw) as RecentBoard[]) : [];
+    return Array.isArray(list)
+      ? list.filter((r) => typeof r?.id === 'string' && typeof r?.name === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function pushRecentBoard(id: string, name: string): void {
+  try {
+    const list = [{ id, name }, ...loadRecentBoards().filter((r) => r.id !== id)].slice(0, RECENTS_MAX);
+    window.localStorage.setItem(RECENTS_KEY, JSON.stringify(list));
+  } catch {
+    // Best-effort.
+  }
+}

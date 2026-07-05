@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
 } from 'react';
+// (useMemo is used by the search overlay)
 import { Link } from 'react-router-dom';
 import {
   type Board,
@@ -97,7 +98,9 @@ import {
 } from '../lib/notesEditor';
 import { SHORTCUT_CATEGORIES, SHORTCUTS } from '../lib/notesShortcutRegistry';
 import { stepOrder, type ZStep } from '../lib/notesZOrder';
-import { loadSavedView, saveSavedView } from '../lib/notesViewStore';
+import { loadRecentBoards, loadSavedView, pushRecentBoard, saveSavedView } from '../lib/notesViewStore';
+import { listAllBoards, listAllCards } from '../lib/notes';
+import { searchBoards, searchCards, type BoardHit, type CardHit } from '../lib/notesSearch';
 import { marqueeHits, normalizeRect, type Rect } from '../lib/notesMarquee';
 import { useFavicon } from '../hooks/useFavicon';
 import './Notes.css';
@@ -189,8 +192,10 @@ export default function Notes() {
   const [docOverlayId, setDocOverlayId] = useState<string | null>(null);
   const [lightboxId, setLightboxId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
-  // Placeholder until Sprint 16's real search replaces it.
-  const [searchStubOpen, setSearchStubOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Card to flash-highlight after a search jump.
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const pendingFocusRef = useRef<string | null>(null);
   // In-flight image uploads, shown as shimmer placeholders on the canvas.
   const [uploads, setUploads] = useState<Array<{ id: string; x: number; y: number; w: number; h: number }>>([]);
   const [statusMsg, setStatusMsg] = useState('Drag a card type onto the canvas. Scroll to pan, ⌘+scroll to zoom.');
@@ -337,6 +342,13 @@ export default function Notes() {
       }
       viewRestoredFor.current = boardId;
       const cur = chain[chain.length - 1];
+      if (cur) pushRecentBoard(cur.id, cur.name);
+      // Search jump: once the target board is loaded, center + flash.
+      if (pendingFocusRef.current) {
+        const focusId = pendingFocusRef.current;
+        pendingFocusRef.current = null;
+        window.setTimeout(() => focusFoundCardRef.current(focusId), 90);
+      }
       setStatusMsg(
         `${cardList.length} item${cardList.length === 1 ? '' : 's'} on "${cur?.name || 'Home'}"`,
       );
@@ -1660,6 +1672,67 @@ export default function Notes() {
     document.addEventListener('mouseup', onUp);
   }
 
+  // ── Search jump target focusing (Sprint 16) ───────────────────────────
+  const focusFoundCard = useCallback(
+    (cardId: string) => {
+      const card = cardsRef.current.find((c) => c.id === cardId);
+      if (!card) return;
+      const wrap = wrapRef.current;
+      const centerOn = (c: Card) => {
+        if (!wrap) return;
+        const r = wrap.getBoundingClientRect();
+        const rect = { x: c.x, y: c.y, w: c.w ?? DEFAULT_W[c.type], h: c.h ?? DEFAULT_H[c.type] };
+        setView(viewCenteredOnContent([rect], r.width, r.height, 1));
+      };
+      if (card.parent_column) {
+        const parent = cardsRef.current.find((c) => c.id === card.parent_column);
+        if (parent && isInboxColumn(parent)) {
+          setInboxOpen(true);
+        } else if (parent) {
+          centerOn(parent);
+        }
+      } else {
+        centerOn(card);
+      }
+      setFlashId(cardId);
+    },
+    [],
+  );
+  const focusFoundCardRef = useRef(focusFoundCard);
+  focusFoundCardRef.current = focusFoundCard;
+
+  // Flash-highlight (and scroll to) the found card for ~1.6s.
+  useEffect(() => {
+    if (!flashId) return;
+    const el = document.querySelector<HTMLElement>(
+      `[data-card-id="${flashId}"], [data-member-id="${flashId}"]`,
+    );
+    el?.classList.add('nt-flash');
+    el?.scrollIntoView?.({ block: 'nearest' });
+    const t = window.setTimeout(() => {
+      el?.classList.remove('nt-flash');
+      setFlashId(null);
+    }, 1600);
+    return () => {
+      window.clearTimeout(t);
+      el?.classList.remove('nt-flash');
+    };
+  }, [flashId]);
+
+  function jumpToBoard(boardId: string) {
+    setSearchOpen(false);
+    if (boardId !== currentBoardId) setCurrentBoardId(boardId);
+  }
+  function jumpToCard(card: Card) {
+    setSearchOpen(false);
+    if (card.board_id === currentBoardId) {
+      focusFoundCard(card.id);
+    } else {
+      pendingFocusRef.current = card.id;
+      setCurrentBoardId(card.board_id);
+    }
+  }
+
   // ── Unsorted inbox panel (Sprint 15) ───────────────────────────────────
   // A reserved system column per board (payload { system: 'inbox' }),
   // created lazily, rendered as a docked right panel instead of a canvas
@@ -2152,8 +2225,8 @@ export default function Notes() {
           (document.activeElement as HTMLElement | null)?.blur();
         } else if (helpOpen) {
           setHelpOpen(false);
-        } else if (searchStubOpen) {
-          setSearchStubOpen(false);
+        } else if (searchOpen) {
+          setSearchOpen(false);
         } else if (lightboxId) {
           setLightboxId(null);
         } else if (docOverlayId) {
@@ -2237,7 +2310,7 @@ export default function Notes() {
         }
         if (e.key === 'f' || e.key === 'F') {
           e.preventDefault();
-          setSearchStubOpen(true);
+          setSearchOpen(true);
           return;
         }
         if ((e.key === 'u' || e.key === 'U') && e.shiftKey) {
@@ -2330,7 +2403,7 @@ export default function Notes() {
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge, selectedArrowId, arrows, arrowMenu, arrowLabelEditId, deleteArrowCmd, helpOpen, searchStubOpen, toggleInbox]);
+  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge, selectedArrowId, arrows, arrowMenu, arrowLabelEditId, deleteArrowCmd, helpOpen, searchOpen, toggleInbox]);
 
   // ── Floating format toolbar ───────────────────────────────────────────
   // Show when the user makes a non-collapsed selection inside a Note body
@@ -3133,14 +3206,12 @@ export default function Notes() {
 
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
 
-      {searchStubOpen && (
-        <div className="nt-help-overlay" onClick={() => setSearchStubOpen(false)}>
-          <div className="nt-help-panel nt-search-stub" onClick={(e) => e.stopPropagation()}>
-            <h3>Search</h3>
-            <p>Global search across boards and cards arrives in a later sprint — the Cmd/Ctrl+F keybinding is already wired to this spot.</p>
-            <button className="btn-quiet" onClick={() => setSearchStubOpen(false)}>close</button>
-          </div>
-        </div>
+      {searchOpen && (
+        <SearchOverlay
+          onClose={() => setSearchOpen(false)}
+          onJumpBoard={jumpToBoard}
+          onJumpCard={jumpToCard}
+        />
       )}
 
       {docCard && (
@@ -4140,6 +4211,158 @@ function fileGroupIcon(group: string): JSX.Element {
         </svg>
       );
   }
+}
+
+// ── Global search / quick switcher (Sprint 16) ──────────────────────────
+// Client-side index: boards + cards are re-fetched every time the overlay
+// opens (single-user scale), so freshly typed content is findable and
+// trashed cards never appear (their rows are gone).
+
+function SearchOverlay({
+  onClose,
+  onJumpBoard,
+  onJumpCard,
+}: {
+  onClose: () => void;
+  onJumpBoard: (boardId: string) => void;
+  onJumpCard: (card: Card) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [boards, setBoards] = useState<Board[]>([]);
+  const [allCards, setAllCards] = useState<Card[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [sel, setSel] = useState(0);
+  const recents = useMemo(() => loadRecentBoards(), []);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([listAllBoards(), listAllCards()])
+      .then(([b, c]) => {
+        if (!alive) return;
+        setBoards(b);
+        setAllCards(c.filter((card) => !isInboxColumn(card)));
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error(err);
+        if (alive) setLoading(false);
+      });
+    return () => { alive = false; };
+  }, []);
+
+  const boardHits: BoardHit[] = useMemo(
+    () => searchBoards(query, boards),
+    [query, boards],
+  );
+  const cardHits: CardHit[] = useMemo(
+    () => searchCards(query, allCards, boards),
+    [query, allCards, boards],
+  );
+  const total = query.trim() ? boardHits.length + cardHits.length : recents.length;
+  const clampedSel = Math.min(sel, Math.max(0, total - 1));
+
+  function activate(index: number) {
+    if (!query.trim()) {
+      const r = recents[index];
+      if (r) onJumpBoard(r.id);
+      return;
+    }
+    if (index < boardHits.length) onJumpBoard(boardHits[index].board.id);
+    else {
+      const hit = cardHits[index - boardHits.length];
+      if (hit) onJumpCard(hit.card);
+    }
+  }
+
+  return (
+    <div className="nt-help-overlay" onClick={onClose}>
+      <div className="nt-search-panel" onClick={(e) => e.stopPropagation()}>
+        <input
+          className="nt-search-input"
+          autoFocus
+          placeholder={loading ? 'Indexing…' : 'Search boards and cards…'}
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setSel(0);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setSel((s) => Math.min(s + 1, Math.max(0, total - 1)));
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setSel((s) => Math.max(0, s - 1));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              activate(clampedSel);
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              onClose();
+            }
+          }}
+        />
+        <div className="nt-search-results">
+          {!query.trim() ? (
+            <>
+              <div className="nt-search-group">Recent boards</div>
+              {recents.length === 0 && <div className="nt-search-empty">No recent boards yet.</div>}
+              {recents.map((r, i) => (
+                <button
+                  key={r.id}
+                  className={`nt-search-row${i === clampedSel ? ' active' : ''}`}
+                  onMouseEnter={() => setSel(i)}
+                  onClick={() => onJumpBoard(r.id)}
+                >
+                  <span className="row-icon">▦</span>
+                  <span className="row-main">{r.name}</span>
+                </button>
+              ))}
+            </>
+          ) : (
+            <>
+              {boardHits.length > 0 && <div className="nt-search-group">Boards</div>}
+              {boardHits.map((h, i) => (
+                <button
+                  key={h.board.id}
+                  className={`nt-search-row${i === clampedSel ? ' active' : ''}`}
+                  onMouseEnter={() => setSel(i)}
+                  onClick={() => onJumpBoard(h.board.id)}
+                >
+                  <span className="row-icon">▦</span>
+                  <span className="row-main">{h.board.name}</span>
+                  <span className="row-path">{h.path.slice(0, -1).join(' › ')}</span>
+                </button>
+              ))}
+              {cardHits.length > 0 && <div className="nt-search-group">Cards</div>}
+              {cardHits.map((h, i) => {
+                const idx = boardHits.length + i;
+                return (
+                  <button
+                    key={h.card.id}
+                    className={`nt-search-row${idx === clampedSel ? ' active' : ''}`}
+                    onMouseEnter={() => setSel(idx)}
+                    onClick={() => onJumpCard(h.card)}
+                  >
+                    <span className="row-icon">{h.card.type === 'todo' ? '☑' : h.card.type === 'link' ? '⧉' : h.card.type === 'image' ? '▣' : '≡'}</span>
+                    <span className="row-main snippet">
+                      {h.snippet.before}
+                      <mark>{h.snippet.match}</mark>
+                      {h.snippet.after}
+                    </span>
+                    <span className="row-path">{h.path.join(' › ')}</span>
+                  </button>
+                );
+              })}
+              {boardHits.length === 0 && cardHits.length === 0 && !loading && (
+                <div className="nt-search-empty">Nothing matches “{query}”.</div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Keyboard-shortcut help overlay (rendered FROM the registry) ─────────

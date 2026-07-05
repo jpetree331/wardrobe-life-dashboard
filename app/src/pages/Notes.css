@@ -1330,10 +1330,68 @@
 }
 .nt-help-row .label { color: var(--ink); }
 .nt-help-row .when { color: var(--ink-faint); font-size: 11.5px; }
-.nt-search-stub { max-width: 420px; }
-.nt-search-stub p {
+/* Search / quick switcher */
+.nt-search-panel {
+  width: 620px; max-width: calc(100vw - 60px);
+  max-height: min(560px, calc(100vh - 120px));
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 30px 90px -30px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column;
+  align-self: flex-start; margin-top: 8vh;
+}
+.nt-search-input {
+  border: 0; outline: none; background: transparent;
+  font-family: var(--notes-font-body); font-size: 18px;
+  color: var(--ink);
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.nt-search-input::placeholder { color: var(--ink-faint); font-style: italic; }
+.nt-search-results { overflow-y: auto; padding: 6px 0 10px; }
+.nt-search-group {
+  font-family: var(--notes-font-display);
+  font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 10px 20px 4px;
+}
+.nt-search-row {
+  display: flex; align-items: baseline; gap: 10px;
+  width: 100%; text-align: left;
+  background: transparent; border: 0; cursor: pointer;
+  padding: 7px 20px;
   font-family: var(--notes-font-body); font-size: 14px;
-  color: var(--ink-soft); line-height: 1.5;
+  color: var(--ink);
+}
+.nt-search-row.active { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+.nt-search-row .row-icon { color: var(--ink-faint); flex-shrink: 0; font-size: 12px; }
+.nt-search-row .row-main {
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nt-search-row .row-main mark {
+  background: color-mix(in oklab, var(--accent) 30%, transparent);
+  color: inherit; border-radius: 2px; padding: 0 1px;
+}
+.nt-search-row .row-path {
+  flex-shrink: 0; max-width: 40%;
+  font-size: 11px; font-style: italic; color: var(--ink-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nt-search-empty {
+  padding: 18px 20px;
+  font-family: var(--notes-font-body); font-style: italic;
+  color: var(--ink-faint);
+}
+
+/* Flash highlight after a search jump */
+.nt-flash {
+  animation: nt-flash-pulse 1.6s ease-out;
+}
+@keyframes nt-flash-pulse {
+  0%   { box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 80%, transparent); }
+  60%  { box-shadow: 0 0 0 6px color-mix(in oklab, var(--accent) 35%, transparent); }
+  100% { box-shadow: 0 0 0 8px transparent; }
 }
 
 /* Status footer */
