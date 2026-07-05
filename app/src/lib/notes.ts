@@ -292,6 +292,8 @@ export async function updateCard(id: string, patch: Partial<{
   payload: CardPayload;
   parent_column: string | null;
   column_index: number | null;
+  // Cross-board moves (drop on a board tile / breadcrumb, Sprint 14).
+  board_id: string;
   // `type` is patchable specifically to support Note → Document conversion.
   // The DB CHECK constraint still enforces the allowed set.
   type: CardType;

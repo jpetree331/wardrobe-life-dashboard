@@ -165,6 +165,11 @@ export default function Notes() {
   const [colDrop, setColDrop] = useState<{ colId: string; index: number } | null>(null);
   // Member row being dragged out of / within a column (styling).
   const [memberDragId, setMemberDragId] = useState<string | null>(null);
+  // Cards mid-drag (lift/tilt styling), board tile charging up to open,
+  // and the breadcrumb currently hovered as a drop target (Sprint 14).
+  const [draggingIds, setDraggingIds] = useState<Set<string>>(new Set());
+  const [boardHoverId, setBoardHoverId] = useState<string | null>(null);
+  const [crumbHoverId, setCrumbHoverId] = useState<string | null>(null);
   // Arrows (Sprint 9).
   const [arrows, setArrows] = useState<Arrow[]>([]);
   const [selectedArrowId, setSelectedArrowId] = useState<string | null>(null);
@@ -500,12 +505,74 @@ export default function Notes() {
     const canJoinColumn = ![...movingIds].some(
       (id) => cards.find((c) => c.id === id)?.type === 'column',
     );
+    // Alt/Option held at drag start = drag out a DUPLICATE (Sprint 14).
+    const altDuplicate = e.altKey;
     const startX = e.clientX;
     const startY = e.clientY;
     const k = view.k;
+    const wrapRect = wrapRef.current?.getBoundingClientRect() ?? null;
+
+    const restoreStartPositions = () =>
+      setCards((prev) =>
+        prev.map((c) => {
+          const p = startPositions.get(c.id);
+          return p ? { ...c, x: p.x, y: p.y } : c;
+        }),
+      );
+
+    /** Board tile (not being dragged) under the cursor, model-space. */
+    const boardTileAt = (clientX: number, clientY: number): Card | null => {
+      if (!wrapRect) return null;
+      const pt = wrapperToCanvas(view, clientX - wrapRect.left, clientY - wrapRect.top);
+      return (
+        cardsRef.current
+          .filter((c) => c.type === 'board' && c.board_ref && !c.parent_column && !movingIds.has(c.id))
+          .sort((a, b) => b.z - a.z)
+          .find((c) => {
+            const cr = { x: c.x, y: c.y, w: c.w ?? DEFAULT_W.board, h: c.h ?? DEFAULT_H.board };
+            return pt.x >= cr.x && pt.x <= cr.x + cr.w && pt.y >= cr.y && pt.y <= cr.y + cr.h;
+          }) ?? null
+      );
+    };
+    const crumbAt = (clientX: number, clientY: number): string | null => {
+      const el = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+      const crumb = el?.closest<HTMLElement>('.crumb[data-board-id]');
+      // The current board isn't a meaningful drop target.
+      const id = crumb?.dataset.boardId ?? null;
+      return id && id !== currentBoardId ? id : null;
+    };
+
+    let dragStarted = false;
+    let hoverTileId: string | null = null;
+    let hoverTimer: number | null = null;
+    let finished = false;
+    const clearHover = () => {
+      if (hoverTimer) window.clearTimeout(hoverTimer);
+      hoverTimer = null;
+      hoverTileId = null;
+      setBoardHoverId(null);
+    };
+    const cleanup = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      clearHover();
+      setColDrop(null);
+      setCrumbHoverId(null);
+      setDraggingIds(new Set());
+    };
+    const movingCardsNow = () =>
+      [...startPositions.keys()]
+        .map((id) => cardsRef.current.find((c) => c.id === id))
+        .filter((c): c is Card => Boolean(c));
+
     const onMove = (ev: MouseEvent) => {
+      if (finished) return;
       const dx = (ev.clientX - startX) / k;
       const dy = (ev.clientY - startY) / k;
+      if (!dragStarted && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
+        dragStarted = true;
+        setDraggingIds(new Set(movingIds));
+      }
       setCards((prev) =>
         prev.map((c) => {
           const p = startPositions.get(c.id);
@@ -513,14 +580,63 @@ export default function Notes() {
         }),
       );
       setColDrop(canJoinColumn ? computeColumnDrop(ev.clientX, ev.clientY) : null);
+      setCrumbHoverId(crumbAt(ev.clientX, ev.clientY));
+
+      // Hover-to-open: hold over a board tile ~1s → cards move there and
+      // the board opens (charge-up ring during the hold).
+      const tile = boardTileAt(ev.clientX, ev.clientY);
+      if ((tile?.id ?? null) !== hoverTileId) {
+        clearHover();
+        if (tile && tile.board_ref) {
+          hoverTileId = tile.id;
+          setBoardHoverId(tile.id);
+          hoverTimer = window.setTimeout(() => {
+            finished = true;
+            cleanup();
+            restoreStartPositions();
+            const name = (tile.payload as { name?: string }).name || 'board';
+            moveCardsToBoard(movingCardsNow(), tile.board_ref!, name).then(() => {
+              setCurrentBoardId(tile.board_ref!);
+            });
+          }, 1000);
+        }
+      }
     };
     const onUp = (ev: MouseEvent) => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      setColDrop(null);
+      if (finished) return;
+      finished = true;
+      cleanup();
       const dx = (ev.clientX - startX) / k;
       const dy = (ev.clientY - startY) / k;
       if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) return;
+
+      // Alt-drag: the original never moves — a copy lands at the drop spot.
+      if (altDuplicate) {
+        restoreStartPositions();
+        duplicateCards(movingCardsNow().map((c) => {
+          const p = startPositions.get(c.id)!;
+          return { ...c, x: p.x, y: p.y };
+        }), Math.round(dx), Math.round(dy));
+        return;
+      }
+
+      // Direct drop on a board tile → move the cards into that board.
+      const tile = boardTileAt(ev.clientX, ev.clientY);
+      if (tile?.board_ref) {
+        restoreStartPositions();
+        const name = (tile.payload as { name?: string }).name || 'board';
+        moveCardsToBoard(movingCardsNow(), tile.board_ref, name);
+        return;
+      }
+
+      // Drop on a breadcrumb → move the cards up-tree to that ancestor.
+      const crumbTarget = crumbAt(ev.clientX, ev.clientY);
+      if (crumbTarget) {
+        restoreStartPositions();
+        const target = ancestry.find((b) => b.id === crumbTarget);
+        moveCardsToBoard(movingCardsNow(), crumbTarget, target?.name || 'board');
+        return;
+      }
 
       // Dropped over a column → the whole selection joins it, ordered by
       // its current vertical position.
@@ -528,12 +644,7 @@ export default function Notes() {
       if (drop) {
         // Restore the original free positions first so lastFreeX/Y (and an
         // undo) reflect where the drag STARTED, not the drop pixel.
-        setCards((prev) =>
-          prev.map((c) => {
-            const p = startPositions.get(c.id);
-            return p ? { ...c, x: p.x, y: p.y } : c;
-          }),
-        );
+        restoreStartPositions();
         const ordered = [...startPositions.keys()].sort((a, b) => {
           const ca = startPositions.get(a)!;
           const cb = startPositions.get(b)!;
@@ -1276,18 +1387,18 @@ export default function Notes() {
   deleteCardsRef.current = deleteCards;
 
   const duplicateCards = useCallback(
-    async (targets: Card[]) => {
+    async (targets: Card[], offsetX = 16, offsetY = 16) => {
       if (targets.length === 0 || !currentBoardId) return;
       setCtxMenu(null);
       try {
         const dups: Card[] = [];
         const memberDups: Card[] = [];
-        // Uniform +16/+16 offset preserves the group's relative layout.
+        // A uniform offset preserves the group's relative layout.
         for (const card of targets) {
           const dup = await createCard({
             board_id: currentBoardId,
             type: card.type,
-            x: card.x + 16, y: card.y + 16,
+            x: card.x + offsetX, y: card.y + offsetY,
             w: card.w ?? undefined, h: card.h ?? undefined,
             color: card.color,
             payload: structuredClone(card.payload as any),
@@ -1720,6 +1831,87 @@ export default function Notes() {
     [currentBoardId, getHistory, upsertArrowLocal],
   );
 
+  // ── Cross-board move (drop on board tile / breadcrumb, Sprint 14) ─────
+  // Arrows do NOT follow cards across boards — they're soft-deleted with a
+  // status note (and return if the move is undone).
+  const moveCardsToBoard = useCallback(
+    async (targets: Card[], targetBoardId: string, targetName: string) => {
+      if (!currentBoardId) return;
+      const fromBoardId = currentBoardId;
+      // Only free cards travel; a tile can't move into its own board.
+      const moving = targets.filter(
+        (t) => !t.parent_column && !(t.type === 'board' && t.board_ref === targetBoardId),
+      );
+      if (moving.length === 0) return;
+      const movingIds = new Set(moving.map((m) => m.id));
+      // Columns carry their members.
+      const memberRows: Card[] = [];
+      for (const t of moving) {
+        if (t.type === 'column') {
+          memberRows.push(...cardsRef.current.filter((c) => c.parent_column === t.id));
+        }
+      }
+      const allIds = new Set([...movingIds, ...memberRows.map((m) => m.id)]);
+      const attachedArrows = arrowsRef.current.filter(
+        (a) => allIds.has(a.from_card) || allIds.has(a.to_card),
+      );
+      const origPositions = moving.map((m) => ({ id: m.id, x: m.x, y: m.y }));
+      const destPositions = moving.map((m, i) => ({ id: m.id, x: 80 + i * 32, y: 80 + i * 32 }));
+      try {
+        const arrowSnapshots = attachedArrows.slice();
+        const arrowTrashIds: string[] = [];
+        for (const a of attachedArrows) {
+          removeArrowLocal(a.id);
+          arrowTrashIds.push(await softDeleteArrow(a));
+        }
+        for (let i = 0; i < moving.length; i++) {
+          await updateCard(moving[i].id, { board_id: targetBoardId, ...destPositions[i] });
+        }
+        for (const m of memberRows) await updateCard(m.id, { board_id: targetBoardId });
+        removeCardsLocal(allIds);
+        clearSelection();
+        setStatusMsg(
+          `Moved ${moving.length} card${moving.length === 1 ? '' : 's'} to "${targetName}".` +
+            (attachedArrows.length ? ' Attached arrows went to the trash.' : ''),
+        );
+        getHistory(fromBoardId)?.push({
+          label: `Move ${moving.length === 1 ? 'card' : `${moving.length} cards`} to "${targetName}"`,
+          undo: async () => {
+            for (let i = 0; i < moving.length; i++) {
+              const row = await updateCard(moving[i].id, { board_id: fromBoardId, x: origPositions[i].x, y: origPositions[i].y });
+              upsertCardLocal(row);
+            }
+            for (const m of memberRows) {
+              const row = await updateCard(m.id, { board_id: fromBoardId });
+              upsertCardLocal(row);
+            }
+            for (let i = 0; i < arrowSnapshots.length; i++) {
+              const row = await insertArrowRow(arrowSnapshots[i]);
+              upsertArrowLocal(row);
+              await removeTrashEntry(arrowTrashIds[i]);
+            }
+          },
+          do: async () => {
+            for (let i = 0; i < arrowSnapshots.length; i++) {
+              removeArrowLocal(arrowSnapshots[i].id);
+              arrowTrashIds[i] = await softDeleteArrow(arrowSnapshots[i]);
+            }
+            for (let i = 0; i < moving.length; i++) {
+              await updateCard(moving[i].id, { board_id: targetBoardId, ...destPositions[i] });
+            }
+            for (const m of memberRows) await updateCard(m.id, { board_id: targetBoardId });
+            removeCardsLocal(allIds);
+          },
+        });
+      } catch (err) {
+        console.error(err);
+        setStatusMsg('Could not move cards; refreshing.');
+        loadBoard(fromBoardId);
+      }
+    },
+    [currentBoardId, getHistory, loadBoard, clearSelection, removeCardsLocal, upsertCardLocal, removeArrowLocal, upsertArrowLocal],
+  );
+
   // ── Quick-create + edit-mode focus (Sprint 13) ─────────────────────────
 
   /** Focus a note card's TipTap editor once it has rendered. */
@@ -1731,9 +1923,8 @@ export default function Notes() {
     }, 60);
   }
 
-  async function createNoteAtCenter() {
+  async function createNoteAt(at: { x: number; y: number }) {
     if (!currentBoardId) return;
-    const at = centerCanvasPoint();
     try {
       const card = await createCard({
         board_id: currentBoardId,
@@ -1748,6 +1939,29 @@ export default function Notes() {
     } catch (err) {
       console.error(err);
     }
+  }
+  const createNoteAtCenter = () => createNoteAt(centerCanvasPoint());
+
+  /** Double-click on empty canvas → new note under the cursor, editing. */
+  function onCanvasDoubleClick(e: React.MouseEvent) {
+    const t = e.target as HTMLElement;
+    if (
+      t.closest('.nt-card') ||
+      t.closest('.nt-ctx') ||
+      t.closest('.nt-arrow-hit') ||
+      t.closest('.nt-arrow-label') ||
+      t.closest('.nt-upload-ph')
+    ) {
+      return;
+    }
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const r = wrap.getBoundingClientRect();
+    const pt = wrapperToCanvas(view, e.clientX - r.left, e.clientY - r.top);
+    createNoteAt({
+      x: Math.round(pt.x - DEFAULT_W.note / 2),
+      y: Math.round(pt.y - 24),
+    });
   }
 
   /** [ / ] one z-step; Shift = to back / front. One composite command. */
@@ -2285,7 +2499,8 @@ export default function Notes() {
               return (
                 <span key={b.id}>
                   <button
-                    className={`crumb${last ? ' current' : ''}`}
+                    className={`crumb${last ? ' current' : ''}${crumbHoverId === b.id ? ' drop-hover' : ''}`}
+                    data-board-id={b.id}
                     onClick={() => !last && setCurrentBoardId(b.id)}
                     onDoubleClick={async () => {
                       const name = window.prompt('Rename board', b.name);
@@ -2388,6 +2603,7 @@ export default function Notes() {
           className={`nt-canvas-wrap${spaceHeld ? ' space-pan' : ''}`}
           ref={wrapRef}
           onMouseDown={onCanvasMouseDown}
+          onDoubleClick={onCanvasDoubleClick}
           onDragOver={onCanvasDragOver}
           onDrop={onCanvasDrop}
         >
@@ -2406,6 +2622,8 @@ export default function Notes() {
                 members={card.type === 'column' ? membersOf(card.id) : undefined}
                 dropIndex={colDrop?.colId === card.id ? colDrop.index : null}
                 dropActive={colDrop?.colId === card.id}
+                dragging={draggingIds.has(card.id)}
+                boardCharge={boardHoverId === card.id}
                 onArrowStart={(e) => startArrowDraft(card, e)}
                 renderMember={(m) => (
                   <ColumnMemberRow
@@ -2852,6 +3070,8 @@ function CardView({
   members,
   dropIndex,
   dropActive,
+  dragging,
+  boardCharge,
   renderMember,
   onArrowStart,
   onMouseDown,
@@ -2869,6 +3089,8 @@ function CardView({
   members?: Card[];
   dropIndex?: number | null;
   dropActive?: boolean;
+  dragging?: boolean;
+  boardCharge?: boolean;
   renderMember?: (m: Card) => JSX.Element;
   onArrowStart?: (e: React.MouseEvent) => void;
   onMouseDown: (e: React.MouseEvent) => void;
@@ -2900,7 +3122,7 @@ function CardView({
 
   return (
     <div
-      className={`nt-card type-${card.type}${selected ? ' selected' : ''}${dropActive ? ' col-drop-active' : ''}${resolved ? ' resolved' : ''}`}
+      className={`nt-card type-${card.type}${selected ? ' selected' : ''}${dropActive ? ' col-drop-active' : ''}${resolved ? ' resolved' : ''}${dragging ? ' dragging' : ''}${boardCharge ? ' board-charge' : ''}`}
       data-card-id={card.id}
       style={baseStyle}
       onMouseDown={onMouseDown}

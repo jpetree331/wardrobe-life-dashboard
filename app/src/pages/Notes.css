@@ -267,6 +267,35 @@
 }
 .nt-card:hover .typetag, .nt-card.selected .typetag { opacity: 1; }
 
+/* Drag polish: lift + slight tilt while a card rides the cursor */
+.nt-card.dragging {
+  box-shadow: 0 24px 48px -18px rgba(43,36,25,0.45);
+  transform: rotate(1.6deg);
+  cursor: grabbing;
+  z-index: 20 !important;
+}
+.theme-milanote .nt-card.dragging {
+  box-shadow: 0 14px 30px rgba(0,0,0,0.18);
+  transform: rotate(0.8deg);
+}
+/* Board tile charging up to open (hover-to-open hold) */
+.nt-card.type-board.board-charge .board-tile {
+  outline: 3px solid var(--accent);
+  outline-offset: 5px;
+  animation: nt-charge 1s linear forwards;
+}
+@keyframes nt-charge {
+  from { outline-color: color-mix(in oklab, var(--accent) 25%, transparent); }
+  to   { outline-color: var(--accent); }
+}
+/* Breadcrumb as a live drop target during a card drag */
+.nt-ribbon .crumb.drop-hover {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  border-radius: var(--notes-control-radius);
+}
+
 /* Note card. Card uses flex so the editable body fills the card's interior;
    without this an empty Note's body is zero-height and clicks on the empty
    area below it land on the card background, which triggers the drag
