@@ -4,6 +4,7 @@ import {
   ZOOM_MAX,
   clampZoom,
   fitView,
+  viewCenteredOnContent,
   wrapperToCanvas,
   zoomAroundCursor,
 } from '../src/lib/notesPanZoom';
@@ -61,6 +62,31 @@ describe('wrapperToCanvas', () => {
     // forward by the same view.
     expect(v.x + x * v.k).toBeCloseTo(100);
     expect(v.y + y * v.k).toBeCloseTo(200);
+  });
+});
+
+describe('viewCenteredOnContent', () => {
+  it('returns identity-at-k for an empty board', () => {
+    expect(viewCenteredOnContent([], 1000, 800)).toEqual({ x: 0, y: 0, k: 1 });
+  });
+
+  it('pins the content bbox center to the viewport center at 100%', () => {
+    // Single card 200x100 at (400, 300) → content center (500, 350).
+    const v = viewCenteredOnContent([{ x: 400, y: 300, w: 200, h: 100 }], 1000, 800);
+    expect(v.k).toBe(1);
+    // Canvas point (500,350) should render at wrapper (500,400).
+    expect(v.x + 500 * v.k).toBeCloseTo(500);
+    expect(v.y + 350 * v.k).toBeCloseTo(400);
+  });
+
+  it('keeps 100% zoom even when content overflows the viewport', () => {
+    const v = viewCenteredOnContent([{ x: 0, y: 0, w: 5000, h: 4000 }], 1000, 800);
+    expect(v.k).toBe(1); // never scales — that's fitView's job
+  });
+
+  it('clamps a requested zoom into range', () => {
+    const v = viewCenteredOnContent([{ x: 0, y: 0, w: 100, h: 100 }], 1000, 800, 99);
+    expect(v.k).toBe(ZOOM_MAX);
   });
 });
 

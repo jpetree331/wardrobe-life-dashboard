@@ -52,6 +52,40 @@ export function wrapperToCanvas(view: View, cx: number, cy: number): { x: number
 }
 
 /**
+ * Compute a `View` at the given zoom (default 100%) with the content's
+ * bounding-box center pinned to the viewport center. Used by the Cmd/Ctrl+0
+ * "actual size" shortcut — unlike fitView it never changes what 100% means,
+ * it only recenters.
+ */
+export function viewCenteredOnContent(
+  cards: Array<{ x: number; y: number; w?: number | null; h?: number | null }>,
+  wrapperW: number,
+  wrapperH: number,
+  k = 1,
+): View {
+  const kk = clampZoom(k);
+  if (cards.length === 0 || wrapperW <= 0 || wrapperH <= 0) {
+    return { x: 0, y: 0, k: kk };
+  }
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const c of cards) {
+    const w = c.w ?? 200;
+    const h = c.h ?? 100;
+    if (c.x < minX) minX = c.x;
+    if (c.y < minY) minY = c.y;
+    if (c.x + w > maxX) maxX = c.x + w;
+    if (c.y + h > maxY) maxY = c.y + h;
+  }
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  return {
+    x: wrapperW / 2 - cx * kk,
+    y: wrapperH / 2 - cy * kk,
+    k: kk,
+  };
+}
+
+/**
  * Compute a `View` that fits all cards within the wrapper viewport.
  * `cards` is a list of { x, y, w, h } rectangles in canvas-local units.
  * If there are no cards, returns the default 100% identity view.

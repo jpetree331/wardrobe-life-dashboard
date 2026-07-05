@@ -68,6 +68,24 @@ export function shouldOfferConvert(html: string, dismissed: boolean | undefined)
   return plainTextLength(html) > CONVERT_PROMPT_AT;
 }
 
+/**
+ * True when a keyboard event's target is a text-entry context — an input,
+ * textarea, select, or any contentEditable element. Global canvas shortcuts
+ * (nudge, delete, zoom, select-all…) must not fire while the user is typing.
+ * Centralized here so every keyboard feature shares one definition.
+ */
+export function isTypingContext(target: EventTarget | null): boolean {
+  if (!target || typeof (target as HTMLElement).tagName !== 'string') return false;
+  const el = target as HTMLElement;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (el.isContentEditable === true) return true;
+  // Fallback for environments where isContentEditable isn't implemented
+  // (jsdom): inspect the attribute directly.
+  const ce = el.getAttribute?.('contenteditable');
+  return ce === '' || ce === 'true' || ce === 'plaintext-only';
+}
+
 function stripTags(s: string): string {
   return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
 }

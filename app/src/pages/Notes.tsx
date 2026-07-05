@@ -30,14 +30,17 @@ import {
 import {
   fitView,
   type View,
+  viewCenteredOnContent,
   wrapperToCanvas,
   zoomAroundCursor,
 } from '../lib/notesPanZoom';
 import {
   detectMarkdownSentinel,
   extractTitleFromHtml,
+  isTypingContext,
   shouldOfferConvert,
 } from '../lib/notesShortcuts';
+import { loadSavedView, saveSavedView } from '../lib/notesViewStore';
 import { useFavicon } from '../hooks/useFavicon';
 import './Notes.css';
 
@@ -106,6 +109,11 @@ export default function Notes() {
   }, []);
 
   // ── Load board contents on board change ────────────────────────────────
+  // Guards the view-save debounce: we must not persist the view for a board
+  // until its own saved view has been restored, or the pre-restore default
+  // would clobber the stored one while the board is still loading.
+  const viewRestoredFor = useRef<string | null>(null);
+
   const loadBoard = useCallback(async (boardId: string) => {
     try {
       const [cardList, chain] = await Promise.all([
@@ -115,7 +123,19 @@ export default function Notes() {
       setCards(cardList);
       setAncestry(chain);
       setSelectedId(null);
-      setView({ x: 0, y: 0, k: 1 });
+      // Restore this board's saved view; else fit its cards; else identity.
+      const saved = loadSavedView(boardId);
+      if (saved) {
+        setView(saved);
+      } else {
+        const r = wrapRef.current?.getBoundingClientRect();
+        if (cardList.length > 0 && r) {
+          setView(fitView(cardList.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })), r.width, r.height));
+        } else {
+          setView({ x: 0, y: 0, k: 1 });
+        }
+      }
+      viewRestoredFor.current = boardId;
       const cur = chain[chain.length - 1];
       setStatusMsg(
         `${cardList.length} item${cardList.length === 1 ? '' : 's'} on "${cur?.name || 'Home'}"`,
@@ -129,6 +149,13 @@ export default function Notes() {
   useEffect(() => {
     if (currentBoardId) loadBoard(currentBoardId);
   }, [currentBoardId, loadBoard]);
+
+  // ── Persist view per board (300ms after pan/zoom settles) ─────────────
+  useEffect(() => {
+    if (!currentBoardId || viewRestoredFor.current !== currentBoardId) return;
+    const handle = window.setTimeout(() => saveSavedView(currentBoardId, view), 300);
+    return () => window.clearTimeout(handle);
+  }, [view, currentBoardId]);
 
   // ── Pan/zoom ──────────────────────────────────────────────────────────
   // ctrl/cmd + wheel = zoom, ordinary wheel = pan.
@@ -317,37 +344,98 @@ export default function Notes() {
     };
   }, []);
 
-  // ── Keyboard: Delete sends the selected card to trash ────────────────
-  // Skipped if the user is typing — we look at the current focus and bail
-  // out for any input/textarea/contentEditable element. Backspace is
-  // intentionally not bound: it's too easy to hit while editing text.
+  // ── Keyboard: canvas shortcuts (see lib/notesShortcutRegistry.ts) ─────
+  // All canvas shortcuts are suppressed while typing (input/textarea/
+  // contentEditable — the shared isTypingContext helper), except Esc, which
+  // exits the typing context. Backspace is intentionally not bound to
+  // delete: it's too easy to hit while editing text.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== 'Delete') return;
-      const t = e.target;
-      if (
-        t instanceof HTMLElement &&
-        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
-      ) {
+      const typing = isTypingContext(e.target);
+
+      // Esc — innermost-first: exit editing, then overlay, context menu,
+      // trash drawer, and finally deselect.
+      if (e.key === 'Escape') {
+        if (typing) {
+          (document.activeElement as HTMLElement | null)?.blur();
+        } else if (docOverlayId) {
+          setDocOverlayId(null);
+        } else if (ctxMenu) {
+          setCtxMenu(null);
+        } else if (trashOpen) {
+          setTrashOpen(false);
+        } else if (selectedId) {
+          setSelectedId(null);
+        }
         return;
       }
-      if (!selectedId) return;
-      const card = cards.find((c) => c.id === selectedId);
-      if (!card) return;
-      e.preventDefault();
-      // Inline soft-delete; the regular deleteCard isn't memoized and
-      // would force this effect to re-attach on every render.
-      setCards((prev) => prev.filter((c) => c.id !== card.id));
-      setSelectedId(null);
-      setCtxMenu(null);
-      softDeleteCard(card).catch((err) => {
-        console.error(err);
-        if (currentBoardId) loadBoard(currentBoardId);
-      });
+
+      if (typing) return;
+
+      // Zoom: Mod+= / Mod+- around viewport center; Mod+0 = 100% centered
+      // on content; Mod+Shift+0 = fit all.
+      if (e.ctrlKey || e.metaKey) {
+        const wrap = wrapRef.current;
+        if (!wrap) return;
+        const r = wrap.getBoundingClientRect();
+        if (e.key === '=' || e.key === '+') {
+          e.preventDefault();
+          setView((v) => zoomAroundCursor(v, 1.15, r.width / 2, r.height / 2));
+          return;
+        }
+        if (e.key === '-' || e.key === '_') {
+          e.preventDefault();
+          setView((v) => zoomAroundCursor(v, 1 / 1.15, r.width / 2, r.height / 2));
+          return;
+        }
+        if (e.code === 'Digit0' || e.code === 'Numpad0') {
+          e.preventDefault();
+          const rects = cards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }));
+          setView(
+            e.shiftKey
+              ? fitView(rects, r.width, r.height)
+              : viewCenteredOnContent(rects, r.width, r.height),
+          );
+          return;
+        }
+        return;
+      }
+
+      // Arrow nudge: 1px canvas-space, Shift = 10px.
+      if (
+        selectedId &&
+        (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')
+      ) {
+        const card = cards.find((c) => c.id === selectedId);
+        if (!card) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        scheduleCardSave(card.id, { x: card.x + dx, y: card.y + dy });
+        return;
+      }
+
+      // Delete sends the selected card to trash.
+      if (e.key === 'Delete') {
+        if (!selectedId) return;
+        const card = cards.find((c) => c.id === selectedId);
+        if (!card) return;
+        e.preventDefault();
+        // Inline soft-delete; the regular deleteCard isn't memoized and
+        // would force this effect to re-attach on every render.
+        setCards((prev) => prev.filter((c) => c.id !== card.id));
+        setSelectedId(null);
+        setCtxMenu(null);
+        softDeleteCard(card).catch((err) => {
+          console.error(err);
+          if (currentBoardId) loadBoard(currentBoardId);
+        });
+      }
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [selectedId, cards, currentBoardId, loadBoard]);
+  }, [selectedId, cards, currentBoardId, loadBoard, docOverlayId, ctxMenu, trashOpen, scheduleCardSave]);
 
   // ── Floating format toolbar ───────────────────────────────────────────
   // Show when the user makes a non-collapsed selection inside a Note body

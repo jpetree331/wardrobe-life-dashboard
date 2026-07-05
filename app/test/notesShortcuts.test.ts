@@ -3,6 +3,7 @@ import {
   CONVERT_PROMPT_AT,
   detectMarkdownSentinel,
   extractTitleFromHtml,
+  isTypingContext,
   plainTextLength,
   shouldOfferConvert,
 } from '../src/lib/notesShortcuts';
@@ -64,6 +65,34 @@ describe('extractTitleFromHtml', () => {
 
   it('strips inline formatting from inside the heading', () => {
     expect(extractTitleFromHtml('<h1>Some <em>title</em> here</h1>')).toBe('Some title here');
+  });
+});
+
+describe('isTypingContext', () => {
+  it('is true for input, textarea, and select elements', () => {
+    expect(isTypingContext(document.createElement('input'))).toBe(true);
+    expect(isTypingContext(document.createElement('textarea'))).toBe(true);
+    expect(isTypingContext(document.createElement('select'))).toBe(true);
+  });
+
+  it('is true for contentEditable elements', () => {
+    // React's contentEditable prop renders as this attribute.
+    const div = document.createElement('div');
+    div.setAttribute('contenteditable', 'true');
+    expect(isTypingContext(div)).toBe(true);
+    const bare = document.createElement('div');
+    bare.setAttribute('contenteditable', '');
+    expect(isTypingContext(bare)).toBe(true);
+    const off = document.createElement('div');
+    off.setAttribute('contenteditable', 'false');
+    expect(isTypingContext(off)).toBe(false);
+  });
+
+  it('is false for plain elements, document, and null', () => {
+    expect(isTypingContext(document.createElement('div'))).toBe(false);
+    expect(isTypingContext(document.createElement('button'))).toBe(false);
+    expect(isTypingContext(document)).toBe(false);
+    expect(isTypingContext(null)).toBe(false);
   });
 });
 
