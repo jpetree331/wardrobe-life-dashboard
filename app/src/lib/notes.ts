@@ -14,7 +14,9 @@ export const SWATCHES: SwatchKey[] = [
   'paper', 'saffron', 'rose', 'sage', 'sky', 'violet', 'clay',
 ];
 
-export type CardType = 'note' | 'todo' | 'heading' | 'link' | 'document' | 'board' | 'image' | 'file';
+export type CardType =
+  | 'note' | 'todo' | 'heading' | 'link' | 'document' | 'board'
+  | 'image' | 'file' | 'column';
 
 export type Board = {
   id: string;
@@ -66,7 +68,13 @@ export type CardPayload =
   | { name: string }                                                   // board tile mirror
   | ImagePayload                                                        // image
   | FilePayload                                                         // file
+  | ColumnPayload                                                       // column
   | Record<string, unknown>;                                            // catch-all
+
+export type ColumnPayload = {
+  title: string;
+  collapsed?: boolean;
+};
 
 export type Card = {
   id: string;
@@ -81,6 +89,10 @@ export type Card = {
   color: SwatchKey;
   payload: CardPayload;
   board_ref: string | null;     // populated when type='board'
+  // Column containment (Sprint 8): a card with parent_column set lives
+  // inside that column card at column_index and ignores its x/y.
+  parent_column: string | null;
+  column_index: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -88,7 +100,7 @@ export type Card = {
 export type TrashEntry = {
   id: string;
   user_id: string;
-  kind: 'card' | 'todo_item' | 'board';
+  kind: 'card' | 'todo_item' | 'board' | 'column';
   origin_board: string | null;
   origin_card: string | null;
   snapshot: any;
@@ -182,6 +194,8 @@ export async function createCard(input: {
   color?: SwatchKey;
   payload?: CardPayload;
   board_ref?: string | null;
+  parent_column?: string | null;
+  column_index?: number | null;
 }): Promise<Card> {
   const userId = await currentUserId();
   const { data, error } = await supabase
@@ -197,6 +211,8 @@ export async function createCard(input: {
       color: input.color ?? 'paper',
       payload: input.payload ?? {},
       board_ref: input.board_ref ?? null,
+      parent_column: input.parent_column ?? null,
+      column_index: input.column_index ?? null,
     })
     .select()
     .single();
@@ -250,6 +266,8 @@ export async function updateCard(id: string, patch: Partial<{
   z: number;
   color: SwatchKey;
   payload: CardPayload;
+  parent_column: string | null;
+  column_index: number | null;
   // `type` is patchable specifically to support Note → Document conversion.
   // The DB CHECK constraint still enforces the allowed set.
   type: CardType;
@@ -331,6 +349,8 @@ export async function insertCardRow(card: Card): Promise<Card> {
       color: card.color,
       payload: card.payload,
       board_ref: card.board_ref,
+      parent_column: card.parent_column,
+      column_index: card.column_index,
     })
     .select()
     .single();
@@ -386,6 +406,30 @@ async function snapshotBoardSubtree(rootBoardId: string): Promise<{
     }
   }
   return { boards, cards };
+}
+
+/**
+ * Soft-delete a column WITH its members as one composite, restorable-as-a-
+ * unit trash entry (kind 'column'). Members are snapshotted from the
+ * caller's state; the DB cascade on parent_column removes their rows when
+ * the column row is deleted.
+ */
+export async function softDeleteColumn(column: Card, members: Card[]): Promise<string> {
+  const userId = await currentUserId();
+  const { data: tRow, error: tErr } = await supabase
+    .from('notes_trash')
+    .insert({
+      user_id: userId,
+      kind: 'column',
+      origin_board: column.board_id,
+      snapshot: { column, members },
+    })
+    .select('id')
+    .single();
+  if (tErr) throw tErr;
+  const { error } = await supabase.from('notes_cards').delete().eq('id', column.id);
+  if (error) throw error;
+  return (tRow as { id: string }).id;
 }
 
 /**
@@ -454,6 +498,48 @@ export async function restoreTrash(entry: TrashEntry): Promise<void> {
     if (card) {
       const items = [...(((card.payload as any).items as TodoItem[]) ?? []), item];
       await updateCard(card.id, { payload: { ...(card.payload as any), items } });
+    }
+  } else if (entry.kind === 'column') {
+    // Restore column + members as a unit with FRESH ids (originals may
+    // clash), remapping members' parent_column onto the new column id.
+    const snap = entry.snapshot as { column: Card; members: Card[] };
+    let boardId = snap.column.board_id;
+    const board = await getBoard(boardId);
+    if (!board) {
+      const root = await getOrCreateRootBoard();
+      boardId = root.id;
+    }
+    const { data: newCol, error: cErr } = await supabase
+      .from('notes_cards')
+      .insert({
+        user_id: userId,
+        board_id: boardId,
+        type: 'column',
+        x: snap.column.x, y: snap.column.y,
+        w: snap.column.w, h: snap.column.h, z: snap.column.z,
+        color: snap.column.color,
+        payload: snap.column.payload,
+      })
+      .select()
+      .single();
+    if (cErr) throw cErr;
+    const sorted = [...snap.members].sort(
+      (a, b) => (a.column_index ?? 0) - (b.column_index ?? 0),
+    );
+    for (let i = 0; i < sorted.length; i++) {
+      const m = sorted[i];
+      const { error } = await supabase.from('notes_cards').insert({
+        user_id: userId,
+        board_id: boardId,
+        type: m.type,
+        x: m.x, y: m.y, w: m.w, h: m.h, z: m.z,
+        color: m.color,
+        payload: m.payload,
+        board_ref: m.board_ref,
+        parent_column: (newCol as Card).id,
+        column_index: i,
+      });
+      if (error) throw error;
     }
   }
   // 'board' kind restore: out of scope for v1 — boards going to trash is

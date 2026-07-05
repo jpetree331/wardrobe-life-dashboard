@@ -28,9 +28,12 @@ import {
   renameBoard,
   restoreTrash,
   softDeleteCard,
+  softDeleteColumn,
   softDeleteTodoItem,
   updateCard,
 } from '../lib/notes';
+import type { ColumnPayload } from '../lib/notes';
+import { insertAt, insertionIndexFromY } from '../lib/notesColumns';
 import { BoardHistory, BurstCoalescer, hasUserContent, type Command } from '../lib/notesHistory';
 import type { FilePayload, ImagePayload, LinkPayload } from '../lib/notes';
 import { domainOf, embedUrlFor, isProbablyUrl, type LinkMeta } from '../lib/notesLinkMeta';
@@ -80,6 +83,7 @@ const TOOLBAR_TYPES: Array<{
   { type: 'document', label: 'Document', hint: 'Drag onto canvas' },
   { type: 'image',    label: 'Image',    hint: 'Click to pick, or drop image files on the canvas' },
   { type: 'file',     label: 'File',     hint: 'Click to pick, or drop any file on the canvas' },
+  { type: 'column',   label: 'Column',   hint: 'Drag onto canvas — a list container for cards' },
 ];
 
 const DEFAULT_W: Record<CardType, number> = {
@@ -91,6 +95,7 @@ const DEFAULT_W: Record<CardType, number> = {
   board: 130,
   image: 240,
   file: 250,
+  column: 260,
 };
 const DEFAULT_H: Record<CardType, number> = {
   note: 140,
@@ -101,6 +106,7 @@ const DEFAULT_H: Record<CardType, number> = {
   board: 130,
   image: 180,
   file: 96,
+  column: 120, // columns auto-size; this is only the drop footprint
 };
 
 export default function Notes() {
@@ -117,6 +123,10 @@ export default function Notes() {
   // Space held = pan mode on the canvas (Milanote model: plain drag on
   // empty canvas selects; Space+drag or middle-mouse pans).
   const [spaceHeld, setSpaceHeld] = useState(false);
+  // Live column drop target while dragging cards (highlight + indicator).
+  const [colDrop, setColDrop] = useState<{ colId: string; index: number } | null>(null);
+  // Member row being dragged out of / within a column (styling).
+  const [memberDragId, setMemberDragId] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; cardId: string } | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
   const [trash, setTrash] = useState<TrashEntry[]>([]);
@@ -349,8 +359,9 @@ export default function Notes() {
     const y1 = e.clientY - r.top;
     // View and cards are stable for the duration of the gesture (no pan or
     // edits mid-marquee), so capturing them from this render is safe.
+    // Only free cards live on the canvas plane — members aren't marqueeable.
     const gestureView = view;
-    const gestureCards = cards;
+    const gestureCards = cards.filter((c) => !c.parent_column);
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     const baseSelection = additive ? new Set(selectedIds) : new Set<string>();
     if (!additive) clearSelection();
@@ -376,7 +387,13 @@ export default function Notes() {
     const wrap = wrapRef.current;
     if (!wrap) return;
     const r = wrap.getBoundingClientRect();
-    setView(fitView(cards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })), r.width, r.height));
+    setView(
+      fitView(
+        cards.filter((c) => !c.parent_column).map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
+        r.width,
+        r.height,
+      ),
+    );
   }
 
   // ── Card drag (single or whole selection) ─────────────────────────────
@@ -405,6 +422,10 @@ export default function Notes() {
     for (const c of cards) {
       if (movingIds.has(c.id)) startPositions.set(c.id, { x: c.x, y: c.y });
     }
+    // Columns can't nest, so a drag containing a column never targets one.
+    const canJoinColumn = ![...movingIds].some(
+      (id) => cards.find((c) => c.id === id)?.type === 'column',
+    );
     const startX = e.clientX;
     const startY = e.clientY;
     const k = view.k;
@@ -417,37 +438,59 @@ export default function Notes() {
           return p ? { ...c, x: p.x + dx, y: p.y + dy } : c;
         }),
       );
+      setColDrop(canJoinColumn ? computeColumnDrop(ev.clientX, ev.clientY) : null);
     };
     const onUp = (ev: MouseEvent) => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      setColDrop(null);
       const dx = (ev.clientX - startX) / k;
       const dy = (ev.clientY - startY) / k;
-      // Persist all moved cards if the gesture actually moved; one history
-      // command per gesture covering the whole group.
-      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
-        const moves = [...startPositions].map(([id, p]) => ({
-          id,
-          from: p,
-          to: { x: p.x + dx, y: p.y + dy },
-        }));
-        for (const m of moves) updateCard(m.id, m.to).catch(console.error);
-        getHistory(currentBoardId)?.push({
-          label: moves.length > 1 ? `Move ${moves.length} cards` : 'Move',
-          undo: async () => {
-            for (const m of moves) {
-              patchCardLocal(m.id, m.from);
-              await updateCard(m.id, m.from);
-            }
-          },
-          do: async () => {
-            for (const m of moves) {
-              patchCardLocal(m.id, m.to);
-              await updateCard(m.id, m.to);
-            }
-          },
+      if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) return;
+
+      // Dropped over a column → the whole selection joins it, ordered by
+      // its current vertical position.
+      const drop = canJoinColumn ? computeColumnDrop(ev.clientX, ev.clientY) : null;
+      if (drop) {
+        // Restore the original free positions first so lastFreeX/Y (and an
+        // undo) reflect where the drag STARTED, not the drop pixel.
+        setCards((prev) =>
+          prev.map((c) => {
+            const p = startPositions.get(c.id);
+            return p ? { ...c, x: p.x, y: p.y } : c;
+          }),
+        );
+        const ordered = [...startPositions.keys()].sort((a, b) => {
+          const ca = startPositions.get(a)!;
+          const cb = startPositions.get(b)!;
+          return ca.y - cb.y || ca.x - cb.x;
         });
+        placeCards(ordered, drop, ordered.length > 1 ? `Move ${ordered.length} cards to column` : 'Move to column');
+        return;
       }
+
+      // Plain move: persist; one history command per gesture for the group.
+      const moves = [...startPositions].map(([id, p]) => ({
+        id,
+        from: p,
+        to: { x: p.x + dx, y: p.y + dy },
+      }));
+      for (const m of moves) updateCard(m.id, m.to).catch(console.error);
+      getHistory(currentBoardId)?.push({
+        label: moves.length > 1 ? `Move ${moves.length} cards` : 'Move',
+        undo: async () => {
+          for (const m of moves) {
+            patchCardLocal(m.id, m.from);
+            await updateCard(m.id, m.from);
+          }
+        },
+        do: async () => {
+          for (const m of moves) {
+            patchCardLocal(m.id, m.to);
+            await updateCard(m.id, m.to);
+          }
+        },
+      });
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -753,6 +796,8 @@ export default function Notes() {
   function makeCreateCommand(created: Card[], label: string): Command {
     const snapshots = created.slice();
     const trashIds: (string | null)[] = snapshots.map(() => null);
+    // For created COLUMNS: members present at undo time, kept for redo.
+    const memberSnapshots: Card[][] = snapshots.map(() => []);
     return {
       label: snapshots.length > 1 ? `${label} (${snapshots.length})` : label,
       undo: async () => {
@@ -760,6 +805,22 @@ export default function Notes() {
           // Use the card's CURRENT state — it may have gained content.
           const cur = cardsRef.current.find((c) => c.id === snapshots[i].id) ?? snapshots[i];
           snapshots[i] = cur;
+          if (cur.type === 'column') {
+            // A column may have gained members since creation — they must
+            // ride along in a composite snapshot (divergence rule 1).
+            const members = cardsRef.current
+              .filter((c) => c.parent_column === cur.id)
+              .sort((a, b) => (a.column_index ?? 0) - (b.column_index ?? 0));
+            memberSnapshots[i] = members;
+            removeCardsLocal(new Set([cur.id, ...members.map((m) => m.id)]));
+            if (members.length > 0 || hasUserContent(cur)) {
+              trashIds[i] = await softDeleteColumn(cur, members);
+            } else {
+              trashIds[i] = null;
+              await hardDeleteCardRow(cur.id);
+            }
+            continue;
+          }
           removeCardsLocal(new Set([cur.id]));
           if (hasUserContent(cur)) {
             trashIds[i] = await softDeleteCard(cur);
@@ -774,6 +835,10 @@ export default function Notes() {
         for (let i = 0; i < snapshots.length; i++) {
           const row = await insertCardRow(snapshots[i]);
           upsertCardLocal(row);
+          for (const m of memberSnapshots[i]) {
+            const mRow = await insertCardRow(m);
+            upsertCardLocal(mRow);
+          }
           const t = trashIds[i];
           if (t) {
             await removeTrashEntry(t);
@@ -868,29 +933,53 @@ export default function Notes() {
   const deleteCards = useCallback(
     async (targets: Card[]) => {
       if (targets.length === 0) return;
-      const ids = new Set(targets.map((t) => t.id));
-      setCards((prev) => prev.filter((c) => !ids.has(c.id)));
+      // Deleting a column takes its members with it (composite snapshot).
+      const columns = targets.filter((t) => t.type === 'column');
+      const columnMembers = new Map<string, Card[]>();
+      for (const col of columns) {
+        columnMembers.set(
+          col.id,
+          cardsRef.current
+            .filter((c) => c.parent_column === col.id)
+            .sort((a, b) => (a.column_index ?? 0) - (b.column_index ?? 0)),
+        );
+      }
+      const removedIds = new Set(targets.map((t) => t.id));
+      for (const members of columnMembers.values()) {
+        for (const m of members) removedIds.add(m.id);
+      }
+      setCards((prev) => prev.filter((c) => !removedIds.has(c.id)));
       setSelectedIds(new Set());
       setCtxMenu(null);
       // Board tiles delete whole subtrees; their restore path is Trash v2
       // (Sprint 18), so they're excluded from undo — trash still has them.
-      const plain = targets.filter((t) => !(t.type === 'board' && t.board_ref));
+      const plain = targets.filter((t) => t.type !== 'column' && !(t.type === 'board' && t.board_ref));
       const boards = targets.filter((t) => t.type === 'board' && t.board_ref);
       try {
-        // Each card gets its own restorable trash entry.
-        const trashIds: string[] = [];
-        for (const t of plain) trashIds.push(await softDeleteCard(t));
+        // Each card / column gets its own restorable trash entry.
+        const plainTrashIds: string[] = [];
+        for (const t of plain) plainTrashIds.push(await softDeleteCard(t));
+        const colTrashIds: string[] = [];
+        for (const col of columns) {
+          colTrashIds.push(await softDeleteColumn(col, columnMembers.get(col.id) ?? []));
+        }
         for (const b of boards) await softDeleteCard(b);
         setStatusMsg(
           targets.length === 1
             ? 'Moved 1 card to the trash.'
             : `Moved ${targets.length} cards to the trash.`,
         );
-        if (plain.length > 0) {
+        if (plain.length > 0 || columns.length > 0) {
           const snapshots = plain.slice();
-          const tIds = trashIds.slice();
+          const tIds = plainTrashIds.slice();
+          const colSnapshots = columns.slice();
+          const cIds = colTrashIds.slice();
+          const label =
+            targets.length > 1 ? `Delete ${targets.length} cards`
+            : columns.length === 1 ? 'Delete column'
+            : 'Delete';
           getHistory(currentBoardId)?.push({
-            label: snapshots.length > 1 ? `Delete ${snapshots.length} cards` : 'Delete',
+            label,
             undo: async () => {
               // Restore rows with original ids AND retract the trash
               // entries so undoing a delete leaves no ghost in the trash.
@@ -899,11 +988,27 @@ export default function Notes() {
                 upsertCardLocal(row);
                 await removeTrashEntry(tIds[i]);
               }
+              for (let i = 0; i < colSnapshots.length; i++) {
+                const col = colSnapshots[i];
+                const colRow = await insertCardRow(col);
+                upsertCardLocal(colRow);
+                for (const m of columnMembers.get(col.id) ?? []) {
+                  const mRow = await insertCardRow(m);
+                  upsertCardLocal(mRow);
+                }
+                await removeTrashEntry(cIds[i]);
+              }
             },
             do: async () => {
               for (let i = 0; i < snapshots.length; i++) {
                 removeCardsLocal(new Set([snapshots[i].id]));
                 tIds[i] = await softDeleteCard(snapshots[i]);
+              }
+              for (let i = 0; i < colSnapshots.length; i++) {
+                const col = colSnapshots[i];
+                const members = columnMembers.get(col.id) ?? [];
+                removeCardsLocal(new Set([col.id, ...members.map((m) => m.id)]));
+                cIds[i] = await softDeleteColumn(col, members);
               }
             },
           });
@@ -923,6 +1028,7 @@ export default function Notes() {
       setCtxMenu(null);
       try {
         const dups: Card[] = [];
+        const memberDups: Card[] = [];
         // Uniform +16/+16 offset preserves the group's relative layout.
         for (const card of targets) {
           const dup = await createCard({
@@ -935,9 +1041,31 @@ export default function Notes() {
             board_ref: null, // duplicating a board tile copies its visual, not its target board
           });
           dups.push(dup);
+          // Duplicating a column duplicates its contents too.
+          if (card.type === 'column') {
+            const members = cardsRef.current
+              .filter((c) => c.parent_column === card.id)
+              .sort((a, b) => (a.column_index ?? 0) - (b.column_index ?? 0));
+            for (let i = 0; i < members.length; i++) {
+              const m = members[i];
+              const mDup = await createCard({
+                board_id: currentBoardId,
+                type: m.type,
+                x: m.x, y: m.y,
+                w: m.w ?? undefined, h: m.h ?? undefined,
+                color: m.color,
+                payload: structuredClone(m.payload as any),
+                board_ref: null,
+                parent_column: dup.id,
+                column_index: i,
+              });
+              memberDups.push(mDup);
+            }
+          }
         }
-        setCards((prev) => [...prev, ...dups]);
+        setCards((prev) => [...prev, ...dups, ...memberDups]);
         setSelectedIds(new Set(dups.map((d) => d.id)));
+        // Member copies ride along via the command's column handling.
         getHistory(currentBoardId)?.push(makeCreateCommand(dups, 'Duplicate'));
       } catch (err) {
         console.error(err);
@@ -946,6 +1074,214 @@ export default function Notes() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- makeCreateCommand closes over stable refs only
     [currentBoardId, getHistory],
   );
+
+  // ── Column containment (Sprint 8) ─────────────────────────────────────
+  // Cards with parent_column render inside their column; only free cards
+  // live on the canvas plane.
+  const freeCards = cards.filter((c) => !c.parent_column);
+  const membersOf = useCallback(
+    (colId: string): Card[] =>
+      cards
+        .filter((c) => c.parent_column === colId)
+        .sort((a, b) => (a.column_index ?? 0) - (b.column_index ?? 0)),
+    [cards],
+  );
+
+  type PlacementState = {
+    id: string;
+    parent_column: string | null;
+    column_index: number | null;
+    x: number;
+    y: number;
+    payload: Card['payload'];
+  };
+  const placementOf = (c: Card): PlacementState => ({
+    id: c.id,
+    parent_column: c.parent_column,
+    column_index: c.column_index,
+    x: c.x,
+    y: c.y,
+    payload: c.payload,
+  });
+
+  const applyPlacements = useCallback(
+    async (states: PlacementState[]) => {
+      for (const s of states) {
+        patchCardLocal(s.id, {
+          parent_column: s.parent_column,
+          column_index: s.column_index,
+          x: s.x, y: s.y,
+          payload: s.payload,
+        });
+      }
+      for (const s of states) {
+        await updateCard(s.id, {
+          parent_column: s.parent_column,
+          column_index: s.column_index,
+          x: s.x, y: s.y,
+          payload: s.payload,
+        });
+      }
+    },
+    [patchCardLocal],
+  );
+
+  /**
+   * Move cards into a column slot or out to free canvas. Handles join,
+   * within-column reorder, and detach in one recomputation; reindexes all
+   * affected columns; pushes ONE history command.
+   */
+  const placeCards = useCallback(
+    async (
+      ids: string[],
+      target: { colId: string; index: number } | { freeAt: { x: number; y: number } },
+      label: string,
+    ) => {
+      const all = cardsRef.current;
+      const moving = ids
+        .map((id) => all.find((c) => c.id === id))
+        .filter((c): c is Card => Boolean(c) && c!.type !== 'column'); // no nesting
+      if (moving.length === 0) return;
+      const movingSet = new Set(moving.map((m) => m.id));
+
+      const affectedCols = new Set<string>();
+      for (const m of moving) if (m.parent_column) affectedCols.add(m.parent_column);
+      if ('colId' in target) affectedCols.add(target.colId);
+
+      const affectedMembers = all.filter(
+        (c) => c.parent_column && affectedCols.has(c.parent_column),
+      );
+      const before: PlacementState[] = [...moving, ...affectedMembers]
+        .filter((c, i, arr) => arr.findIndex((x) => x.id === c.id) === i)
+        .map(placementOf);
+
+      const after = new Map<string, PlacementState>();
+      // Moving cards first.
+      if ('colId' in target) {
+        for (const m of moving) {
+          const p = m.payload as Record<string, unknown>;
+          after.set(m.id, {
+            ...placementOf(m),
+            parent_column: target.colId,
+            column_index: 0, // fixed up by the reindex below
+            // Remember the free position for future drags back out.
+            payload: m.parent_column ? m.payload : { ...p, lastFreeX: m.x, lastFreeY: m.y },
+          });
+        }
+      } else {
+        moving.forEach((m, i) => {
+          after.set(m.id, {
+            ...placementOf(m),
+            parent_column: null,
+            column_index: null,
+            x: target.freeAt.x + i * 24,
+            y: target.freeAt.y + i * 24,
+          });
+        });
+      }
+      // Recompute order per affected column.
+      for (const colId of affectedCols) {
+        const currentIds = all
+          .filter((c) => c.parent_column === colId)
+          .sort((a, b) => (a.column_index ?? 0) - (b.column_index ?? 0))
+          .map((c) => c.id);
+        let orderedIds: string[];
+        if ('colId' in target && colId === target.colId) {
+          // The indicator index counts CURRENT rows (which may include the
+          // moving cards during a same-column reorder) — adjust for those
+          // sitting above the slot before inserting.
+          const aboveSlot = currentIds.slice(0, target.index).filter((id) => movingSet.has(id)).length;
+          const without = currentIds.filter((id) => !movingSet.has(id));
+          orderedIds = insertAt(without, moving.map((m) => m.id), target.index - aboveSlot);
+        } else {
+          orderedIds = currentIds.filter((id) => !movingSet.has(id));
+        }
+        orderedIds.forEach((id, i) => {
+          const existing = after.get(id);
+          if (existing) {
+            existing.column_index = i;
+          } else {
+            const c = all.find((x) => x.id === id)!;
+            if (c.column_index !== i) after.set(id, { ...placementOf(c), column_index: i });
+          }
+        });
+      }
+
+      const afterStates = [...after.values()];
+      // Trim before-list to cards that actually change.
+      const changedIds = new Set(afterStates.map((s) => s.id));
+      const beforeStates = before.filter((s) => changedIds.has(s.id));
+      await applyPlacements(afterStates).catch(console.error);
+      clearSelection();
+      getHistory(currentBoardId)?.push({
+        label,
+        undo: () => applyPlacements(beforeStates),
+        do: () => applyPlacements(afterStates),
+      });
+    },
+    [applyPlacements, clearSelection, currentBoardId, getHistory],
+  );
+
+  /** Which column (and slot) the cursor is over, from live DOM geometry. */
+  function computeColumnDrop(clientX: number, clientY: number): { colId: string; index: number } | null {
+    const els = document.querySelectorAll<HTMLElement>('[data-col-id]');
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
+      const mids: number[] = [];
+      el.querySelectorAll<HTMLElement>('[data-member-id]').forEach((row) => {
+        const rr = row.getBoundingClientRect();
+        mids.push(rr.top + rr.height / 2);
+      });
+      return { colId: el.dataset.colId!, index: insertionIndexFromY(mids, clientY) };
+    }
+    return null;
+  }
+
+  /** Drag a column member: reorder, move between columns, or detach. */
+  function startMemberDrag(member: Card, e: React.MouseEvent) {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('[contenteditable]') || target.closest('input') || target.closest('button') || target.closest('a')) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragging = false;
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 6) {
+        dragging = true;
+        setMemberDragId(member.id);
+      }
+      if (!dragging) return;
+      setColDrop(computeColumnDrop(ev.clientX, ev.clientY));
+    };
+    const onUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setMemberDragId(null);
+      setColDrop(null);
+      if (!dragging) return;
+      const drop = computeColumnDrop(ev.clientX, ev.clientY);
+      if (drop) {
+        placeCards([member.id], drop, drop.colId === member.parent_column ? 'Reorder column' : 'Move to column');
+      } else {
+        const wrap = wrapRef.current;
+        if (!wrap) return;
+        const r = wrap.getBoundingClientRect();
+        const pt = wrapperToCanvas(view, ev.clientX - r.left, ev.clientY - r.top);
+        placeCards(
+          [member.id],
+          { freeAt: { x: Math.round(pt.x - 100), y: Math.round(pt.y - 30) } },
+          'Remove from column',
+        );
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
 
   // ── Arrow-nudge coalescing ─────────────────────────────────────────────
   // Rapid arrow presses accumulate locally; 500ms after the last press the
@@ -1047,7 +1383,7 @@ export default function Notes() {
         }
         if (e.code === 'Digit0' || e.code === 'Numpad0') {
           e.preventDefault();
-          const rects = cards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }));
+          const rects = cards.filter((c) => !c.parent_column).map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }));
           setView(
             e.shiftKey
               ? fitView(rects, r.width, r.height)
@@ -1057,7 +1393,7 @@ export default function Notes() {
         }
         if (e.key === 'a' || e.key === 'A') {
           e.preventDefault();
-          setSelectedIds(new Set(cards.map((c) => c.id)));
+          setSelectedIds(new Set(cards.filter((c) => !c.parent_column).map((c) => c.id)));
           return;
         }
         if (e.key === 'd' || e.key === 'D') {
@@ -1211,33 +1547,36 @@ export default function Notes() {
     const k = view.k;
     const img = card.type === 'image' ? (card.payload as ImagePayload) : null;
     const aspect = img && img.naturalH > 0 ? img.naturalW / img.naturalH : null;
-    const size = (dx: number, dy: number) =>
-      aspect !== null
-        ? aspectResize(startW, dx, aspect)
-        : { w: Math.max(140, startW + dx), h: Math.max(60, startH + dy) };
+    // Columns are width-only: height always follows their contents.
+    const widthOnly = card.type === 'column';
+    const sizePatch = (dx: number, dy: number): Partial<Card> => {
+      if (aspect !== null) return aspectResize(startW, dx, aspect);
+      if (widthOnly) return { w: Math.max(200, startW + dx) };
+      return { w: Math.max(140, startW + dx), h: Math.max(60, startH + dy) };
+    };
     const onMove = (ev: MouseEvent) => {
       const dx = (ev.clientX - startX) / k;
       const dy = (ev.clientY - startY) / k;
-      const { w, h } = size(dx, dy);
-      patchCardLocal(card.id, { w, h });
+      patchCardLocal(card.id, sizePatch(dx, dy));
     };
     const onUp = (ev: MouseEvent) => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       const dx = (ev.clientX - startX) / k;
       const dy = (ev.clientY - startY) / k;
-      const { w, h } = size(dx, dy);
-      updateCard(card.id, { w, h }).catch(console.error);
-      if (w !== startW || h !== startH) {
+      const patch = sizePatch(dx, dy);
+      updateCard(card.id, patch as any).catch(console.error);
+      const revert: Partial<Card> = widthOnly ? { w: startW } : { w: startW, h: startH };
+      if (patch.w !== startW || (!widthOnly && patch.h !== startH)) {
         getHistory(currentBoardId)?.push({
           label: 'Resize',
           undo: async () => {
-            patchCardLocal(card.id, { w: startW, h: startH });
-            await updateCard(card.id, { w: startW, h: startH });
+            patchCardLocal(card.id, revert);
+            await updateCard(card.id, revert as any);
           },
           do: async () => {
-            patchCardLocal(card.id, { w, h });
-            await updateCard(card.id, { w, h });
+            patchCardLocal(card.id, patch);
+            await updateCard(card.id, patch as any);
           },
         });
       }
@@ -1499,11 +1838,45 @@ export default function Notes() {
               transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})`,
             }}
           >
-            {cards.map((card) => (
+            {freeCards.map((card) => (
               <CardView
                 key={card.id}
                 card={card}
                 selected={selectedIds.has(card.id)}
+                members={card.type === 'column' ? membersOf(card.id) : undefined}
+                dropIndex={colDrop?.colId === card.id ? colDrop.index : null}
+                dropActive={colDrop?.colId === card.id}
+                renderMember={(m) => (
+                  <ColumnMemberRow
+                    key={m.id}
+                    card={m}
+                    selected={selectedIds.has(m.id)}
+                    dragging={memberDragId === m.id}
+                    onMouseDown={(e) => startMemberDrag(m, e)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openContextMenu(m, e.clientX, e.clientY);
+                    }}
+                    onDoubleClick={() => {
+                      if (m.type === 'board' && m.board_ref) setCurrentBoardId(m.board_ref);
+                      else if (m.type === 'document') setDocOverlayId(m.id);
+                      else if (m.type === 'image') setLightboxId(m.id);
+                    }}
+                  >
+                    <CardBody
+                      card={m}
+                      onPatch={(patch) => scheduleCardSave(m.id, patch)}
+                      onConvertNote={() => convertNoteToDocument(m)}
+                      onDismissConvert={() => dismissConvertPrompt(m)}
+                      onDeleteTodoItem={(item) => deleteTodoLine(m, item)}
+                      onOpenLink={() => {
+                        const url = (m.payload as any).url;
+                        if (url) window.open(url, '_blank', 'noopener');
+                      }}
+                    />
+                  </ColumnMemberRow>
+                )}
                 onMouseDown={(e) => startCardDrag(card, e)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -1746,6 +2119,10 @@ export default function Notes() {
 function CardView({
   card,
   selected,
+  members,
+  dropIndex,
+  dropActive,
+  renderMember,
   onMouseDown,
   onContextMenu,
   onDoubleClick,
@@ -1758,6 +2135,10 @@ function CardView({
 }: {
   card: Card;
   selected: boolean;
+  members?: Card[];
+  dropIndex?: number | null;
+  dropActive?: boolean;
+  renderMember?: (m: Card) => JSX.Element;
   onMouseDown: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
@@ -1768,24 +2149,25 @@ function CardView({
   onDeleteTodoItem: (item: TodoItem) => void;
   onOpenLink: () => void;
 }) {
+  const chromeless = card.type === 'heading' || card.type === 'board';
   const baseStyle: CSSProperties = {
     left: card.x,
     top: card.y,
     width: card.w ?? undefined,
-    height: card.type === 'heading' || card.type === 'board' ? undefined : card.h ?? undefined,
-    background: card.type === 'heading' || card.type === 'board'
-      ? undefined
-      : `var(--c-${card.color})`,
+    // Heading/board auto-size; columns auto-height from their members.
+    height: chromeless || card.type === 'column' ? undefined : card.h ?? undefined,
+    background: chromeless || card.type === 'column' ? undefined : `var(--c-${card.color})`,
     zIndex: card.z || undefined,
   };
 
   // Heading and Board cards don't get resize handles — heading auto-sizes
-  // to its text, Board has a fixed-shape tile.
+  // to its text, Board has a fixed-shape tile. Columns resize width-only
+  // (handled in startResize).
   const showResize = card.type !== 'heading' && card.type !== 'board';
 
   return (
     <div
-      className={`nt-card type-${card.type}${selected ? ' selected' : ''}`}
+      className={`nt-card type-${card.type}${selected ? ' selected' : ''}${dropActive ? ' col-drop-active' : ''}`}
       style={baseStyle}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
@@ -1793,6 +2175,54 @@ function CardView({
     >
       <div className="nt-drag-handle" />
       <div className="typetag">{card.type}</div>
+      {card.type === 'column' ? (
+        <ColumnBody
+          card={card}
+          onPatch={onPatch}
+          members={members ?? []}
+          dropIndex={dropIndex ?? null}
+          renderMember={renderMember ?? (() => <></>)}
+        />
+      ) : (
+        <CardBody
+          card={card}
+          onPatch={onPatch}
+          onConvertNote={onConvertNote}
+          onDismissConvert={onDismissConvert}
+          onDeleteTodoItem={onDeleteTodoItem}
+          onOpenLink={onOpenLink}
+        />
+      )}
+      {showResize && (
+        <div
+          className="nt-resize-se"
+          onMouseDown={onResizeStart}
+          title="Drag to resize"
+        />
+      )}
+    </div>
+  );
+}
+
+/** The type-specific interior of a card — shared by canvas cards and
+    column members. */
+function CardBody({
+  card,
+  onPatch,
+  onConvertNote,
+  onDismissConvert,
+  onDeleteTodoItem,
+  onOpenLink,
+}: {
+  card: Card;
+  onPatch: (patch: Partial<Card>) => void;
+  onConvertNote: () => void;
+  onDismissConvert: () => void;
+  onDeleteTodoItem: (item: TodoItem) => void;
+  onOpenLink: () => void;
+}) {
+  return (
+    <>
       {card.type === 'note' && (
         <NoteBody card={card} onPatch={onPatch} onConvert={onConvertNote} onDismissConvert={onDismissConvert} />
       )}
@@ -1807,13 +2237,109 @@ function CardView({
       {card.type === 'board' && <BoardTile card={card} />}
       {card.type === 'image' && <ImageBody card={card} onPatch={onPatch} />}
       {card.type === 'file' && <FileBody card={card} />}
-      {showResize && (
+    </>
+  );
+}
+
+// ── Column container body + member rows ─────────────────────────────────
+
+function ColumnBody({
+  card,
+  onPatch,
+  members,
+  dropIndex,
+  renderMember,
+}: {
+  card: Card;
+  onPatch: (p: Partial<Card>) => void;
+  members: Card[];
+  dropIndex: number | null;
+  renderMember: (m: Card) => JSX.Element;
+}) {
+  const payload = card.payload as ColumnPayload;
+  const collapsed = Boolean(payload.collapsed);
+  const titleRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (titleRef.current && document.activeElement !== titleRef.current) {
+      titleRef.current.textContent = payload.title || '';
+    }
+  }, [payload.title]);
+  return (
+    <div className="col-container" data-col-id={card.id}>
+      <header className="col-head">
+        <button
+          className="col-caret"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPatch({ payload: { ...payload, collapsed: !collapsed } });
+          }}
+          title={collapsed ? 'Expand' : 'Collapse'}
+        >
+          {collapsed ? '▸' : '▾'}
+        </button>
         <div
-          className="nt-resize-se"
-          onMouseDown={onResizeStart}
-          title="Drag to resize"
+          ref={titleRef}
+          className="col-title"
+          contentEditable
+          suppressContentEditableWarning
+          data-placeholder="Column"
+          onInput={(e) =>
+            onPatch({ payload: { ...payload, title: (e.target as HTMLDivElement).textContent || '' } })
+          }
         />
+        <span className="col-count">{members.length}</span>
+      </header>
+      {collapsed ? (
+        <div className="col-collapsed-note">
+          {members.length} card{members.length === 1 ? '' : 's'}
+        </div>
+      ) : (
+        <div className="col-members">
+          {members.map((m, i) => (
+            <div key={m.id} className="col-slot">
+              {dropIndex === i && <div className="col-indicator" />}
+              {renderMember(m)}
+            </div>
+          ))}
+          {dropIndex === members.length && <div className="col-indicator" />}
+          {members.length === 0 && dropIndex === null && (
+            <div className="col-empty">drag cards here</div>
+          )}
+        </div>
       )}
+    </div>
+  );
+}
+
+function ColumnMemberRow({
+  card,
+  selected,
+  dragging,
+  onMouseDown,
+  onContextMenu,
+  onDoubleClick,
+  children,
+}: {
+  card: Card;
+  selected: boolean;
+  dragging: boolean;
+  onMouseDown: (e: React.MouseEvent) => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  onDoubleClick: () => void;
+  children: React.ReactNode;
+}) {
+  const chromeless = card.type === 'heading' || card.type === 'board';
+  return (
+    <div
+      className={`col-member type-${card.type}${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}`}
+      data-member-id={card.id}
+      style={chromeless ? undefined : ({ background: `var(--c-${card.color})` } as CSSProperties)}
+      onMouseDown={onMouseDown}
+      onContextMenu={onContextMenu}
+      onDoubleClick={onDoubleClick}
+    >
+      {children}
     </div>
   );
 }
@@ -2538,6 +3064,7 @@ function defaultPayloadFor(type: CardType): any {
     case 'heading':  return { body: '' };
     case 'link':     return { title: '', url: '' };
     case 'document': return { title: 'Untitled document', body: '', mode: 'icon' };
+    case 'column':   return { title: 'Column' };
     default:         return {};
   }
 }
@@ -2574,11 +3101,17 @@ function trashPreview(t: TrashEntry): string {
     if (c.type === 'document') return p.title || '(document)';
     if (c.type === 'image')    return p.caption || '(image)';
     if (c.type === 'file')     return p.filename || '(file)';
+    if (c.type === 'column')   return p.title || '(column)';
     return c.type;
   }
   if (t.kind === 'board') {
     const tile = (t.snapshot as any).tile;
     return tile?.payload?.name || '(board)';
+  }
+  if (t.kind === 'column') {
+    const snap = t.snapshot as any;
+    const n = snap?.members?.length ?? 0;
+    return `${snap?.column?.payload?.title || '(column)'} · ${n} card${n === 1 ? '' : 's'}`;
   }
   return '(item)';
 }
@@ -2663,6 +3196,15 @@ function toolIcon(type: CardType): JSX.Element {
           <path d="M6 3h8l4 4v14H6z" />
           <path d="M14 3v4h4" />
           <path d="M9 14l2 2 4-4" />
+        </svg>
+      );
+    case 'column':
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <rect x="5" y="3.5" width="14" height="17" rx="1.5" />
+          <line x1="8" y1="8" x2="16" y2="8" />
+          <line x1="8" y1="12" x2="16" y2="12" />
+          <line x1="8" y1="16" x2="16" y2="16" />
         </svg>
       );
   }
