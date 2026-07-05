@@ -45,6 +45,18 @@ import { insertAt, insertionIndexFromY } from '../lib/notesColumns';
 import { arrowPath, bestEdgePair, bezierPoint, type RectLike } from '../lib/notesArrows';
 import type { CommentPayload, SwatchCardPayload } from '../lib/notes';
 import { extractPalette, normalizeHex } from '../lib/notesPalette';
+import {
+  cardsPlainTextDigest,
+  classifyClipboard,
+  INTERNAL_MIME,
+  parseSerializedCards,
+  sanitizeHtmlFragment,
+  serializeCards,
+  splitTitleBody,
+  textToNoteHtml,
+  type ClipboardClassification,
+  type SerializedCards,
+} from '../lib/notesClipboard';
 import { BoardHistory, BurstCoalescer, hasUserContent, type Command } from '../lib/notesHistory';
 import type { FilePayload, ImagePayload, LinkPayload } from '../lib/notes';
 import { domainOf, embedUrlFor, isProbablyUrl, type LinkMeta } from '../lib/notesLinkMeta';
@@ -714,25 +726,164 @@ export default function Notes() {
   const createLinkFromUrlRef = useRef(createLinkFromUrl);
   createLinkFromUrlRef.current = createLinkFromUrl;
 
-  // Paste routing (canvas scope only — typing keeps its native paste):
-  // clipboard files → media cards; a bare URL → link card with metadata.
+  // ── Paste & drop intelligence (Sprint 11) ─────────────────────────────
+  // One classifier routes every paste/drop at canvas scope: internal card
+  // JSON → faithful copies; files → media; bare URL → link; rich HTML →
+  // sanitized note/document; text → note (≤600 chars) or document.
+
+  /** Paste cards previously copied with Cmd/Ctrl+C (cross-board capable). */
+  async function pasteSerializedCards(data: SerializedCards) {
+    if (!currentBoardId || data.items.length === 0) return;
+    const at = centerCanvasPoint();
+    try {
+      const created: Card[] = [];
+      for (const item of data.items) {
+        const card = await createCard({
+          board_id: currentBoardId,
+          type: item.type,
+          x: Math.round(at.x + item.dx + 16),
+          y: Math.round(at.y + item.dy + 16),
+          w: item.w ?? undefined,
+          h: item.h ?? undefined,
+          color: item.color,
+          payload: structuredClone(item.payload) as Card['payload'],
+          board_ref: null, // board tiles paste as visuals, like duplicate
+        });
+        created.push(card);
+        upsertCardLocal(card);
+        for (let i = 0; i < (item.members?.length ?? 0); i++) {
+          const m = item.members![i];
+          const mc = await createCard({
+            board_id: currentBoardId,
+            type: m.type,
+            x: 0, y: 0,
+            w: m.w ?? undefined, h: m.h ?? undefined,
+            color: m.color,
+            payload: structuredClone(m.payload) as Card['payload'],
+            parent_column: card.id,
+            column_index: i,
+          });
+          upsertCardLocal(mc);
+        }
+      }
+      setSelectedIds(new Set(created.map((c) => c.id)));
+      getHistory(currentBoardId)?.push(makeCreateCommand(created, 'Paste'));
+      setStatusMsg(created.length > 1 ? `Pasted ${created.length} cards.` : 'Pasted 1 card.');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Paste failed.');
+    }
+  }
+
+  /** Create a note/document card from classified text/HTML content. */
+  async function pasteClassified(cls: ClipboardClassification, at: { x: number; y: number }) {
+    if (!currentBoardId) return;
+    try {
+      let card: Card | null = null;
+      if (cls.kind === 'html-note' || cls.kind === 'note-text') {
+        const body = cls.kind === 'html-note' ? sanitizeHtmlFragment(cls.html) : textToNoteHtml(cls.text);
+        card = await createCard({
+          board_id: currentBoardId,
+          type: 'note',
+          x: at.x, y: at.y, w: 280, h: 170,
+          payload: { body },
+        });
+      } else if (cls.kind === 'html-document' || cls.kind === 'document-text') {
+        const { title, bodyHtml } =
+          cls.kind === 'document-text'
+            ? splitTitleBody(cls.text)
+            : { title: extractTitleFromHtml(cls.html) || 'Untitled document', bodyHtml: sanitizeHtmlFragment(cls.html) };
+        card = await createCard({
+          board_id: currentBoardId,
+          type: 'document',
+          x: at.x, y: at.y, w: 240, h: 200,
+          payload: { title, body: bodyHtml, mode: 'preview' },
+        });
+      }
+      if (!card) return;
+      upsertCardLocal(card);
+      selectOnly(card.id);
+      getHistory(currentBoardId)?.push(
+        makeCreateCommand([card], card.type === 'document' ? 'Paste document' : 'Paste note'),
+      );
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Paste failed.');
+    }
+  }
+  const pasteSerializedRef = useRef(pasteSerializedCards);
+  pasteSerializedRef.current = pasteSerializedCards;
+  const pasteClassifiedRef = useRef(pasteClassified);
+  pasteClassifiedRef.current = pasteClassified;
+
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
       if (isTypingContext(e.target)) return;
-      const files = [...(e.clipboardData?.files ?? [])];
-      if (files.length > 0) {
-        e.preventDefault();
-        createMediaCardsRef.current(files, centerCanvasPointRef.current());
-        return;
+      const dt = e.clipboardData;
+      if (!dt) return;
+      const internal = dt.getData(INTERNAL_MIME);
+      if (internal) {
+        const parsed = parseSerializedCards(internal);
+        if (parsed) {
+          e.preventDefault();
+          pasteSerializedRef.current(parsed);
+          return;
+        }
       }
-      const text = e.clipboardData?.getData('text/plain') ?? '';
-      if (isProbablyUrl(text)) {
-        e.preventDefault();
-        createLinkFromUrlRef.current(text.trim());
+      const files = [...dt.files];
+      const cls = classifyClipboard({
+        fileCount: files.length,
+        text: dt.getData('text/plain') ?? '',
+        html: dt.getData('text/html') ?? '',
+      });
+      if (cls.kind === 'none') return;
+      e.preventDefault();
+      if (cls.kind === 'files') {
+        createMediaCardsRef.current(files, centerCanvasPointRef.current());
+      } else if (cls.kind === 'url') {
+        createLinkFromUrlRef.current(cls.url);
+      } else {
+        pasteClassifiedRef.current(cls, centerCanvasPointRef.current());
       }
     }
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
+  }, []);
+
+  // Copy / cut: selected cards serialize to an internal MIME (faithful
+  // cross-board paste) plus a plain-text digest for other apps.
+  const selectedIdsRef = useRef(selectedIds);
+  useEffect(() => { selectedIdsRef.current = selectedIds; }, [selectedIds]);
+  const deleteCardsRef = useRef<(targets: Card[]) => void>(() => {});
+  useEffect(() => {
+    function handle(e: ClipboardEvent, cut: boolean) {
+      if (isTypingContext(e.target)) return;
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return; // let text copies behave normally
+      const ids = selectedIdsRef.current;
+      if (ids.size === 0) return;
+      const chosen = cardsRef.current.filter((c) => ids.has(c.id));
+      if (chosen.length === 0 || !e.clipboardData) return;
+      e.preventDefault();
+      const membersOfLocal = (colId: string) =>
+        cardsRef.current
+          .filter((c) => c.parent_column === colId)
+          .sort((a, b) => (a.column_index ?? 0) - (b.column_index ?? 0));
+      e.clipboardData.setData(INTERNAL_MIME, JSON.stringify(serializeCards(chosen, membersOfLocal)));
+      e.clipboardData.setData('text/plain', cardsPlainTextDigest(chosen, membersOfLocal));
+      if (cut) deleteCardsRef.current(chosen);
+      setStatusMsg(
+        `${cut ? 'Cut' : 'Copied'} ${chosen.length} card${chosen.length === 1 ? '' : 's'} — paste on any board.`,
+      );
+    }
+    const onCopy = (e: ClipboardEvent) => handle(e, false);
+    const onCut = (e: ClipboardEvent) => handle(e, true);
+    document.addEventListener('copy', onCopy);
+    document.addEventListener('cut', onCut);
+    return () => {
+      document.removeEventListener('copy', onCopy);
+      document.removeEventListener('cut', onCut);
+    };
   }, []);
 
   // ── Toolbar drag (drop on canvas creates a card) ──────────────────────
@@ -770,8 +921,26 @@ export default function Notes() {
       return;
     }
 
-    const type = (dropDataRef.current ||
-      (e.dataTransfer.getData('text/plain') as CardType)) as CardType;
+    // External text/HTML drops (from other apps) route like a paste, at
+    // the drop point. Toolbar drags are identified by dropDataRef.
+    if (!dropDataRef.current) {
+      const cls = classifyClipboard({
+        fileCount: 0,
+        text: e.dataTransfer.getData('text/plain') ?? '',
+        html: e.dataTransfer.getData('text/html') ?? '',
+      });
+      if (cls.kind === 'url') {
+        createLinkFromUrl(cls.url);
+        return;
+      }
+      if (cls.kind !== 'none' && cls.kind !== 'files') {
+        pasteClassified(cls, { x: Math.round(pt.x - 140), y: Math.round(pt.y - 80) });
+        return;
+      }
+      return;
+    }
+
+    const type = dropDataRef.current as CardType;
     if (!type) return;
     // Center the card around the drop point
     const w = DEFAULT_W[type];
@@ -1092,6 +1261,7 @@ export default function Notes() {
     },
     [currentBoardId, loadBoard, getHistory, upsertCardLocal, removeCardsLocal, upsertArrowLocal, removeArrowLocal],
   );
+  deleteCardsRef.current = deleteCards;
 
   const duplicateCards = useCallback(
     async (targets: Card[]) => {

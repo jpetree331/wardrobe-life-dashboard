@@ -41,6 +41,9 @@ export const SHORTCUTS: ShortcutDef[] = [
   // ── Selection ───────────────────────────────────────────────────────
   { id: 'select-all',  keys: ['Mod A'],            label: 'Select all cards on the board', category: 'Selection', when: 'not typing' },
   { id: 'duplicate',   keys: ['Mod D'],            label: 'Duplicate selection',      category: 'Selection', when: 'selection, not typing' },
+  { id: 'copy',        keys: ['Mod C'],            label: 'Copy selection (paste on any board)', category: 'Selection', when: 'selection, not typing' },
+  { id: 'cut',         keys: ['Mod X'],            label: 'Cut selection',            category: 'Selection', when: 'selection, not typing' },
+  { id: 'paste',       keys: ['Mod V'],            label: 'Paste cards, files, URLs, or text', category: 'Canvas', when: 'not typing' },
   { id: 'toggle-select', keys: ['Shift Click', 'Mod Click'], label: 'Add / remove a card from the selection', category: 'Selection' },
   { id: 'nudge',       keys: ['Arrow keys'],       label: 'Nudge selection 1px',      category: 'Selection', when: 'selection, not typing' },
   { id: 'nudge-fast',  keys: ['Shift Arrow keys'], label: 'Nudge selection 10px',     category: 'Selection', when: 'selection, not typing' },
