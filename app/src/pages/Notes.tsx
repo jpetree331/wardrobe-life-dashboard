@@ -104,6 +104,9 @@ import { listAllBoards, listAllCards } from '../lib/notes';
 import { searchBoards, searchCards, type BoardHit, type CardHit } from '../lib/notesSearch';
 import { fetchTrashEntry, permanentlyDeleteTrashEntry, reparentBoard, updateBoardMeta } from '../lib/notes';
 import { boardPath } from '../lib/notesSearch';
+import { toPng } from 'html-to-image';
+import { jsPDF } from 'jspdf';
+import { boardToMarkdown, contentBBox, sanitizeFilename } from '../lib/notesExport';
 import { buildBoardTree, wouldCreateCycle, type BoardNode } from '../lib/notesBoardTree';
 import { marqueeHits, normalizeRect, type Rect } from '../lib/notesMarquee';
 import { useFavicon } from '../hooks/useFavicon';
@@ -2851,6 +2854,88 @@ export default function Notes() {
     }
   }
 
+  // ── Export: PNG / PDF / Markdown (Sprint 19) ──────────────────────────
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+
+  function boardDisplayName(): string {
+    return ancestry[ancestry.length - 1]?.name || 'board';
+  }
+  function triggerDownload(href: string, filename: string) {
+    const a = document.createElement('a');
+    a.href = href;
+    a.download = filename;
+    a.click();
+  }
+
+  /** Rasterize the full board (not the viewport) at 1x or 2x. */
+  async function renderBoardPng(scale: 1 | 2): Promise<{ dataUrl: string; bbox: { w: number; h: number } } | null> {
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return null;
+    const bbox = contentBBox(freeCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })));
+    if (!bbox) {
+      setStatusMsg('This board is empty — nothing to export.');
+      return null;
+    }
+    const pageBg = getComputedStyle(document.querySelector('.notes-page')!).backgroundColor;
+    const dataUrl = await toPng(canvasEl, {
+      width: Math.round(bbox.w * scale),
+      height: Math.round(bbox.h * scale),
+      pixelRatio: 1,
+      backgroundColor: pageBg,
+      style: {
+        // Re-frame the (cloned) canvas on the content bbox at export scale.
+        transform: `scale(${scale}) translate(${-bbox.x}px, ${-bbox.y}px)`,
+        transformOrigin: '0 0',
+      },
+      filter: (node) =>
+        !(node instanceof HTMLElement &&
+          (node.classList?.contains('nt-marquee') ||
+           node.classList?.contains('nt-empty') ||
+           node.classList?.contains('nt-upload-ph'))),
+    });
+    return { dataUrl, bbox: { w: bbox.w, h: bbox.h } };
+  }
+
+  async function exportBoard(kind: 'png1' | 'png2' | 'pdf' | 'md') {
+    setExportMenuOpen(false);
+    const name = sanitizeFilename(boardDisplayName());
+    try {
+      if (kind === 'md') {
+        if (freeCards.length === 0) {
+          setStatusMsg('This board is empty — nothing to export.');
+          return;
+        }
+        const md = boardToMarkdown(boardDisplayName(), freeCards, membersOf);
+        const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+        triggerDownload(url, `${name}.md`);
+        URL.revokeObjectURL(url);
+        setStatusMsg('Markdown exported.');
+        return;
+      }
+      setStatusMsg('Rendering the board — this can take a few seconds…');
+      const scale = kind === 'png2' ? 2 : 1;
+      const out = await renderBoardPng(scale as 1 | 2);
+      if (!out) return;
+      if (kind === 'pdf') {
+        const pdf = new jsPDF({
+          orientation: out.bbox.w >= out.bbox.h ? 'landscape' : 'portrait',
+          unit: 'px',
+          format: [out.bbox.w, out.bbox.h],
+          hotfixes: ['px_scaling'],
+        });
+        pdf.addImage(out.dataUrl, 'PNG', 0, 0, out.bbox.w, out.bbox.h);
+        pdf.save(`${name}.pdf`);
+        setStatusMsg('PDF exported.');
+      } else {
+        triggerDownload(out.dataUrl, `${name}${scale === 2 ? '@2x' : ''}.png`);
+        setStatusMsg(`PNG exported at ${scale}x.`);
+      }
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Export failed — see the console for details.');
+    }
+  }
+
   // Member row renderer shared by canvas columns and the inbox panel.
   const renderMemberRow = (m: Card) => (
     <ColumnMemberRow
@@ -2989,6 +3074,19 @@ export default function Notes() {
           >
             {theme === 'parchment' ? 'skin: parchment' : 'skin: milanote'}
           </button>
+          <div className="nt-export-wrap">
+            <button className="btn-quiet" onClick={() => setExportMenuOpen((v) => !v)} title="Export this board">
+              export
+            </button>
+            {exportMenuOpen && (
+              <div className="nt-export-menu">
+                <button onClick={() => exportBoard('png1')}>PNG (1×)</button>
+                <button onClick={() => exportBoard('png2')}>PNG (2×)</button>
+                <button onClick={() => exportBoard('pdf')}>PDF</button>
+                <button onClick={() => exportBoard('md')}>Markdown</button>
+              </div>
+            )}
+          </div>
           <button className="btn-quiet" onClick={() => setHelpOpen(true)} title="Keyboard shortcuts (?)">⌨</button>
           <button className="btn-quiet" onClick={openTrash} title="Trash">Trash</button>
         </div>

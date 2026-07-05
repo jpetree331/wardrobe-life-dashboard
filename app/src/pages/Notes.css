@@ -1488,6 +1488,27 @@
   100% { box-shadow: 0 0 0 8px transparent; }
 }
 
+/* Export menu */
+.nt-export-wrap { position: relative; }
+.nt-export-menu {
+  position: absolute; right: 0; top: calc(100% + 6px);
+  z-index: 120;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 14px 30px -10px rgba(43,36,25,0.35);
+  padding: 5px;
+  min-width: 130px;
+  display: flex; flex-direction: column;
+}
+.nt-export-menu button {
+  background: transparent; border: 0; cursor: pointer;
+  text-align: left;
+  font-family: var(--notes-font-body); font-size: 13px;
+  color: var(--ink);
+  padding: 6px 10px; border-radius: var(--notes-control-radius);
+}
+.nt-export-menu button:hover { background: var(--bg-3); }
+
 /* Status footer */
 .nt-status {
   display: flex; align-items: center; justify-content: space-between;
