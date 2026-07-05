@@ -28,6 +28,7 @@ export type Board = {
   tile_color: SwatchKey;
   tile_icon: string;
   is_root: boolean;
+  starred: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -194,6 +195,41 @@ export async function renameBoard(id: string, name: string): Promise<void> {
     .update({ name })
     .eq('id', id);
   if (error) throw error;
+}
+
+/** Update board metadata: star flag / tile color / tile icon. */
+export async function updateBoardMeta(
+  id: string,
+  patch: Partial<{ starred: boolean; tile_color: SwatchKey; tile_icon: string }>,
+): Promise<void> {
+  const { error } = await supabase.from('notes_boards').update(patch).eq('id', id);
+  if (error) throw error;
+}
+
+/**
+ * Re-parent a board (sidebar drag). Moves the board row AND its tile card
+ * onto the new parent's canvas. Cycle checking is the caller's job
+ * (lib/notesBoardTree.wouldCreateCycle); the root board never moves.
+ */
+export async function reparentBoard(boardId: string, newParentId: string): Promise<void> {
+  const { data: board, error: bErr } = await supabase
+    .from('notes_boards')
+    .select('is_root')
+    .eq('id', boardId)
+    .single();
+  if (bErr) throw bErr;
+  if ((board as { is_root: boolean }).is_root) throw new Error('The root board cannot be moved.');
+  const { error } = await supabase
+    .from('notes_boards')
+    .update({ parent_id: newParentId })
+    .eq('id', boardId);
+  if (error) throw error;
+  // The tile that opens this board lives on the old parent — bring it along.
+  const { error: tErr } = await supabase
+    .from('notes_cards')
+    .update({ board_id: newParentId, parent_column: null, column_index: null })
+    .eq('board_ref', boardId);
+  if (tErr) throw tErr;
 }
 
 // ── Cards ──────────────────────────────────────────────────────────────

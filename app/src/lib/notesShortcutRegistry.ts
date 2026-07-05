@@ -54,6 +54,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { id: 'edit-card',   keys: ['Enter', 'Tab'], label: 'Edit the selected note',   category: 'Canvas', when: 'one note selected' },
   { id: 'search',      keys: ['Mod F'],        label: 'Search boards and cards',  category: 'Canvas', when: 'not typing' },
   { id: 'inbox',       keys: ['Mod Shift U'],  label: 'Toggle the Unsorted tray', category: 'Canvas', when: 'not typing' },
+  { id: 'sidebar',     keys: ['Mod \\'],       label: 'Toggle the board tree sidebar', category: 'Canvas', when: 'not typing' },
   { id: 'dblclick-note', keys: ['Double-click empty canvas'], label: 'New note under the cursor', category: 'Canvas' },
   { id: 'alt-drag',    keys: ['Alt Drag'],          label: 'Drag out a duplicate (original stays)', category: 'Selection' },
   { id: 'hover-open',  keys: ['Drag onto a board tile'], label: 'Drop moves cards in; hold ~1s to follow them', category: 'Canvas' },

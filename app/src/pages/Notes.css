@@ -146,6 +146,70 @@
   min-height: 0; min-width: 0;
   position: relative;
 }
+.nt-main.with-sidebar { grid-template-columns: 232px 64px 1fr; }
+
+/* Board tree sidebar */
+.nt-sidebar {
+  background: var(--bg-2);
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  padding: 12px 8px 20px;
+}
+.nt-sidebar-group {
+  font-family: var(--notes-font-display);
+  font-size: 10px; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 12px 8px 4px;
+}
+.nt-tree-row {
+  display: flex; align-items: center; gap: 5px;
+  padding: 2px 6px 2px 8px;
+  border-radius: var(--notes-control-radius);
+}
+.nt-tree-row.shallow { padding-left: 12px; }
+.nt-tree-row.current { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+.nt-tree-row.drop { outline: 1.5px dashed var(--accent); outline-offset: -1px; }
+.nt-tree-row .tree-caret {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--ink-faint); font-size: 10px;
+  width: 14px; padding: 0; flex-shrink: 0;
+}
+.nt-tree-row .tree-caret.none { cursor: default; opacity: 0.4; }
+.nt-tree-row .tree-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  flex-shrink: 0;
+}
+.nt-tree-row .tree-dot.faint { background: var(--bg-3); }
+.nt-tree-row .tree-name {
+  flex: 1; min-width: 0; text-align: left;
+  background: transparent; border: 0; cursor: pointer;
+  font-family: var(--notes-font-body); font-size: 13.5px;
+  color: var(--ink); padding: 2px 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nt-tree-row .tree-name:hover { color: var(--accent-strong); }
+.nt-tree-row .tree-star { color: var(--ink-faint); font-size: 11px; }
+.nt-tree-row .tree-star.lit { color: var(--c-saffron); text-shadow: 0 0 1px var(--ink-faint); }
+.nt-sidebar-hint {
+  font-family: var(--notes-font-body); font-style: italic;
+  font-size: 11px; color: var(--ink-faint);
+  padding: 16px 10px 0;
+}
+
+/* Tile icon picker inside the context menu */
+.nt-ctx .icon-grid {
+  display: grid; grid-template-columns: repeat(8, 1fr);
+  gap: 2px; padding: 4px 8px 6px;
+}
+.nt-ctx .tile-ic {
+  background: transparent; border: 0; cursor: pointer;
+  color: var(--ink-soft);
+  padding: 3px; border-radius: var(--notes-control-radius);
+  display: flex; align-items: center; justify-content: center;
+}
+.nt-ctx .tile-ic:hover { background: var(--bg-3); color: var(--ink); }
+.nt-ctx .tile-ic svg { width: 16px; height: 16px; }
 
 /* Left toolbar */
 .nt-tools {

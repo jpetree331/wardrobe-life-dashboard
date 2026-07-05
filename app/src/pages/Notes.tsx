@@ -18,6 +18,7 @@ import {
   SWATCHES,
   createBoardWithTile,
   createCard,
+  getBoard,
   getBoardAncestry,
   getOrCreateRootBoard,
   hardDeleteCardRow,
@@ -101,6 +102,8 @@ import { stepOrder, type ZStep } from '../lib/notesZOrder';
 import { loadRecentBoards, loadSavedView, pushRecentBoard, saveSavedView } from '../lib/notesViewStore';
 import { listAllBoards, listAllCards } from '../lib/notes';
 import { searchBoards, searchCards, type BoardHit, type CardHit } from '../lib/notesSearch';
+import { reparentBoard, updateBoardMeta } from '../lib/notes';
+import { buildBoardTree, wouldCreateCycle, type BoardNode } from '../lib/notesBoardTree';
 import { marqueeHits, normalizeRect, type Rect } from '../lib/notesMarquee';
 import { useFavicon } from '../hooks/useFavicon';
 import './Notes.css';
@@ -126,6 +129,36 @@ const TOOLBAR_TYPES: Array<{
 /** Is this card the board's reserved "Unsorted" inbox column? */
 function isInboxColumn(c: Card): boolean {
   return c.type === 'column' && (c.payload as Record<string, unknown>).system === 'inbox';
+}
+
+/** Curated board-tile icon set (Sprint 17) — line style matches both themes. */
+const TILE_ICON_PATHS: Record<string, string> = {
+  grid:    'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+  star:    'M12 3.5l2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.7l5.9-.9z',
+  book:    'M5 4h11a3 3 0 013 3v13H8a3 3 0 01-3-3zM5 17.5A2.5 2.5 0 017.5 15H19',
+  heart:   'M12 20s-7-4.5-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.5-7 10-7 10z',
+  leaf:    'M5 19C5 9 12 4 20 4c0 9-5 15-13 15zM5 19c2-5 6-9 10-11',
+  sun:     'M12 7a5 5 0 100 10 5 5 0 000-10zM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+  moon:    'M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z',
+  key:     'M14 10a4 4 0 11-1.2-2.8M12.8 12.8L5 20.5M8 17.5l2 2M6 19.5l1.5 1.5',
+  bell:    'M6 16v-5a6 6 0 1112 0v5l1.5 2.5H4.5zM10 21a2 2 0 004 0',
+  flame:   'M12 3c1 4-4 5.5-4 10a4 4 0 008 0c0-2-1-3.5-1-3.5s2.5 1 2 4A6.5 6.5 0 1112 3z',
+  feather: 'M19 5c-6 0-11 4-12.5 12L5 19M6.5 17H13c4 0 6-6 6-12zM8 13h6',
+  anchor:  'M12 8a2.5 2.5 0 112.5-2.5A2.5 2.5 0 0112 8zm0 0v13m-7-7c0 4 3 7 7 7s7-3 7-7M3.5 14H7m10 0h3.5',
+  map:     'M9 4L4 6v14l5-2 6 2 5-2V4l-5 2zm0 0v14m6-12v14',
+  music:   'M9 18V6l10-2v12M9 18a2.5 2.5 0 11-2.5-2.5M19 16a2.5 2.5 0 11-2.5-2.5',
+  camera:  'M4 8h3l2-2.5h6L17 8h3v11H4zm8 2.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7z',
+  cross:   'M10 3h4v6h6v4h-6v8h-4v-8H4V9h6z',
+};
+export const TILE_ICON_NAMES = Object.keys(TILE_ICON_PATHS);
+
+function tileIconSvg(name: string): JSX.Element {
+  const d = TILE_ICON_PATHS[name] ?? TILE_ICON_PATHS.grid;
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d={d} />
+    </svg>
+  );
 }
 
 const DEFAULT_W: Record<CardType, number> = {
@@ -1672,6 +1705,81 @@ export default function Notes() {
     document.addEventListener('mouseup', onUp);
   }
 
+  // ── Board tree sidebar + starring + tile customization (Sprint 17) ────
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try { return window.localStorage.getItem('notes-sidebar-open') === '1'; } catch { return false; }
+  });
+  const [sidebarBoards, setSidebarBoards] = useState<Board[]>([]);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+    try {
+      const raw = window.localStorage.getItem('notes-sidebar-expanded');
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch { return new Set(); }
+  });
+  const refreshSidebar = useCallback(() => {
+    listAllBoards().then(setSidebarBoards).catch(console.error);
+  }, []);
+  useEffect(() => {
+    if (sidebarOpen) refreshSidebar();
+  }, [sidebarOpen, currentBoardId, refreshSidebar]);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((v) => {
+      const next = !v;
+      try { window.localStorage.setItem('notes-sidebar-open', next ? '1' : '0'); } catch { /* ok */ }
+      return next;
+    });
+  }, []);
+  function toggleExpanded(boardId: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(boardId)) next.delete(boardId);
+      else next.add(boardId);
+      try { window.localStorage.setItem('notes-sidebar-expanded', JSON.stringify([...next])); } catch { /* ok */ }
+      return next;
+    });
+  }
+
+  async function handleReparent(moveId: string, targetId: string) {
+    if (moveId === targetId) return;
+    if (wouldCreateCycle(sidebarBoards, moveId, targetId)) {
+      setStatusMsg('Cannot move a board into its own subtree.');
+      return;
+    }
+    try {
+      await reparentBoard(moveId, targetId);
+      setStatusMsg('Board moved.');
+      refreshSidebar();
+      if (currentBoardId) loadBoard(currentBoardId); // breadcrumbs + tiles
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Could not move that board.');
+    }
+  }
+
+  const currentBoard = ancestry[ancestry.length - 1] ?? null;
+  async function toggleStarBoard(boardId: string, next: boolean) {
+    try {
+      await updateBoardMeta(boardId, { starred: next });
+      setAncestry((prev) => prev.map((b) => (b.id === boardId ? { ...b, starred: next } : b)));
+      setSidebarBoards((prev) => prev.map((b) => (b.id === boardId ? { ...b, starred: next } : b)));
+      setStatusMsg(next ? 'Board starred.' : 'Board unstarred.');
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  /** Tile icon customization: writes notes_boards.tile_icon AND mirrors
+      it in the tile card payload for rendering. */
+  function setTileIcon(tile: Card, icon: string) {
+    setCtxMenu(null);
+    if (!tile.board_ref) return;
+    const payload = { ...(tile.payload as Record<string, unknown>), icon };
+    patchCardLocal(tile.id, { payload });
+    updateCard(tile.id, { payload }).catch(console.error);
+    updateBoardMeta(tile.board_ref, { tile_icon: icon }).catch(console.error);
+  }
+
   // ── Search jump target focusing (Sprint 16) ───────────────────────────
   const focusFoundCard = useCallback(
     (cardId: string) => {
@@ -2318,6 +2426,11 @@ export default function Notes() {
           toggleInbox();
           return;
         }
+        if (e.key === '\\') {
+          e.preventDefault();
+          toggleSidebar();
+          return;
+        }
         return;
       }
 
@@ -2403,7 +2516,7 @@ export default function Notes() {
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge, selectedArrowId, arrows, arrowMenu, arrowLabelEditId, deleteArrowCmd, helpOpen, searchOpen, toggleInbox]);
+  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge, selectedArrowId, arrows, arrowMenu, arrowLabelEditId, deleteArrowCmd, helpOpen, searchOpen, toggleInbox, toggleSidebar]);
 
   // ── Floating format toolbar ───────────────────────────────────────────
   // Show when the user makes a non-collapsed selection inside a Note body
@@ -2585,6 +2698,10 @@ export default function Notes() {
     for (const t of targets) {
       patchCardLocal(t.id, { color });
       updateCard(t.id, { color }).catch(console.error);
+      // Board tiles also record the color on the board row (sidebar dot).
+      if (t.type === 'board' && t.board_ref) {
+        updateBoardMeta(t.board_ref, { tile_color: color }).catch(console.error);
+      }
     }
     getHistory(currentBoardId)?.push({
       label: targets.length > 1 ? `Color ${targets.length} cards` : 'Change color',
@@ -2702,6 +2819,13 @@ export default function Notes() {
       <header className="nt-ribbon">
         <div className="left">
           <Link className="back" to="/">← hallway</Link>
+          <button
+            className="btn-quiet"
+            onClick={toggleSidebar}
+            title="Board tree (Ctrl/Cmd+\)"
+          >
+            {sidebarOpen ? '⊟' : '⊞'}
+          </button>
           <div className="place">Notes</div>
           <nav className="breadcrumbs" aria-label="Boards">
             {ancestry.map((b, i) => {
@@ -2742,6 +2866,13 @@ export default function Notes() {
           </nav>
         </div>
         <div className="right">
+          <button
+            className="btn-quiet"
+            onClick={() => currentBoard && toggleStarBoard(currentBoard.id, !currentBoard.starred)}
+            title={currentBoard?.starred ? 'Unstar this board' : 'Star this board'}
+          >
+            {currentBoard?.starred ? '★' : '☆'}
+          </button>
           <button
             className="btn-quiet"
             disabled={!hist?.canUndo()}
@@ -2786,7 +2917,18 @@ export default function Notes() {
         </div>
       </header>
 
-      <main className="nt-main">
+      <main className={`nt-main${sidebarOpen ? ' with-sidebar' : ''}`}>
+        {sidebarOpen && (
+          <BoardSidebar
+            boards={sidebarBoards}
+            currentBoardId={currentBoardId}
+            expandedIds={expandedIds}
+            recents={loadRecentBoards()}
+            onToggleExpand={toggleExpanded}
+            onNavigate={(id) => setCurrentBoardId(id)}
+            onReparent={handleReparent}
+          />
+        )}
         <aside className="nt-tools" aria-label="Card types">
           {TOOLBAR_TYPES.map((t) => (
             <button
@@ -3038,15 +3180,36 @@ export default function Notes() {
             Bring to front
           </button>
           {ctxCard.type === 'board' && ctxCard.board_ref && (
-            <button
-              className="item"
-              onClick={() => {
-                setCurrentBoardId(ctxCard.board_ref!);
-                setCtxMenu(null);
-              }}
-            >
-              Open board
-            </button>
+            <>
+              <button
+                className="item"
+                onClick={() => {
+                  setCurrentBoardId(ctxCard.board_ref!);
+                  setCtxMenu(null);
+                }}
+              >
+                Open board
+              </button>
+              <button
+                className="item"
+                onClick={async () => {
+                  setCtxMenu(null);
+                  const b = sidebarBoards.find((x) => x.id === ctxCard.board_ref) ??
+                    (await getBoard(ctxCard.board_ref!).catch(() => null));
+                  if (b) toggleStarBoard(b.id, !b.starred);
+                }}
+              >
+                Star / unstar board
+              </button>
+              <div className="label">Tile icon</div>
+              <div className="icon-grid">
+                {TILE_ICON_NAMES.map((n) => (
+                  <button key={n} className="tile-ic" title={n} onClick={() => setTileIcon(ctxCard, n)}>
+                    {tileIconSvg(n)}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
           {ctxCard.type === 'document' && (
             <button
@@ -3962,16 +4125,11 @@ function DocumentTile({
 }
 
 function BoardTile({ card }: { card: Card }) {
-  const payload = card.payload as { name?: string };
+  const payload = card.payload as { name?: string; icon?: string };
   return (
     <>
       <div className="board-tile" style={{ background: `var(--c-${card.color})` } as CSSProperties}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="4" y="4" width="7" height="7" rx="1" />
-          <rect x="13" y="4" width="7" height="7" rx="1" />
-          <rect x="4" y="13" width="7" height="7" rx="1" />
-          <rect x="13" y="13" width="7" height="7" rx="1" />
-        </svg>
+        {tileIconSvg(payload.icon || 'grid')}
       </div>
       <div className="board-label">{payload.name || 'Untitled'}</div>
       <div className="board-meta">double-click to enter</div>
@@ -4211,6 +4369,105 @@ function fileGroupIcon(group: string): JSX.Element {
         </svg>
       );
   }
+}
+
+// ── Board tree sidebar (Sprint 17) ──────────────────────────────────────
+
+function BoardSidebar({
+  boards,
+  currentBoardId,
+  expandedIds,
+  recents,
+  onToggleExpand,
+  onNavigate,
+  onReparent,
+}: {
+  boards: Board[];
+  currentBoardId: string | null;
+  expandedIds: Set<string>;
+  recents: Array<{ id: string; name: string }>;
+  onToggleExpand: (id: string) => void;
+  onNavigate: (id: string) => void;
+  onReparent: (moveId: string, targetId: string) => void;
+}) {
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const tree = buildBoardTree(boards);
+  const starred = boards.filter((b) => b.starred).sort((a, b) => a.name.localeCompare(b.name));
+
+  const row = (node: BoardNode<Board>, depth: number): JSX.Element => {
+    const b = node.board;
+    const expanded = b.is_root || expandedIds.has(b.id);
+    return (
+      <div key={b.id}>
+        <div
+          className={`nt-tree-row${b.id === currentBoardId ? ' current' : ''}${dropTarget === b.id ? ' drop' : ''}`}
+          style={{ paddingLeft: 8 + depth * 14 } as CSSProperties}
+          draggable={!b.is_root}
+          onDragStart={(e) => {
+            e.dataTransfer.setData('text/x-board-id', b.id);
+            e.dataTransfer.effectAllowed = 'move';
+          }}
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes('text/x-board-id')) {
+              e.preventDefault();
+              setDropTarget(b.id);
+            }
+          }}
+          onDragLeave={() => setDropTarget((t) => (t === b.id ? null : t))}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDropTarget(null);
+            const moveId = e.dataTransfer.getData('text/x-board-id');
+            if (moveId) onReparent(moveId, b.id);
+          }}
+        >
+          <button
+            className={`tree-caret${node.children.length === 0 ? ' none' : ''}`}
+            onClick={() => onToggleExpand(b.id)}
+            tabIndex={-1}
+          >
+            {node.children.length > 0 ? (expanded ? '▾' : '▸') : '·'}
+          </button>
+          <span className="tree-dot" style={{ background: `var(--c-${b.tile_color})` } as CSSProperties} />
+          <button className="tree-name" onClick={() => onNavigate(b.id)}>
+            {b.name}
+          </button>
+          {b.starred && <span className="tree-star">★</span>}
+        </div>
+        {expanded && node.children.map((child) => row(child, depth + 1))}
+      </div>
+    );
+  };
+
+  return (
+    <aside className="nt-sidebar">
+      {starred.length > 0 && (
+        <>
+          <div className="nt-sidebar-group">Starred</div>
+          {starred.map((b) => (
+            <div className="nt-tree-row shallow" key={`s-${b.id}`}>
+              <span className="tree-star lit">★</span>
+              <button className="tree-name" onClick={() => onNavigate(b.id)}>{b.name}</button>
+            </div>
+          ))}
+        </>
+      )}
+      {recents.length > 0 && (
+        <>
+          <div className="nt-sidebar-group">Recent</div>
+          {recents.slice(0, 8).map((r) => (
+            <div className="nt-tree-row shallow" key={`r-${r.id}`}>
+              <span className="tree-dot faint" />
+              <button className="tree-name" onClick={() => onNavigate(r.id)}>{r.name}</button>
+            </div>
+          ))}
+        </>
+      )}
+      <div className="nt-sidebar-group">All boards</div>
+      {tree ? row(tree, 0) : <div className="nt-search-empty">Loading…</div>}
+      <div className="nt-sidebar-hint">drag a board onto another to move it</div>
+    </aside>
+  );
 }
 
 // ── Global search / quick switcher (Sprint 16) ──────────────────────────
