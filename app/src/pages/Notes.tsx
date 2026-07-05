@@ -32,8 +32,17 @@ import {
   softDeleteTodoItem,
   updateCard,
 } from '../lib/notes';
-import type { ColumnPayload } from '../lib/notes';
+import type { Arrow, ColumnPayload } from '../lib/notes';
+import {
+  createArrow,
+  hardDeleteArrowRow,
+  insertArrowRow,
+  listArrows,
+  softDeleteArrow,
+  updateArrow,
+} from '../lib/notes';
 import { insertAt, insertionIndexFromY } from '../lib/notesColumns';
+import { arrowPath, bestEdgePair, bezierPoint, type RectLike } from '../lib/notesArrows';
 import { BoardHistory, BurstCoalescer, hasUserContent, type Command } from '../lib/notesHistory';
 import type { FilePayload, ImagePayload, LinkPayload } from '../lib/notes';
 import { domainOf, embedUrlFor, isProbablyUrl, type LinkMeta } from '../lib/notesLinkMeta';
@@ -127,6 +136,14 @@ export default function Notes() {
   const [colDrop, setColDrop] = useState<{ colId: string; index: number } | null>(null);
   // Member row being dragged out of / within a column (styling).
   const [memberDragId, setMemberDragId] = useState<string | null>(null);
+  // Arrows (Sprint 9).
+  const [arrows, setArrows] = useState<Arrow[]>([]);
+  const [selectedArrowId, setSelectedArrowId] = useState<string | null>(null);
+  const [arrowMenu, setArrowMenu] = useState<{ x: number; y: number; arrowId: string } | null>(null);
+  const [arrowDraft, setArrowDraft] = useState<{ fromId: string; cursor: { x: number; y: number } } | null>(null);
+  const [arrowLabelEditId, setArrowLabelEditId] = useState<string | null>(null);
+  const arrowsRef = useRef<Arrow[]>([]);
+  useEffect(() => { arrowsRef.current = arrows; }, [arrows]);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; cardId: string } | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
   const [trash, setTrash] = useState<TrashEntry[]>([]);
@@ -189,6 +206,18 @@ export default function Notes() {
   const removeCardsLocal = useCallback((ids: Set<string>) => {
     setCards((prev) => prev.filter((c) => !ids.has(c.id)));
   }, []);
+  const upsertArrowLocal = useCallback((arrow: Arrow) => {
+    setArrows((prev) => {
+      const i = prev.findIndex((a) => a.id === arrow.id);
+      if (i === -1) return [...prev, arrow];
+      const next = prev.slice();
+      next[i] = arrow;
+      return next;
+    });
+  }, []);
+  const removeArrowLocal = useCallback((id: string) => {
+    setArrows((prev) => prev.filter((a) => a.id !== id));
+  }, []);
 
   const doUndo = useCallback(async () => {
     const cmd = await getHistory(currentBoardId)?.undo();
@@ -236,13 +265,22 @@ export default function Notes() {
 
   const loadBoard = useCallback(async (boardId: string) => {
     try {
-      const [cardList, chain] = await Promise.all([
+      const [cardList, chain, arrowList] = await Promise.all([
         listCards(boardId),
         getBoardAncestry(boardId),
+        listArrows(boardId).catch((err) => {
+          // Arrows table may not exist yet (migration 0012 pending).
+          console.error(err);
+          return [] as Arrow[];
+        }),
       ]);
       setCards(cardList);
+      setArrows(arrowList);
       setAncestry(chain);
       setSelectedIds(new Set());
+      setSelectedArrowId(null);
+      setArrowMenu(null);
+      setArrowLabelEditId(null);
       // Restore this board's saved view; else fit its cards; else identity.
       const saved = loadSavedView(boardId);
       if (saved) {
@@ -324,7 +362,11 @@ export default function Notes() {
     if (!pan && e.button !== 0) return;
     if ((e.target as HTMLElement).closest('.nt-card')) return;
     if ((e.target as HTMLElement).closest('.nt-ctx')) return;
+    if ((e.target as HTMLElement).closest('.nt-arrow-hit')) return;
+    if ((e.target as HTMLElement).closest('.nt-arrow-label')) return;
     setCtxMenu(null);
+    setArrowMenu(null);
+    setSelectedArrowId(null);
     if (pan) startPanGesture(e);
     else startMarqueeGesture(e);
   }
@@ -948,6 +990,12 @@ export default function Notes() {
       for (const members of columnMembers.values()) {
         for (const m of members) removedIds.add(m.id);
       }
+      // Arrows attached to any deleted card go to the trash with it and
+      // return on undo (matching the Sprint 9 rules).
+      const attachedArrows = arrowsRef.current.filter(
+        (a) => removedIds.has(a.from_card) || removedIds.has(a.to_card),
+      );
+      setArrows((prev) => prev.filter((a) => !attachedArrows.some((x) => x.id === a.id)));
       setCards((prev) => prev.filter((c) => !removedIds.has(c.id)));
       setSelectedIds(new Set());
       setCtxMenu(null);
@@ -956,6 +1004,9 @@ export default function Notes() {
       const plain = targets.filter((t) => t.type !== 'column' && !(t.type === 'board' && t.board_ref));
       const boards = targets.filter((t) => t.type === 'board' && t.board_ref);
       try {
+        // Arrows first (their FKs cascade once the cards go).
+        const arrowTrashIds: string[] = [];
+        for (const a of attachedArrows) arrowTrashIds.push(await softDeleteArrow(a));
         // Each card / column gets its own restorable trash entry.
         const plainTrashIds: string[] = [];
         for (const t of plain) plainTrashIds.push(await softDeleteCard(t));
@@ -974,6 +1025,8 @@ export default function Notes() {
           const tIds = plainTrashIds.slice();
           const colSnapshots = columns.slice();
           const cIds = colTrashIds.slice();
+          const arrowSnapshots = attachedArrows.slice();
+          const aIds = arrowTrashIds.slice();
           const label =
             targets.length > 1 ? `Delete ${targets.length} cards`
             : columns.length === 1 ? 'Delete column'
@@ -998,8 +1051,18 @@ export default function Notes() {
                 }
                 await removeTrashEntry(cIds[i]);
               }
+              // Cards are back — re-attach their arrows.
+              for (let i = 0; i < arrowSnapshots.length; i++) {
+                const row = await insertArrowRow(arrowSnapshots[i]);
+                upsertArrowLocal(row);
+                await removeTrashEntry(aIds[i]);
+              }
             },
             do: async () => {
+              for (let i = 0; i < arrowSnapshots.length; i++) {
+                removeArrowLocal(arrowSnapshots[i].id);
+                aIds[i] = await softDeleteArrow(arrowSnapshots[i]);
+              }
               for (let i = 0; i < snapshots.length; i++) {
                 removeCardsLocal(new Set([snapshots[i].id]));
                 tIds[i] = await softDeleteCard(snapshots[i]);
@@ -1019,7 +1082,7 @@ export default function Notes() {
         if (currentBoardId) loadBoard(currentBoardId);
       }
     },
-    [currentBoardId, loadBoard, getHistory, upsertCardLocal, removeCardsLocal],
+    [currentBoardId, loadBoard, getHistory, upsertCardLocal, removeCardsLocal, upsertArrowLocal, removeArrowLocal],
   );
 
   const duplicateCards = useCallback(
@@ -1283,6 +1346,143 @@ export default function Notes() {
     document.addEventListener('mouseup', onUp);
   }
 
+  // ── Arrows (Sprint 9) ──────────────────────────────────────────────────
+
+  /** Model-space rect for arrow attachment. */
+  const rectOfCard = (c: Card): RectLike => ({
+    x: c.x,
+    y: c.y,
+    w: c.w ?? DEFAULT_W[c.type],
+    h: c.h ?? DEFAULT_H[c.type],
+  });
+
+  /** Drag from an edge dot; drop on another card creates an arrow. */
+  function startArrowDraft(card: Card, e: React.MouseEvent) {
+    if (e.button !== 0 || !currentBoardId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const r = wrap.getBoundingClientRect();
+    const toCanvas = (cx: number, cy: number) => wrapperToCanvas(view, cx - r.left, cy - r.top);
+    setArrowDraft({ fromId: card.id, cursor: toCanvas(e.clientX, e.clientY) });
+    const onMove = (ev: MouseEvent) => {
+      setArrowDraft({ fromId: card.id, cursor: toCanvas(ev.clientX, ev.clientY) });
+    };
+    const onUp = async (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setArrowDraft(null);
+      const pt = toCanvas(ev.clientX, ev.clientY);
+      // Topmost free card under the cursor (excluding the source).
+      const target = cardsRef.current
+        .filter((c) => !c.parent_column && c.id !== card.id)
+        .sort((a, b) => b.z - a.z)
+        .find((c) => {
+          const cr = rectOfCard(c);
+          return pt.x >= cr.x && pt.x <= cr.x + cr.w && pt.y >= cr.y && pt.y <= cr.y + cr.h;
+        });
+      if (!target) return; // dropped on empty canvas → cancel
+      // TODO(Sprint roadmap): Milanote also creates a new note on empty-
+      // canvas drop; deliberately skipped for now.
+      try {
+        const arrow = await createArrow({
+          board_id: currentBoardId,
+          from_card: card.id,
+          to_card: target.id,
+        });
+        upsertArrowLocal(arrow);
+        setSelectedArrowId(arrow.id);
+        // Undo: an arrow with a label goes through the trash; a bare
+        // arrow never "existed" and may be hard-removed.
+        let trashId: string | null = null;
+        let snapshot = arrow;
+        getHistory(currentBoardId)?.push({
+          label: 'Connect cards',
+          undo: async () => {
+            const cur = arrowsRef.current.find((a) => a.id === snapshot.id) ?? snapshot;
+            snapshot = cur;
+            removeArrowLocal(cur.id);
+            if (cur.label.trim()) trashId = await softDeleteArrow(cur);
+            else {
+              trashId = null;
+              await hardDeleteArrowRow(cur.id);
+            }
+          },
+          do: async () => {
+            const row = await insertArrowRow(snapshot);
+            upsertArrowLocal(row);
+            if (trashId) {
+              await removeTrashEntry(trashId);
+              trashId = null;
+            }
+          },
+        });
+      } catch (err) {
+        console.error(err);
+        setStatusMsg('Could not create the arrow — has migration 0012 been run?');
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  const deleteArrowCmd = useCallback(
+    async (arrow: Arrow) => {
+      setArrowMenu(null);
+      setSelectedArrowId(null);
+      removeArrowLocal(arrow.id);
+      try {
+        let trashId = await softDeleteArrow(arrow);
+        getHistory(currentBoardId)?.push({
+          label: 'Delete arrow',
+          undo: async () => {
+            const row = await insertArrowRow(arrow);
+            upsertArrowLocal(row);
+            await removeTrashEntry(trashId);
+          },
+          do: async () => {
+            removeArrowLocal(arrow.id);
+            trashId = await softDeleteArrow(arrow);
+          },
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    },
+    [currentBoardId, getHistory, removeArrowLocal, upsertArrowLocal],
+  );
+
+  /** Patch an arrow (label / style / direction) as an undoable command. */
+  const patchArrowCmd = useCallback(
+    async (arrow: Arrow, patch: Partial<Pick<Arrow, 'label' | 'style' | 'from_card' | 'to_card'>>, label: string) => {
+      setArrowMenu(null);
+      const before = { from_card: arrow.from_card, to_card: arrow.to_card, label: arrow.label, style: arrow.style };
+      const after = { ...before, ...patch };
+      upsertArrowLocal({ ...arrow, ...after });
+      try {
+        await updateArrow(arrow.id, after);
+      } catch (err) {
+        console.error(err);
+        return;
+      }
+      getHistory(currentBoardId)?.push({
+        label,
+        undo: async () => {
+          const cur = arrowsRef.current.find((a) => a.id === arrow.id);
+          if (cur) upsertArrowLocal({ ...cur, ...before });
+          await updateArrow(arrow.id, before);
+        },
+        do: async () => {
+          const cur = arrowsRef.current.find((a) => a.id === arrow.id);
+          if (cur) upsertArrowLocal({ ...cur, ...after });
+          await updateArrow(arrow.id, after);
+        },
+      });
+    },
+    [currentBoardId, getHistory, upsertArrowLocal],
+  );
+
   // ── Arrow-nudge coalescing ─────────────────────────────────────────────
   // Rapid arrow presses accumulate locally; 500ms after the last press the
   // whole run persists and becomes ONE composite history command.
@@ -1342,10 +1542,16 @@ export default function Notes() {
           setLightboxId(null);
         } else if (docOverlayId) {
           setDocOverlayId(null);
+        } else if (arrowLabelEditId) {
+          setArrowLabelEditId(null);
         } else if (ctxMenu) {
           setCtxMenu(null);
+        } else if (arrowMenu) {
+          setArrowMenu(null);
         } else if (trashOpen) {
           setTrashOpen(false);
+        } else if (selectedArrowId) {
+          setSelectedArrowId(null);
         } else if (selectedIds.size) {
           clearSelection();
         }
@@ -1448,8 +1654,16 @@ export default function Notes() {
         return;
       }
 
-      // Delete sends the whole selection to trash.
+      // Delete sends the selected arrow, or the whole selection, to trash.
       if (e.key === 'Delete') {
+        if (selectedArrowId) {
+          const arrow = arrows.find((a) => a.id === selectedArrowId);
+          if (arrow) {
+            e.preventDefault();
+            deleteArrowCmd(arrow);
+          }
+          return;
+        }
         if (!selectedIds.size) return;
         e.preventDefault();
         deleteCards(cards.filter((c) => selectedIds.has(c.id)));
@@ -1457,7 +1671,7 @@ export default function Notes() {
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge]);
+  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge, selectedArrowId, arrows, arrowMenu, arrowLabelEditId, deleteArrowCmd]);
 
   // ── Floating format toolbar ───────────────────────────────────────────
   // Show when the user makes a non-collapsed selection inside a Note body
@@ -1611,15 +1825,16 @@ export default function Notes() {
     setCtxMenu({ x: clientX, y: clientY, cardId: card.id });
   }
   useEffect(() => {
-    if (!ctxMenu) return;
+    if (!ctxMenu && !arrowMenu) return;
     function close(e: MouseEvent) {
       const t = e.target as HTMLElement;
       if (t.closest('.nt-ctx')) return;
       setCtxMenu(null);
+      setArrowMenu(null);
     }
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
-  }, [ctxMenu]);
+  }, [ctxMenu, arrowMenu]);
 
   /** The cards an action invoked on `card` should apply to. */
   function actionTargets(card: Card): Card[] {
@@ -1846,6 +2061,7 @@ export default function Notes() {
                 members={card.type === 'column' ? membersOf(card.id) : undefined}
                 dropIndex={colDrop?.colId === card.id ? colDrop.index : null}
                 dropActive={colDrop?.colId === card.id}
+                onArrowStart={(e) => startArrowDraft(card, e)}
                 renderMember={(m) => (
                   <ColumnMemberRow
                     key={m.id}
@@ -1912,6 +2128,118 @@ export default function Notes() {
                 }}
               />
             ))}
+            {/* Arrow overlay: inside the transformed canvas so it pans/zooms
+                for free. Only free-card endpoints render. */}
+            <svg className="nt-arrows" width={12000} height={8000}>
+              <defs>
+                <marker
+                  id="nt-arrowhead"
+                  viewBox="0 0 10 10"
+                  refX="8.5"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 1 L 9 5 L 0 9 z" fill="context-stroke" stroke="none" />
+                </marker>
+              </defs>
+              {arrows.map((a) => {
+                const from = freeCards.find((c) => c.id === a.from_card);
+                const to = freeCards.find((c) => c.id === a.to_card);
+                if (!from || !to) return null;
+                const pair = bestEdgePair(rectOfCard(from), rectOfCard(to));
+                const d = arrowPath(pair.from, pair.to);
+                const isSel = selectedArrowId === a.id;
+                return (
+                  <g key={a.id} className={`nt-arrow${isSel ? ' selected' : ''}`}>
+                    <path
+                      className="nt-arrow-hit"
+                      d={d}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedArrowId(a.id);
+                        clearSelection();
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        setArrowLabelEditId(a.id);
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSelectedArrowId(a.id);
+                        setArrowMenu({ x: e.clientX, y: e.clientY, arrowId: a.id });
+                      }}
+                    />
+                    <path
+                      className="nt-arrow-line"
+                      d={d}
+                      markerEnd="url(#nt-arrowhead)"
+                      strokeDasharray={a.style?.dashed ? '7 5' : undefined}
+                    />
+                  </g>
+                );
+              })}
+              {arrowDraft && (() => {
+                const from = freeCards.find((c) => c.id === arrowDraft.fromId);
+                if (!from) return null;
+                const fr = rectOfCard(from);
+                const cursorRect: RectLike = { x: arrowDraft.cursor.x, y: arrowDraft.cursor.y, w: 1, h: 1 };
+                const pair = bestEdgePair(fr, cursorRect);
+                return (
+                  <path
+                    className="nt-arrow-line draft"
+                    d={arrowPath(pair.from, pair.to)}
+                    markerEnd="url(#nt-arrowhead)"
+                  />
+                );
+              })()}
+            </svg>
+            {/* Arrow labels (and the inline label editor) in canvas space */}
+            {arrows.map((a) => {
+              const from = freeCards.find((c) => c.id === a.from_card);
+              const to = freeCards.find((c) => c.id === a.to_card);
+              if (!from || !to) return null;
+              if (!a.label && arrowLabelEditId !== a.id) return null;
+              const pair = bestEdgePair(rectOfCard(from), rectOfCard(to));
+              const mid = bezierPoint(pair.from, pair.to, 0.5);
+              if (arrowLabelEditId === a.id) {
+                return (
+                  <input
+                    key={a.id}
+                    className="nt-arrow-label editing"
+                    style={{ left: mid.x, top: mid.y } as CSSProperties}
+                    autoFocus
+                    defaultValue={a.label}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                    }}
+                    onBlur={(e) => {
+                      setArrowLabelEditId(null);
+                      const next = e.target.value.trim();
+                      if (next !== a.label) patchArrowCmd(a, { label: next }, 'Label arrow');
+                    }}
+                  />
+                );
+              }
+              return (
+                <div
+                  key={a.id}
+                  className="nt-arrow-label"
+                  style={{ left: mid.x, top: mid.y } as CSSProperties}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setArrowLabelEditId(a.id);
+                  }}
+                >
+                  {a.label}
+                </div>
+              );
+            })}
             {uploads.map((u) => (
               <div
                 key={u.id}
@@ -2016,6 +2344,40 @@ export default function Notes() {
           </button>
         </div>
       )}
+
+      {arrowMenu && (() => {
+        const arrow = arrows.find((a) => a.id === arrowMenu.arrowId);
+        if (!arrow) return null;
+        return (
+          <div className="nt-ctx" style={{ left: arrowMenu.x, top: arrowMenu.y } as CSSProperties}>
+            <button
+              className="item"
+              onClick={() => patchArrowCmd(arrow, { from_card: arrow.to_card, to_card: arrow.from_card }, 'Flip arrow')}
+            >
+              Toggle direction
+            </button>
+            <button
+              className="item"
+              onClick={() => patchArrowCmd(arrow, { style: { ...arrow.style, dashed: !arrow.style?.dashed } }, 'Style arrow')}
+            >
+              {arrow.style?.dashed ? 'Solid line' : 'Dashed line'}
+            </button>
+            <button
+              className="item"
+              onClick={() => {
+                setArrowMenu(null);
+                setArrowLabelEditId(arrow.id);
+              }}
+            >
+              {arrow.label ? 'Edit label' : 'Add label'}
+            </button>
+            <div className="sep" />
+            <button className="item delete" onClick={() => deleteArrowCmd(arrow)}>
+              Delete arrow
+            </button>
+          </div>
+        );
+      })()}
 
       {fmtToolbar && (
         <div
@@ -2123,6 +2485,7 @@ function CardView({
   dropIndex,
   dropActive,
   renderMember,
+  onArrowStart,
   onMouseDown,
   onContextMenu,
   onDoubleClick,
@@ -2139,6 +2502,7 @@ function CardView({
   dropIndex?: number | null;
   dropActive?: boolean;
   renderMember?: (m: Card) => JSX.Element;
+  onArrowStart?: (e: React.MouseEvent) => void;
   onMouseDown: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
@@ -2200,6 +2564,15 @@ function CardView({
           title="Drag to resize"
         />
       )}
+      {onArrowStart &&
+        (['n', 's', 'e', 'w'] as const).map((side) => (
+          <div
+            key={side}
+            className={`nt-edge-dot dot-${side}`}
+            onMouseDown={onArrowStart}
+            title="Drag to another card to connect"
+          />
+        ))}
     </div>
   );
 }

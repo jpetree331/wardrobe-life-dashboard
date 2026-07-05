@@ -100,11 +100,25 @@ export type Card = {
 export type TrashEntry = {
   id: string;
   user_id: string;
-  kind: 'card' | 'todo_item' | 'board' | 'column';
+  kind: 'card' | 'todo_item' | 'board' | 'column' | 'arrow';
   origin_board: string | null;
   origin_card: string | null;
   snapshot: any;
   deleted_at: string;
+};
+
+export type ArrowStyle = { dashed?: boolean };
+
+export type Arrow = {
+  id: string;
+  user_id: string;
+  board_id: string;
+  from_card: string;
+  to_card: string;
+  label: string;
+  style: ArrowStyle;
+  created_at: string;
+  updated_at: string;
 };
 
 // ── Auth helper ────────────────────────────────────────────────────────
@@ -459,6 +473,102 @@ export async function softDeleteTodoItem(
   return { card: updated, trashId: (tRow as { id: string }).id };
 }
 
+// ── Arrows ─────────────────────────────────────────────────────────────
+
+export async function listArrows(boardId: string): Promise<Arrow[]> {
+  const { data, error } = await supabase
+    .from('notes_arrows')
+    .select('*')
+    .eq('board_id', boardId);
+  if (error) throw error;
+  return (data as Arrow[]) || [];
+}
+
+export async function createArrow(input: {
+  board_id: string;
+  from_card: string;
+  to_card: string;
+  label?: string;
+  style?: ArrowStyle;
+}): Promise<Arrow> {
+  const userId = await currentUserId();
+  const { data, error } = await supabase
+    .from('notes_arrows')
+    .insert({
+      user_id: userId,
+      board_id: input.board_id,
+      from_card: input.from_card,
+      to_card: input.to_card,
+      label: input.label ?? '',
+      style: input.style ?? {},
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Arrow;
+}
+
+export async function updateArrow(id: string, patch: Partial<{
+  from_card: string;
+  to_card: string;
+  label: string;
+  style: ArrowStyle;
+}>): Promise<Arrow> {
+  const { data, error } = await supabase
+    .from('notes_arrows')
+    .update(patch)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Arrow;
+}
+
+/** Soft-delete an arrow: trash snapshot (kind 'arrow'), then delete. */
+export async function softDeleteArrow(arrow: Arrow): Promise<string> {
+  const userId = await currentUserId();
+  const { data: tRow, error: tErr } = await supabase
+    .from('notes_trash')
+    .insert({
+      user_id: userId,
+      kind: 'arrow',
+      origin_board: arrow.board_id,
+      snapshot: arrow,
+    })
+    .select('id')
+    .single();
+  if (tErr) throw tErr;
+  const { error } = await supabase.from('notes_arrows').delete().eq('id', arrow.id);
+  if (error) throw error;
+  return (tRow as { id: string }).id;
+}
+
+/** Re-insert an arrow row preserving its id (history-layer only). */
+export async function insertArrowRow(arrow: Arrow): Promise<Arrow> {
+  const userId = await currentUserId();
+  const { data, error } = await supabase
+    .from('notes_arrows')
+    .insert({
+      id: arrow.id,
+      user_id: userId,
+      board_id: arrow.board_id,
+      from_card: arrow.from_card,
+      to_card: arrow.to_card,
+      label: arrow.label,
+      style: arrow.style,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Arrow;
+}
+
+/** Hard-delete an arrow row (undo of arrow-create only). */
+export async function hardDeleteArrowRow(id: string): Promise<void> {
+  const { error } = await supabase.from('notes_arrows').delete().eq('id', id);
+  if (error) throw error;
+}
+
 // ── Trash ──────────────────────────────────────────────────────────────
 
 export async function listTrash(): Promise<TrashEntry[]> {
@@ -498,6 +608,21 @@ export async function restoreTrash(entry: TrashEntry): Promise<void> {
     if (card) {
       const items = [...(((card.payload as any).items as TodoItem[]) ?? []), item];
       await updateCard(card.id, { payload: { ...(card.payload as any), items } });
+    }
+  } else if (entry.kind === 'arrow') {
+    // Restore only if BOTH endpoint cards still exist.
+    const a = entry.snapshot as Arrow;
+    const [fromCard, toCard] = await Promise.all([fetchCard(a.from_card), fetchCard(a.to_card)]);
+    if (fromCard && toCard) {
+      const { error } = await supabase.from('notes_arrows').insert({
+        user_id: userId,
+        board_id: a.board_id,
+        from_card: a.from_card,
+        to_card: a.to_card,
+        label: a.label,
+        style: a.style,
+      });
+      if (error) throw error;
     }
   } else if (entry.kind === 'column') {
     // Restore column + members as a unit with FRESH ids (originals may
