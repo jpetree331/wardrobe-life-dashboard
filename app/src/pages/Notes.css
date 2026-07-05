@@ -1188,6 +1188,68 @@
   color: var(--ink-faint); font-style: italic;
 }
 
+/* Keyboard help overlay + search stub */
+.nt-help-overlay {
+  position: fixed; inset: 0; z-index: 240;
+  background: var(--notes-scrim);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 30px;
+}
+.nt-help-panel {
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 30px 90px -30px rgba(0,0,0,0.5);
+  max-width: 860px; max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  padding: 22px 28px 26px;
+}
+.nt-help-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 14px;
+}
+.nt-help-panel h3 {
+  margin: 0;
+  font-family: var(--notes-font-display); font-weight: 400;
+  font-size: 13px; letter-spacing: 0.26em; text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.nt-help-cols {
+  columns: 2; column-gap: 36px;
+}
+.nt-help-cols section { break-inside: avoid; margin-bottom: 18px; }
+.nt-help-cols h4 {
+  margin: 0 0 8px;
+  font-family: var(--notes-font-display); font-weight: 500;
+  font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 4px;
+}
+.nt-help-row {
+  display: flex; gap: 12px; align-items: baseline;
+  padding: 3px 0;
+  font-family: var(--notes-font-body); font-size: 13px;
+}
+.nt-help-row .keys { flex-shrink: 0; min-width: 150px; }
+.nt-help-row .keys em { font-size: 11px; color: var(--ink-faint); }
+.nt-help-row kbd {
+  font-family: var(--notes-font-mono); font-size: 10.5px;
+  background: var(--bg-3);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--ink);
+}
+.nt-help-row .label { color: var(--ink); }
+.nt-help-row .when { color: var(--ink-faint); font-size: 11.5px; }
+.nt-search-stub { max-width: 420px; }
+.nt-search-stub p {
+  font-family: var(--notes-font-body); font-size: 14px;
+  color: var(--ink-soft); line-height: 1.5;
+}
+
 /* Status footer */
 .nt-status {
   display: flex; align-items: center; justify-content: space-between;

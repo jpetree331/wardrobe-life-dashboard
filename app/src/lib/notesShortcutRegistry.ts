@@ -50,10 +50,21 @@ export const SHORTCUTS: ShortcutDef[] = [
   { id: 'delete',      keys: ['Delete'],           label: 'Move selection to trash',  category: 'Selection', when: 'selection, not typing' },
 
   // ── Canvas ──────────────────────────────────────────────────────────
+  { id: 'new-note',    keys: ['N'],            label: 'New note at viewport center (in edit mode)', category: 'Canvas', when: 'not typing' },
+  { id: 'edit-card',   keys: ['Enter', 'Tab'], label: 'Edit the selected note',   category: 'Canvas', when: 'one note selected' },
+  { id: 'search',      keys: ['Mod F'],        label: 'Search boards and cards',  category: 'Canvas', when: 'not typing' },
   { id: 'marquee',     keys: ['Drag empty canvas'], label: 'Marquee select',          category: 'Canvas' },
   { id: 'pan',         keys: ['Space Drag', 'Middle-mouse Drag'], label: 'Pan the canvas', category: 'Canvas' },
+  { id: 'z-backward',  keys: ['['],            label: 'Send backward one step',   category: 'Selection', when: 'selection, not typing' },
+  { id: 'z-forward',   keys: [']'],            label: 'Bring forward one step',   category: 'Selection', when: 'selection, not typing' },
+  { id: 'z-back',      keys: ['Shift ['],      label: 'Send to back',             category: 'Selection', when: 'selection, not typing' },
+  { id: 'z-front',     keys: ['Shift ]'],      label: 'Bring to front',           category: 'Selection', when: 'selection, not typing' },
+  { id: 'help',        keys: ['?'],            label: 'Show this shortcut guide', category: 'Canvas', when: 'not typing' },
   { id: 'escape',      keys: ['Esc'],          label: 'Exit editing / close menu, overlay, trash / deselect', category: 'Canvas' },
 ];
+
+/** Category display order for the help overlay. */
+export const SHORTCUT_CATEGORIES: ShortcutCategory[] = ['Canvas', 'Selection', 'View', 'Editing'];
 
 /**
  * Find key-combo collisions: two different actions registered to the same

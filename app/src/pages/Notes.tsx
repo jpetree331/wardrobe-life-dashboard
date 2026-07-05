@@ -95,6 +95,8 @@ import {
   runEditorAction,
   setActiveEditor,
 } from '../lib/notesEditor';
+import { SHORTCUT_CATEGORIES, SHORTCUTS } from '../lib/notesShortcutRegistry';
+import { stepOrder, type ZStep } from '../lib/notesZOrder';
 import { loadSavedView, saveSavedView } from '../lib/notesViewStore';
 import { marqueeHits, normalizeRect, type Rect } from '../lib/notesMarquee';
 import { useFavicon } from '../hooks/useFavicon';
@@ -176,6 +178,9 @@ export default function Notes() {
   const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [docOverlayId, setDocOverlayId] = useState<string | null>(null);
   const [lightboxId, setLightboxId] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  // Placeholder until Sprint 16's real search replaces it.
+  const [searchStubOpen, setSearchStubOpen] = useState(false);
   // In-flight image uploads, shown as shimmer placeholders on the canvas.
   const [uploads, setUploads] = useState<Array<{ id: string; x: number; y: number; w: number; h: number }>>([]);
   const [statusMsg, setStatusMsg] = useState('Drag a card type onto the canvas. Scroll to pan, ⌘+scroll to zoom.');
@@ -1715,6 +1720,68 @@ export default function Notes() {
     [currentBoardId, getHistory, upsertArrowLocal],
   );
 
+  // ── Quick-create + edit-mode focus (Sprint 13) ─────────────────────────
+
+  /** Focus a note card's TipTap editor once it has rendered. */
+  function focusCardEditor(cardId: string) {
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLElement>(`[data-card-id="${cardId}"] [data-note-body]`)
+        ?.focus();
+    }, 60);
+  }
+
+  async function createNoteAtCenter() {
+    if (!currentBoardId) return;
+    const at = centerCanvasPoint();
+    try {
+      const card = await createCard({
+        board_id: currentBoardId,
+        type: 'note',
+        x: at.x, y: at.y, w: DEFAULT_W.note, h: DEFAULT_H.note,
+        payload: { body: '' },
+      });
+      upsertCardLocal(card);
+      selectOnly(card.id);
+      getHistory(currentBoardId)?.push(makeCreateCommand([card], 'Create note'));
+      focusCardEditor(card.id);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  /** [ / ] one z-step; Shift = to back / front. One composite command. */
+  function zOrderStep(dir: ZStep) {
+    const free = cardsRef.current.filter((c) => !c.parent_column);
+    const ordered = [...free].sort((a, b) => a.z - b.z || a.id.localeCompare(b.id));
+    const next = stepOrder(ordered.map((c) => c.id), selectedIds, dir);
+    const zById = new Map(free.map((c) => [c.id, c.z]));
+    const changes: Array<{ id: string; from: number; to: number }> = [];
+    next.forEach((id, i) => {
+      if (zById.get(id) !== i) changes.push({ id, from: zById.get(id)!, to: i });
+    });
+    if (changes.length === 0) return;
+    for (const ch of changes) {
+      patchCardLocal(ch.id, { z: ch.to });
+      updateCard(ch.id, { z: ch.to }).catch(console.error);
+    }
+    getHistory(currentBoardId)?.push({
+      label: dir === 'front' ? 'Bring to front' : dir === 'back' ? 'Send to back' : dir === 'forward' ? 'Bring forward' : 'Send backward',
+      undo: async () => {
+        for (const ch of changes) {
+          patchCardLocal(ch.id, { z: ch.from });
+          await updateCard(ch.id, { z: ch.from });
+        }
+      },
+      do: async () => {
+        for (const ch of changes) {
+          patchCardLocal(ch.id, { z: ch.to });
+          await updateCard(ch.id, { z: ch.to });
+        }
+      },
+    });
+  }
+
   // ── Arrow-nudge coalescing ─────────────────────────────────────────────
   // Rapid arrow presses accumulate locally; 500ms after the last press the
   // whole run persists and becomes ONE composite history command.
@@ -1770,6 +1837,10 @@ export default function Notes() {
       if (e.key === 'Escape') {
         if (typing) {
           (document.activeElement as HTMLElement | null)?.blur();
+        } else if (helpOpen) {
+          setHelpOpen(false);
+        } else if (searchStubOpen) {
+          setSearchStubOpen(false);
         } else if (lightboxId) {
           setLightboxId(null);
         } else if (docOverlayId) {
@@ -1851,6 +1922,44 @@ export default function Notes() {
           doRedo();
           return;
         }
+        if (e.key === 'f' || e.key === 'F') {
+          e.preventDefault();
+          setSearchStubOpen(true);
+          return;
+        }
+        return;
+      }
+
+      // ? opens the shortcut guide.
+      if (e.key === '?') {
+        e.preventDefault();
+        setHelpOpen((v) => !v);
+        return;
+      }
+
+      // N = new note at viewport center, straight into edit mode.
+      if ((e.key === 'n' || e.key === 'N') && !e.altKey) {
+        e.preventDefault();
+        createNoteAtCenter();
+        return;
+      }
+
+      // Enter/Tab on a single selected note = enter edit mode.
+      if ((e.key === 'Enter' || e.key === 'Tab') && selectedIds.size === 1) {
+        const only = cards.find((c) => selectedIds.has(c.id));
+        if (only && (only.type === 'note' || only.type === 'document')) {
+          e.preventDefault();
+          if (only.type === 'document') setDocOverlayId(only.id);
+          else focusCardEditor(only.id);
+          return;
+        }
+      }
+
+      // [ / ] z-order stepping; Shift = to back / front.
+      if ((e.code === 'BracketLeft' || e.code === 'BracketRight') && selectedIds.size) {
+        e.preventDefault();
+        const forward = e.code === 'BracketRight';
+        zOrderStep(e.shiftKey ? (forward ? 'front' : 'back') : forward ? 'forward' : 'backward');
         return;
       }
 
@@ -1903,7 +2012,7 @@ export default function Notes() {
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge, selectedArrowId, arrows, arrowMenu, arrowLabelEditId, deleteArrowCmd]);
+  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge, selectedArrowId, arrows, arrowMenu, arrowLabelEditId, deleteArrowCmd, helpOpen, searchStubOpen]);
 
   // ── Floating format toolbar ───────────────────────────────────────────
   // Show when the user makes a non-collapsed selection inside a Note body
@@ -2247,6 +2356,7 @@ export default function Notes() {
           >
             {theme === 'parchment' ? 'skin: parchment' : 'skin: milanote'}
           </button>
+          <button className="btn-quiet" onClick={() => setHelpOpen(true)} title="Keyboard shortcuts (?)">⌨</button>
           <button className="btn-quiet" onClick={openTrash} title="Trash">Trash</button>
         </div>
       </header>
@@ -2652,6 +2762,18 @@ export default function Notes() {
         />
       )}
 
+      {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+
+      {searchStubOpen && (
+        <div className="nt-help-overlay" onClick={() => setSearchStubOpen(false)}>
+          <div className="nt-help-panel nt-search-stub" onClick={(e) => e.stopPropagation()}>
+            <h3>Search</h3>
+            <p>Global search across boards and cards arrives in a later sprint — the Cmd/Ctrl+F keybinding is already wired to this spot.</p>
+            <button className="btn-quiet" onClick={() => setSearchStubOpen(false)}>close</button>
+          </div>
+        </div>
+      )}
+
       {docCard && (
         <DocumentOverlay
           card={docCard}
@@ -2779,6 +2901,7 @@ function CardView({
   return (
     <div
       className={`nt-card type-${card.type}${selected ? ' selected' : ''}${dropActive ? ' col-drop-active' : ''}${resolved ? ' resolved' : ''}`}
+      data-card-id={card.id}
       style={baseStyle}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
@@ -3644,6 +3767,51 @@ function fileGroupIcon(group: string): JSX.Element {
         </svg>
       );
   }
+}
+
+// ── Keyboard-shortcut help overlay (rendered FROM the registry) ─────────
+
+function HelpOverlay({ onClose }: { onClose: () => void }) {
+  const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
+  const renderCombo = (combo: string) =>
+    combo.replace(/\bMod\b/g, isMac ? '⌘' : 'Ctrl');
+  return (
+    <div className="nt-help-overlay" onClick={onClose}>
+      <div className="nt-help-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="nt-help-head">
+          <h3>Keyboard &amp; mouse</h3>
+          <button className="btn-quiet" onClick={onClose}>close</button>
+        </div>
+        <div className="nt-help-cols">
+          {SHORTCUT_CATEGORIES.map((cat) => {
+            const defs = SHORTCUTS.filter((s) => s.category === cat);
+            if (defs.length === 0) return null;
+            return (
+              <section key={cat}>
+                <h4>{cat}</h4>
+                {defs.map((s) => (
+                  <div className="nt-help-row" key={s.id}>
+                    <span className="keys">
+                      {s.keys.map((k, i) => (
+                        <span key={k}>
+                          {i > 0 && <em> or </em>}
+                          <kbd>{renderCombo(k)}</kbd>
+                        </span>
+                      ))}
+                    </span>
+                    <span className="label">
+                      {s.label}
+                      {s.when ? <em className="when"> — {s.when}</em> : null}
+                    </span>
+                  </div>
+                ))}
+              </section>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Trash drawer ────────────────────────────────────────────────────────
