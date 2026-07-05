@@ -43,6 +43,8 @@ import {
 } from '../lib/notes';
 import { insertAt, insertionIndexFromY } from '../lib/notesColumns';
 import { arrowPath, bestEdgePair, bezierPoint, type RectLike } from '../lib/notesArrows';
+import type { CommentPayload, SwatchCardPayload } from '../lib/notes';
+import { extractPalette, normalizeHex } from '../lib/notesPalette';
 import { BoardHistory, BurstCoalescer, hasUserContent, type Command } from '../lib/notesHistory';
 import type { FilePayload, ImagePayload, LinkPayload } from '../lib/notes';
 import { domainOf, embedUrlFor, isProbablyUrl, type LinkMeta } from '../lib/notesLinkMeta';
@@ -93,6 +95,8 @@ const TOOLBAR_TYPES: Array<{
   { type: 'image',    label: 'Image',    hint: 'Click to pick, or drop image files on the canvas' },
   { type: 'file',     label: 'File',     hint: 'Click to pick, or drop any file on the canvas' },
   { type: 'column',   label: 'Column',   hint: 'Drag onto canvas — a list container for cards' },
+  { type: 'swatch',   label: 'Swatch',   hint: 'Drag onto canvas — a color chip for palettes' },
+  { type: 'comment',  label: 'Comment',  hint: 'Drag onto canvas — an annotation sticky' },
 ];
 
 const DEFAULT_W: Record<CardType, number> = {
@@ -105,6 +109,8 @@ const DEFAULT_W: Record<CardType, number> = {
   image: 240,
   file: 250,
   column: 260,
+  swatch: 120,
+  comment: 230,
 };
 const DEFAULT_H: Record<CardType, number> = {
   note: 140,
@@ -116,6 +122,8 @@ const DEFAULT_H: Record<CardType, number> = {
   image: 180,
   file: 96,
   column: 120, // columns auto-size; this is only the drop footprint
+  swatch: 150,
+  comment: 110,
 };
 
 export default function Notes() {
@@ -1427,6 +1435,53 @@ export default function Notes() {
     document.addEventListener('mouseup', onUp);
   }
 
+  // ── Palette extraction from an image card (Sprint 10) ─────────────────
+  async function extractPaletteFromImage(card: Card) {
+    setCtxMenu(null);
+    if (!currentBoardId) return;
+    const p = card.payload as ImagePayload;
+    try {
+      setStatusMsg('Extracting palette…');
+      const url = await signedMediaUrl(p.thumbPath ?? p.storagePath);
+      const blob = await (await fetch(url)).blob();
+      const bmp = await createImageBitmap(blob);
+      const size = 64;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(bmp, 0, 0, size, size);
+      bmp.close();
+      const hexes = extractPalette(ctx.getImageData(0, 0, size, size).data, 5, 1);
+      if (hexes.length === 0) {
+        setStatusMsg('Could not extract a palette from this image.');
+        return;
+      }
+      // Stack the swatches beside the image, top-aligned — no overlap.
+      const baseX = card.x + (card.w ?? DEFAULT_W.image) + 24;
+      const created: Card[] = [];
+      for (let i = 0; i < hexes.length; i++) {
+        const sw = await createCard({
+          board_id: currentBoardId,
+          type: 'swatch',
+          x: baseX,
+          y: card.y + i * (DEFAULT_H.swatch + 14),
+          w: DEFAULT_W.swatch, h: DEFAULT_H.swatch,
+          payload: { hex: hexes[i], label: '' },
+        });
+        created.push(sw);
+        upsertCardLocal(sw);
+      }
+      setSelectedIds(new Set(created.map((c) => c.id)));
+      getHistory(currentBoardId)?.push(makeCreateCommand(created, 'Extract palette'));
+      setStatusMsg(`Extracted ${created.length} swatches.`);
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Could not extract a palette from this image.');
+    }
+  }
+
   const deleteArrowCmd = useCallback(
     async (arrow: Arrow) => {
       setArrowMenu(null);
@@ -1761,8 +1816,8 @@ export default function Notes() {
     const k = view.k;
     const img = card.type === 'image' ? (card.payload as ImagePayload) : null;
     const aspect = img && img.naturalH > 0 ? img.naturalW / img.naturalH : null;
-    // Columns are width-only: height always follows their contents.
-    const widthOnly = card.type === 'column';
+    // Columns and comments are width-only; their height follows content.
+    const widthOnly = card.type === 'column' || card.type === 'comment';
     const sizePatch = (dx: number, dy: number): Partial<Card> => {
       if (aspect !== null) return aspectResize(startW, dx, aspect);
       if (widthOnly) return { w: Math.max(200, startW + dx) };
@@ -2338,6 +2393,11 @@ export default function Notes() {
               Refresh metadata
             </button>
           )}
+          {ctxCard.type === 'image' && (
+            <button className="item" onClick={() => extractPaletteFromImage(ctxCard)}>
+              Extract palette
+            </button>
+          )}
           <div className="sep" />
           <button className="item delete" onClick={() => deleteCards(actionTargets(ctxCard))}>
             Delete{selectedIds.size > 1 && selectedIds.has(ctxCard.id) ? ` ${selectedIds.size} cards` : ''}
@@ -2525,13 +2585,14 @@ function CardView({
   };
 
   // Heading and Board cards don't get resize handles — heading auto-sizes
-  // to its text, Board has a fixed-shape tile. Columns resize width-only
-  // (handled in startResize).
-  const showResize = card.type !== 'heading' && card.type !== 'board';
+  // to its text, Board has a fixed-shape tile, Swatch is a fixed chip.
+  // Columns and comments resize width-only (handled in startResize).
+  const showResize = card.type !== 'heading' && card.type !== 'board' && card.type !== 'swatch';
+  const resolved = card.type === 'comment' && Boolean((card.payload as CommentPayload).resolved);
 
   return (
     <div
-      className={`nt-card type-${card.type}${selected ? ' selected' : ''}${dropActive ? ' col-drop-active' : ''}`}
+      className={`nt-card type-${card.type}${selected ? ' selected' : ''}${dropActive ? ' col-drop-active' : ''}${resolved ? ' resolved' : ''}`}
       style={baseStyle}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
@@ -2610,6 +2671,119 @@ function CardBody({
       {card.type === 'board' && <BoardTile card={card} />}
       {card.type === 'image' && <ImageBody card={card} onPatch={onPatch} />}
       {card.type === 'file' && <FileBody card={card} />}
+      {card.type === 'swatch' && <SwatchBody card={card} onPatch={onPatch} />}
+      {card.type === 'comment' && <CommentBody card={card} onPatch={onPatch} />}
+    </>
+  );
+}
+
+// ── Swatch card body ────────────────────────────────────────────────────
+
+function SwatchBody({ card, onPatch }: { card: Card; onPatch: (p: Partial<Card>) => void }) {
+  const payload = card.payload as SwatchCardPayload;
+  const hex = normalizeHex(payload.hex) ?? '#cccccc';
+  const [copied, setCopied] = useState(false);
+  const labelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (labelRef.current && document.activeElement !== labelRef.current) {
+      labelRef.current.textContent = payload.label || '';
+    }
+  }, [payload.label]);
+  return (
+    <div className="swatch-body">
+      <label className="swatch-block" style={{ background: hex } as CSSProperties} title="Click to pick a color">
+        <input
+          type="color"
+          value={hex}
+          onChange={(e) => onPatch({ payload: { ...payload, hex: e.target.value } })}
+        />
+        <button
+          className="swatch-copy"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            navigator.clipboard?.writeText(hex).catch(() => {});
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1200);
+          }}
+          title="Copy hex"
+        >
+          {copied ? '✓' : 'copy'}
+        </button>
+      </label>
+      <input
+        className="swatch-hex"
+        key={hex}
+        defaultValue={hex}
+        spellCheck={false}
+        onBlur={(e) => {
+          const n = normalizeHex(e.target.value);
+          if (n && n !== hex) onPatch({ payload: { ...payload, hex: n } });
+          else e.target.value = hex;
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        }}
+      />
+      <div
+        ref={labelRef}
+        className="swatch-label"
+        contentEditable
+        suppressContentEditableWarning
+        data-placeholder="name"
+        onInput={(e) =>
+          onPatch({ payload: { ...payload, label: (e.target as HTMLDivElement).textContent || '' } })
+        }
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            (e.target as HTMLElement).blur();
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+// ── Comment card body (single-user annotation sticky) ──────────────────
+
+function CommentBody({ card, onPatch }: { card: Card; onPatch: (p: Partial<Card>) => void }) {
+  const payload = card.payload as CommentPayload;
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (bodyRef.current && document.activeElement !== bodyRef.current) {
+      bodyRef.current.textContent = payload.body || '';
+    }
+  }, [payload.body]);
+  const when = new Date(card.created_at);
+  return (
+    <>
+      <div className="comment-meta">
+        <span className="comment-time">
+          {when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+        </span>
+        <button
+          className="comment-resolve"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPatch({ payload: { ...payload, resolved: !payload.resolved } });
+          }}
+        >
+          {payload.resolved ? 'reopen' : 'resolve'}
+        </button>
+      </div>
+      <div
+        ref={bodyRef}
+        className="comment-text"
+        contentEditable
+        suppressContentEditableWarning
+        data-placeholder="Annotation…"
+        onInput={(e) =>
+          onPatch({ payload: { ...payload, body: (e.target as HTMLDivElement).textContent || '' } })
+        }
+      />
     </>
   );
 }
@@ -3438,6 +3612,8 @@ function defaultPayloadFor(type: CardType): any {
     case 'link':     return { title: '', url: '' };
     case 'document': return { title: 'Untitled document', body: '', mode: 'icon' };
     case 'column':   return { title: 'Column' };
+    case 'swatch':   return { hex: '#c9a45c', label: '' };
+    case 'comment':  return { body: '', resolved: false };
     default:         return {};
   }
 }
@@ -3475,6 +3651,8 @@ function trashPreview(t: TrashEntry): string {
     if (c.type === 'image')    return p.caption || '(image)';
     if (c.type === 'file')     return p.filename || '(file)';
     if (c.type === 'column')   return p.title || '(column)';
+    if (c.type === 'swatch')   return p.label ? `${p.label} · ${p.hex}` : p.hex || '(swatch)';
+    if (c.type === 'comment')  return p.body || '(comment)';
     return c.type;
   }
   if (t.kind === 'board') {
@@ -3578,6 +3756,19 @@ function toolIcon(type: CardType): JSX.Element {
           <line x1="8" y1="8" x2="16" y2="8" />
           <line x1="8" y1="12" x2="16" y2="12" />
           <line x1="8" y1="16" x2="16" y2="16" />
+        </svg>
+      );
+    case 'swatch':
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <rect x="4.5" y="4.5" width="15" height="15" rx="2.5" />
+          <path d="M4.5 14l5-4 5 5 5-3" />
+        </svg>
+      );
+    case 'comment':
+      return (
+        <svg viewBox="0 0 24 24" className="ic-svg">
+          <path d="M4 6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2h-8l-4 4v-4H6a2 2 0 01-2-2z" />
         </svg>
       );
   }

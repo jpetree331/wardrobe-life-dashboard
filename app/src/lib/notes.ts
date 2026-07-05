@@ -16,7 +16,7 @@ export const SWATCHES: SwatchKey[] = [
 
 export type CardType =
   | 'note' | 'todo' | 'heading' | 'link' | 'document' | 'board'
-  | 'image' | 'file' | 'column';
+  | 'image' | 'file' | 'column' | 'swatch' | 'comment';
 
 export type Board = {
   id: string;
@@ -74,6 +74,16 @@ export type CardPayload =
 export type ColumnPayload = {
   title: string;
   collapsed?: boolean;
+};
+
+export type SwatchCardPayload = {
+  hex: string;
+  label?: string;
+};
+
+export type CommentPayload = {
+  body: string;
+  resolved?: boolean;
 };
 
 export type Card = {

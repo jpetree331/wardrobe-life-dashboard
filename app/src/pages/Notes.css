@@ -786,6 +786,100 @@
 .col-member.type-todo ol { list-style: none; padding: 0; margin: 0; }
 .col-member .nt-convert-prompt { display: none; } /* too cramped in a column */
 
+/* Swatch card — a card that IS a color */
+.nt-card.type-swatch {
+  padding: 8px;
+  width: 120px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.swatch-body { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.swatch-block {
+  position: relative;
+  flex: 1; min-height: 72px;
+  border-radius: calc(var(--notes-card-radius) + 2px);
+  border: 1px solid rgba(0,0,0,0.08);
+  cursor: pointer;
+}
+.swatch-block input[type="color"] {
+  position: absolute; inset: 0;
+  opacity: 0; width: 100%; height: 100%;
+  cursor: pointer;
+}
+.swatch-copy {
+  position: absolute; top: 4px; right: 4px;
+  background: color-mix(in oklab, var(--bg) 85%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--notes-control-radius);
+  font-family: var(--notes-font-body); font-size: 10px;
+  color: var(--ink-soft); cursor: pointer;
+  padding: 1px 6px;
+  opacity: 0; transition: opacity 150ms ease;
+}
+.nt-card.type-swatch:hover .swatch-copy { opacity: 1; }
+.swatch-hex {
+  border: 0; outline: none; background: transparent;
+  font-family: var(--notes-font-mono);
+  font-size: 11px; color: var(--ink);
+  width: 100%; text-align: center;
+}
+.swatch-label {
+  font-family: var(--notes-font-body); font-style: italic;
+  font-size: 11.5px; color: var(--ink-soft);
+  text-align: center; outline: none;
+  min-height: 1.2em;
+}
+.swatch-label:empty:not(:focus)::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint);
+}
+
+/* Comment card — annotation sticky with a speech-bubble tick */
+.nt-card.type-comment {
+  padding: 10px 12px;
+  min-width: 170px;
+  border-radius: calc(var(--notes-card-radius) + 4px);
+  transition: opacity 200ms ease;
+}
+.nt-card.type-comment::after {
+  content: "";
+  position: absolute;
+  left: 18px; bottom: -9px;
+  width: 0; height: 0;
+  border-left: 9px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 10px solid var(--c-paper);
+  filter: drop-shadow(0 1px 0 var(--line));
+}
+.nt-card.type-comment.resolved { opacity: 0.45; }
+.comment-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 4px;
+}
+.comment-time {
+  font-family: var(--notes-font-display);
+  font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.comment-resolve {
+  background: transparent; border: 0; cursor: pointer;
+  font-family: var(--notes-font-body); font-style: italic;
+  font-size: 11px; color: var(--ink-faint);
+  padding: 0 2px;
+  opacity: 0; transition: opacity 150ms ease;
+}
+.nt-card.type-comment:hover .comment-resolve { opacity: 1; }
+.comment-resolve:hover { color: var(--ink); }
+.comment-text {
+  font-family: var(--notes-font-body);
+  font-size: 13.5px; line-height: 1.45; color: var(--ink);
+  outline: none; min-height: 2.4em;
+  word-break: break-word;
+}
+.comment-text:empty:not(:focus)::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint); font-style: italic;
+}
+
 /* Arrows (SVG overlay in canvas space) */
 .nt-arrows {
   position: absolute; left: 0; top: 0;

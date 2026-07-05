@@ -173,6 +173,8 @@ export function hasUserContent(card: Card): boolean {
         typeof p.title === 'string' && p.title !== 'Untitled document' && p.title.trim() !== '';
       return titleTouched || text(p.body).length > 0;
     }
+    case 'comment':
+      return (typeof p.body === 'string' && p.body.trim() !== '') || p.resolved === true;
     default:
       return true;
   }
