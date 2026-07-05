@@ -2,30 +2,9 @@
 // React component lets the markdown-shortcut detection and the title-from-HTML
 // extraction get exercised by unit tests without standing up jsdom + a render.
 
-export type SentinelAction =
-  | { kind: 'h1' }
-  | { kind: 'h2' }
-  | { kind: 'h3' }
-  | { kind: 'ul' }
-  | { kind: 'ol' }
-  | { kind: 'blockquote' };
-
-/**
- * Map the text written at the start of a block to a markdown shortcut. The
- * caller passes the text from the block start up to the caret — if it
- * matches one of the supported sentinels, return the action; otherwise
- * null. Intentionally narrow: only single-line block-open sentinels.
- */
-export function detectMarkdownSentinel(prefix: string): SentinelAction | null {
-  const t = prefix;
-  if (t === '#')   return { kind: 'h1' };
-  if (t === '##')  return { kind: 'h2' };
-  if (t === '###') return { kind: 'h3' };
-  if (t === '-' || t === '*') return { kind: 'ul' };
-  if (t === '1.')  return { kind: 'ol' };
-  if (t === '>')   return { kind: 'blockquote' };
-  return null;
-}
+// NOTE: the manual markdown-sentinel detection that used to live here was
+// retired in Sprint 12 — TipTap's input rules own #/##/###/-/*/1./> (plus
+// **bold**, *italic*, ~~strike~~, `code`, ```, and [ ] tasks) now.
 
 /**
  * Pull a human-readable title from a Note's HTML body. Used by the

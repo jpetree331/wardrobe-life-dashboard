@@ -1,32 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   CONVERT_PROMPT_AT,
-  detectMarkdownSentinel,
   extractTitleFromHtml,
   isTypingContext,
   plainTextLength,
   shouldOfferConvert,
 } from '../src/lib/notesShortcuts';
 
-describe('detectMarkdownSentinel', () => {
-  it('matches the supported single-block sentinels', () => {
-    expect(detectMarkdownSentinel('#')?.kind).toBe('h1');
-    expect(detectMarkdownSentinel('##')?.kind).toBe('h2');
-    expect(detectMarkdownSentinel('###')?.kind).toBe('h3');
-    expect(detectMarkdownSentinel('-')?.kind).toBe('ul');
-    expect(detectMarkdownSentinel('*')?.kind).toBe('ul');
-    expect(detectMarkdownSentinel('1.')?.kind).toBe('ol');
-    expect(detectMarkdownSentinel('>')?.kind).toBe('blockquote');
-  });
-
-  it('returns null for non-sentinel prefixes', () => {
-    expect(detectMarkdownSentinel('')).toBeNull();
-    expect(detectMarkdownSentinel('hello')).toBeNull();
-    expect(detectMarkdownSentinel('# something')).toBeNull(); // trailing text disqualifies
-    expect(detectMarkdownSentinel('####')).toBeNull(); // h4+ unsupported
-    expect(detectMarkdownSentinel('2.')).toBeNull(); // only "1." triggers ol
-  });
-});
+// Markdown sentinel detection moved into TipTap input rules (Sprint 12);
+// the manual detector and its tests were retired with it.
 
 describe('extractTitleFromHtml', () => {
   it('prefers h1 over everything else', () => {

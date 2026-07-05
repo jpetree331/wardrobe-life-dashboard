@@ -83,11 +83,18 @@ import {
   zoomAroundCursor,
 } from '../lib/notesPanZoom';
 import {
-  detectMarkdownSentinel,
   extractTitleFromHtml,
   isTypingContext,
   shouldOfferConvert,
 } from '../lib/notesShortcuts';
+import { EditorContent, useEditor } from '@tiptap/react';
+import {
+  buildNotesExtensions,
+  clearActiveEditor,
+  getActiveEditor,
+  runEditorAction,
+  setActiveEditor,
+} from '../lib/notesEditor';
 import { loadSavedView, saveSavedView } from '../lib/notesViewStore';
 import { marqueeHits, normalizeRect, type Rect } from '../lib/notesMarquee';
 import { useFavicon } from '../hooks/useFavicon';
@@ -1916,7 +1923,7 @@ export default function Notes() {
       }
       const r = range.getBoundingClientRect();
       // Clamp horizontally so the toolbar stays on screen.
-      const left = Math.max(8, Math.min(window.innerWidth - 220, r.left + r.width / 2 - 110));
+      const left = Math.max(8, Math.min(window.innerWidth - 360, r.left + r.width / 2 - 180));
       const top = Math.max(8, r.top - 42);
       setFmtToolbar({ top, left });
     }
@@ -1928,9 +1935,12 @@ export default function Notes() {
     };
   }, []);
 
-  function execFmt(cmd: string, value?: string) {
-    document.execCommand(cmd, false, value);
-    // The contentEditable's onInput fires automatically and triggers a save.
+  function execFmt(action: string) {
+    // Dispatch to whichever TipTap editor holds focus; its onUpdate emits
+    // the debounced save automatically.
+    const editor = getActiveEditor();
+    if (!editor) return;
+    runEditorAction(editor, action);
     // Refresh toolbar position after the DOM mutates.
     setTimeout(() => {
       const s = window.getSelection();
@@ -1939,7 +1949,7 @@ export default function Notes() {
         return;
       }
       const r = s.getRangeAt(0).getBoundingClientRect();
-      const left = Math.max(8, Math.min(window.innerWidth - 220, r.left + r.width / 2 - 110));
+      const left = Math.max(8, Math.min(window.innerWidth - 360, r.left + r.width / 2 - 180));
       const top = Math.max(8, r.top - 42);
       setFmtToolbar({ top, left });
     }, 0);
@@ -2618,13 +2628,19 @@ export default function Notes() {
           <button className="b" onClick={() => execFmt('bold')} title="Bold">B</button>
           <button className="i" onClick={() => execFmt('italic')} title="Italic"><em>I</em></button>
           <button className="u" onClick={() => execFmt('underline')} title="Underline">U</button>
+          <button className="s" onClick={() => execFmt('strike')} title="Strikethrough">S</button>
           <span className="sep" />
-          <button onClick={() => execFmt('formatBlock', 'h1')} title="Heading">H1</button>
-          <button onClick={() => execFmt('formatBlock', 'h2')} title="Subheading">H2</button>
+          <button onClick={() => execFmt('h1')} title="Heading">H1</button>
+          <button onClick={() => execFmt('h2')} title="Subheading">H2</button>
           <span className="sep" />
-          <button onClick={() => execFmt('insertUnorderedList')} title="Bullet list">•</button>
-          <button onClick={() => execFmt('insertOrderedList')} title="Numbered list">1.</button>
-          <button onClick={() => execFmt('formatBlock', 'blockquote')} title="Quote">❝</button>
+          <button onClick={() => execFmt('bullet')} title="Bullet list">•</button>
+          <button onClick={() => execFmt('ordered')} title="Numbered list">1.</button>
+          <button onClick={() => execFmt('task')} title="Checklist">☐</button>
+          <button onClick={() => execFmt('blockquote')} title="Quote">❝</button>
+          <span className="sep" />
+          <button className="hl" onClick={() => execFmt('highlight')} title="Highlight">H</button>
+          <button className="cd" onClick={() => execFmt('code')} title="Inline code">{'<>'}</button>
+          <button onClick={() => execFmt('link')} title="Link">⧉</button>
         </div>
       )}
 
@@ -3072,68 +3088,40 @@ function NoteBody({
   onConvert: () => void;
   onDismissConvert: () => void;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const lastIdRef = useRef<string>('');
   const payload = card.payload as { body?: string; dismissedConvert?: boolean };
+  // Refs keep the once-created editor's callbacks reading fresh values.
+  const payloadRef = useRef(payload);
+  payloadRef.current = payload;
+  const onPatchRef = useRef(onPatch);
+  onPatchRef.current = onPatch;
+
+  // TipTap owns the markdown input rules (#/##/###/-/*/1./>/**b**/*i*/
+  // ~~s~~/`code`/```/[ ]) that the manual sentinel code used to handle.
+  const editor = useEditor({
+    extensions: buildNotesExtensions('Note'),
+    content: payload.body || '',
+    editorProps: {
+      attributes: { class: 'body', 'data-note-body': '' },
+    },
+    onUpdate: ({ editor: ed }) => {
+      onPatchRef.current({ payload: { ...payloadRef.current, body: ed.getHTML() } });
+    },
+    onFocus: ({ editor: ed }) => setActiveEditor(ed),
+    onBlur: ({ editor: ed }) => clearActiveEditor(ed),
+  });
+
+  // Apply EXTERNAL body changes (undo/redo, board reload) when the user
+  // isn't typing here — never fight the focused editor.
   useEffect(() => {
-    if (!ref.current) return;
-    if (lastIdRef.current === card.id && document.activeElement === ref.current) return;
-    ref.current.innerHTML = payload.body || '';
-    lastIdRef.current = card.id;
-  }, [card.id, payload.body]);
-
-  // Markdown shortcuts: when the user types one of the supported sentinels
-  // followed by space at the start of a block, transform the block. The
-  // sentinel and the trailing space are consumed (no literal characters
-  // left behind in the document).
-  function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (e.key !== ' ') return;
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return;
-    if (!ref.current) return;
-    const range = sel.getRangeAt(0);
-    if (!ref.current.contains(range.startContainer)) return;
-
-    // Read the text from the start of the current block to the caret. If
-    // it matches a sentinel exactly, we trigger the transform.
-    const block = findBlockAncestor(range.startContainer, ref.current);
-    if (!block) return;
-    const blockRange = document.createRange();
-    blockRange.setStart(block, 0);
-    blockRange.setEnd(range.startContainer, range.startOffset);
-    const prefix = blockRange.toString();
-    const action = detectMarkdownSentinel(prefix);
-    if (!action) return;
-
-    e.preventDefault();
-    // Remove the sentinel characters from the block (they're at its start).
-    blockRange.deleteContents();
-    if (action.kind === 'h1' || action.kind === 'h2' || action.kind === 'h3' || action.kind === 'blockquote') {
-      document.execCommand('formatBlock', false, action.kind);
-    } else if (action.kind === 'ul') {
-      document.execCommand('insertUnorderedList');
-    } else if (action.kind === 'ol') {
-      document.execCommand('insertOrderedList');
-    }
-    onPatch({ payload: { ...payload, body: ref.current.innerHTML } });
-  }
+    if (!editor || editor.isFocused) return;
+    const body = payload.body || '';
+    if (editor.getHTML() !== body) editor.commands.setContent(body, false);
+  }, [editor, payload.body]);
+  useEffect(() => () => { if (editor) clearActiveEditor(editor); }, [editor]);
 
   return (
     <>
-      <div
-        ref={ref}
-        className="body"
-        contentEditable
-        suppressContentEditableWarning
-        data-note-body=""
-        data-placeholder="Note"
-        onInput={(e) =>
-          onPatch({
-            payload: { ...payload, body: (e.target as HTMLDivElement).innerHTML },
-          })
-        }
-        onKeyDown={onKeyDown}
-      />
+      <EditorContent editor={editor} className="note-editor" />
       {shouldOfferConvert(payload.body || '', payload.dismissedConvert) && (
         <div className="nt-convert-prompt" contentEditable={false}>
           <span>This note has grown — convert it into a Document?</span>
@@ -3145,20 +3133,6 @@ function NoteBody({
       )}
     </>
   );
-}
-
-/** Walk up from `node` to find the closest block-level child of `root`. */
-function findBlockAncestor(node: Node | null, root: Element): Element | null {
-  let n: Node | null = node;
-  while (n && n !== root) {
-    if (n.nodeType === Node.ELEMENT_NODE && (n as Element).parentElement === root) {
-      return n as Element;
-    }
-    n = n.parentNode;
-  }
-  // If the caret is in a text node directly inside `root` (no wrapping
-  // <p>), return the root itself.
-  return root;
 }
 
 function HeadingBody({ card, onPatch }: { card: Card; onPatch: (p: Partial<Card>) => void }) {
@@ -3722,17 +3696,33 @@ function DocumentOverlay({
   onPatch: (p: Partial<Card>) => void;
 }) {
   const payload = card.payload as { title: string; body: string; mode: 'icon' | 'preview' };
-  const bodyRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (bodyRef.current) bodyRef.current.innerHTML = payload.body || '';
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card.id]);
+  const payloadRef = useRef(payload);
+  payloadRef.current = payload;
+  const onPatchRef = useRef(onPatch);
+  onPatchRef.current = onPatch;
 
-  function exec(cmd: string, value?: string) {
-    bodyRef.current?.focus();
-    document.execCommand(cmd, false, value);
-    onPatch({ payload: { ...payload, body: bodyRef.current?.innerHTML || '' } });
-  }
+  const editor = useEditor({
+    extensions: buildNotesExtensions('Begin writing…'),
+    content: payload.body || '',
+    editorProps: {
+      attributes: { class: 'doc-body' },
+    },
+    onUpdate: ({ editor: ed }) => {
+      onPatchRef.current({ payload: { ...payloadRef.current, body: ed.getHTML() } });
+    },
+    onFocus: ({ editor: ed }) => setActiveEditor(ed),
+    onBlur: ({ editor: ed }) => clearActiveEditor(ed),
+  });
+  useEffect(() => {
+    if (!editor || editor.isFocused) return;
+    const body = payload.body || '';
+    if (editor.getHTML() !== body) editor.commands.setContent(body, false);
+  }, [editor, payload.body]);
+  useEffect(() => () => { if (editor) clearActiveEditor(editor); }, [editor]);
+
+  const exec = (action: string) => {
+    if (editor) runEditorAction(editor, action);
+  };
 
   return (
     <div className="nt-doc-overlay" onClick={onClose}>
@@ -3745,13 +3735,20 @@ function DocumentOverlay({
           <button className="b" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('bold')}>B</button>
           <button className="i" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('italic')}><em>I</em></button>
           <button className="u" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('underline')}>U</button>
+          <button className="st" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('strike')}>S</button>
           <span className="sep" />
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('formatBlock', 'h1')}>H1</button>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('formatBlock', 'h2')}>H2</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('h1')}>H1</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('h2')}>H2</button>
           <span className="sep" />
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('insertUnorderedList')}>•</button>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('insertOrderedList')}>1.</button>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('formatBlock', 'blockquote')}>❝</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('bullet')}>•</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('ordered')}>1.</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('task')}>☐</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('blockquote')}>❝</button>
+          <span className="sep" />
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('highlight')}>HL</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('code')}>{'<>'}</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('codeblock')}>```</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => exec('link')}>⧉</button>
         </div>
         <input
           className="doc-page-title"
@@ -3759,14 +3756,7 @@ function DocumentOverlay({
           defaultValue={payload.title || ''}
           onBlur={(e) => onPatch({ payload: { ...payload, title: e.target.value } })}
         />
-        <div
-          ref={bodyRef}
-          className="doc-body"
-          contentEditable
-          suppressContentEditableWarning
-          data-placeholder="Begin writing…"
-          onInput={(e) => onPatch({ payload: { ...payload, body: (e.target as HTMLDivElement).innerHTML } })}
-        />
+        <EditorContent editor={editor} className="doc-editor" />
       </div>
     </div>
   );

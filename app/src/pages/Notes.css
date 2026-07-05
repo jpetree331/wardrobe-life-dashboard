@@ -310,6 +310,79 @@
   color: var(--ink-soft); font-style: italic;
 }
 
+/* ── TipTap editor chrome (note bodies + document overlay) ─────────── */
+.note-editor { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.note-editor .body { flex: 1; }
+.notes-page .ProseMirror { outline: none; }
+.notes-page .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint); font-style: italic;
+  float: left; height: 0; pointer-events: none;
+}
+.notes-page .ProseMirror a {
+  color: var(--accent-strong);
+  text-decoration: underline; text-underline-offset: 2px;
+  cursor: pointer;
+}
+.notes-page .ProseMirror mark {
+  background: color-mix(in oklab, var(--c-saffron) 85%, transparent);
+  color: inherit;
+  padding: 0 2px; border-radius: 2px;
+}
+.notes-page .ProseMirror code {
+  font-family: var(--notes-font-mono);
+  font-size: 0.85em;
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  padding: 1px 5px; border-radius: 3px;
+}
+.notes-page .ProseMirror pre {
+  font-family: var(--notes-font-mono);
+  font-size: 12px; line-height: 1.5;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--notes-control-radius);
+  padding: 8px 10px; margin: 6px 0;
+  overflow-x: auto;
+}
+.notes-page .ProseMirror pre code { background: transparent; padding: 0; }
+/* Task lists inside notes/documents (checkbox toggling works on canvas) */
+.notes-page .ProseMirror ul[data-type="taskList"] {
+  list-style: none; padding-left: 2px; margin: 0 0 8px;
+}
+.notes-page .ProseMirror li[data-type="taskItem"] {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 1px 0;
+}
+.notes-page .ProseMirror li[data-type="taskItem"] > label {
+  flex-shrink: 0; margin-top: 3px;
+}
+.notes-page .ProseMirror li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
+.notes-page .ProseMirror li[data-type="taskItem"] input[type="checkbox"] {
+  appearance: none;
+  width: 13px; height: 13px;
+  border: 1px solid var(--line-strong); border-radius: 2px;
+  background: var(--bg);
+  cursor: pointer;
+  position: relative;
+}
+.notes-page .ProseMirror li[data-type="taskItem"] input[type="checkbox"]:checked {
+  background: var(--ink); border-color: var(--ink);
+}
+.notes-page .ProseMirror li[data-type="taskItem"] input[type="checkbox"]:checked::after {
+  content: "✓"; color: var(--bg);
+  position: absolute; left: 1px; top: -2.5px;
+  font-size: 10px;
+}
+.notes-page .ProseMirror li[data-type="taskItem"][data-checked="true"] > div {
+  color: var(--ink-faint); text-decoration: line-through;
+}
+/* Document overlay editor wrapper */
+.nt-doc-page .doc-editor { min-height: 50vh; display: flex; flex-direction: column; }
+.nt-doc-page .doc-editor .doc-body { flex: 1; }
+.nt-fmt-toolbar .s, .nt-doc-page .doc-tlbl .st { text-decoration: line-through; }
+.nt-fmt-toolbar .hl { background: color-mix(in oklab, var(--c-saffron) 55%, transparent); border-radius: 2px; }
+.nt-fmt-toolbar .cd { font-family: var(--notes-font-mono); font-size: 11px; }
+
 /* Todo card */
 .nt-card.type-todo { padding: 14px 14px 12px; min-width: 220px; min-height: 100px; }
 :is(.nt-card, .col-member).type-todo .todo-title {
