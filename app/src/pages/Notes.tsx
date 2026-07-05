@@ -120,6 +120,11 @@ const TOOLBAR_TYPES: Array<{
   { type: 'comment',  label: 'Comment',  hint: 'Drag onto canvas — an annotation sticky' },
 ];
 
+/** Is this card the board's reserved "Unsorted" inbox column? */
+function isInboxColumn(c: Card): boolean {
+  return c.type === 'column' && (c.payload as Record<string, unknown>).system === 'inbox';
+}
+
 const DEFAULT_W: Record<CardType, number> = {
   note: 240,
   todo: 240,
@@ -440,7 +445,7 @@ export default function Notes() {
     // edits mid-marquee), so capturing them from this render is safe.
     // Only free cards live on the canvas plane — members aren't marqueeable.
     const gestureView = view;
-    const gestureCards = cards.filter((c) => !c.parent_column);
+    const gestureCards = cards.filter((c) => !c.parent_column && !isInboxColumn(c));
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     const baseSelection = additive ? new Set(selectedIds) : new Set<string>();
     if (!additive) clearSelection();
@@ -468,7 +473,7 @@ export default function Notes() {
     const r = wrap.getBoundingClientRect();
     setView(
       fitView(
-        cards.filter((c) => !c.parent_column).map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
+        cards.filter((c) => !c.parent_column && !isInboxColumn(c)).map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
         r.width,
         r.height,
       ),
@@ -1441,8 +1446,9 @@ export default function Notes() {
 
   // ── Column containment (Sprint 8) ─────────────────────────────────────
   // Cards with parent_column render inside their column; only free cards
-  // live on the canvas plane.
-  const freeCards = cards.filter((c) => !c.parent_column);
+  // live on the canvas plane. The system inbox column is a docked panel,
+  // never a canvas card.
+  const freeCards = cards.filter((c) => !c.parent_column && !isInboxColumn(c));
   const membersOf = useCallback(
     (colId: string): Card[] =>
       cards
@@ -1502,10 +1508,17 @@ export default function Notes() {
       label: string,
     ) => {
       const all = cardsRef.current;
+      const targetCol = 'colId' in target ? all.find((c) => c.id === target.colId) : null;
+      const targetIsInbox = targetCol ? isInboxColumn(targetCol) : false;
       const moving = ids
         .map((id) => all.find((c) => c.id === id))
-        .filter((c): c is Card => Boolean(c) && c!.type !== 'column'); // no nesting
-      if (moving.length === 0) return;
+        .filter((c): c is Card => Boolean(c) && c!.type !== 'column') // no nesting
+        // The inbox tray holds loose captures — not board tiles.
+        .filter((c) => !(targetIsInbox && c.type === 'board'));
+      if (moving.length === 0) {
+        if (targetIsInbox) setStatusMsg('Board tiles can’t go in the Unsorted tray.');
+        return;
+      }
       const movingSet = new Set(moving.map((m) => m.id));
 
       const affectedCols = new Set<string>();
@@ -1645,6 +1658,92 @@ export default function Notes() {
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+  }
+
+  // ── Unsorted inbox panel (Sprint 15) ───────────────────────────────────
+  // A reserved system column per board (payload { system: 'inbox' }),
+  // created lazily, rendered as a docked right panel instead of a canvas
+  // card — all column drag/order machinery is reused.
+  const [inboxOpen, setInboxOpen] = useState(false);
+  useEffect(() => {
+    if (!currentBoardId) return;
+    try {
+      setInboxOpen(window.localStorage.getItem(`notes-inbox-open-${currentBoardId}`) === '1');
+    } catch { /* default closed */ }
+  }, [currentBoardId]);
+
+  const inboxCol = cards.find(isInboxColumn) ?? null;
+  const inboxMembers = inboxCol ? membersOf(inboxCol.id) : [];
+
+  const ensureInbox = useCallback(async (): Promise<Card | null> => {
+    if (!currentBoardId) return null;
+    const existing = cardsRef.current.find(isInboxColumn);
+    if (existing) return existing;
+    try {
+      // System infrastructure — deliberately NOT a history command.
+      const col = await createCard({
+        board_id: currentBoardId,
+        type: 'column',
+        x: -4000, y: -4000, // never rendered on canvas; parked offscreen
+        w: 300,
+        payload: { title: 'Unsorted', system: 'inbox' },
+      });
+      upsertCardLocal(col);
+      return col;
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
+  }, [currentBoardId, upsertCardLocal]);
+
+  const toggleInbox = useCallback(() => {
+    setInboxOpen((v) => {
+      const next = !v;
+      try {
+        if (currentBoardId) window.localStorage.setItem(`notes-inbox-open-${currentBoardId}`, next ? '1' : '0');
+      } catch { /* best-effort */ }
+      if (next) ensureInbox();
+      return next;
+    });
+  }, [currentBoardId, ensureInbox]);
+
+  /** Quick capture: text → note in the inbox; a URL → link card. */
+  async function quickCapture(raw: string) {
+    const text = raw.trim();
+    if (!text || !currentBoardId) return;
+    const inbox = await ensureInbox();
+    if (!inbox) return;
+    const idx = cardsRef.current.filter((c) => c.parent_column === inbox.id).length;
+    try {
+      if (isProbablyUrl(text)) {
+        const card = await createCard({
+          board_id: currentBoardId,
+          type: 'link',
+          x: 0, y: 0, w: DEFAULT_W.link, h: DEFAULT_H.link,
+          payload: { title: '', url: text },
+          parent_column: inbox.id,
+          column_index: idx,
+        });
+        upsertCardLocal(card);
+        getHistory(currentBoardId)?.push(makeCreateCommand([card], 'Capture link'));
+        const meta = await fetchLinkMeta(text);
+        if (meta) await applyLinkMeta(card.id, meta);
+      } else {
+        const card = await createCard({
+          board_id: currentBoardId,
+          type: 'note',
+          x: 0, y: 0, w: DEFAULT_W.note, h: DEFAULT_H.note,
+          payload: { body: textToNoteHtml(text) },
+          parent_column: inbox.id,
+          column_index: idx,
+        });
+        upsertCardLocal(card);
+        getHistory(currentBoardId)?.push(makeCreateCommand([card], 'Capture note'));
+      }
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Could not capture that.');
+    }
   }
 
   // ── Arrows (Sprint 9) ──────────────────────────────────────────────────
@@ -2106,7 +2205,7 @@ export default function Notes() {
         }
         if (e.code === 'Digit0' || e.code === 'Numpad0') {
           e.preventDefault();
-          const rects = cards.filter((c) => !c.parent_column).map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }));
+          const rects = cards.filter((c) => !c.parent_column && !isInboxColumn(c)).map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h }));
           setView(
             e.shiftKey
               ? fitView(rects, r.width, r.height)
@@ -2116,7 +2215,7 @@ export default function Notes() {
         }
         if (e.key === 'a' || e.key === 'A') {
           e.preventDefault();
-          setSelectedIds(new Set(cards.filter((c) => !c.parent_column).map((c) => c.id)));
+          setSelectedIds(new Set(cards.filter((c) => !c.parent_column && !isInboxColumn(c)).map((c) => c.id)));
           return;
         }
         if (e.key === 'd' || e.key === 'D') {
@@ -2139,6 +2238,11 @@ export default function Notes() {
         if (e.key === 'f' || e.key === 'F') {
           e.preventDefault();
           setSearchStubOpen(true);
+          return;
+        }
+        if ((e.key === 'u' || e.key === 'U') && e.shiftKey) {
+          e.preventDefault();
+          toggleInbox();
           return;
         }
         return;
@@ -2226,7 +2330,7 @@ export default function Notes() {
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge, selectedArrowId, arrows, arrowMenu, arrowLabelEditId, deleteArrowCmd, helpOpen, searchStubOpen]);
+  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, lightboxId, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge, selectedArrowId, arrows, arrowMenu, arrowLabelEditId, deleteArrowCmd, helpOpen, searchStubOpen, toggleInbox]);
 
   // ── Floating format toolbar ───────────────────────────────────────────
   // Show when the user makes a non-collapsed selection inside a Note body
@@ -2480,6 +2584,39 @@ export default function Notes() {
     }
   }
 
+  // Member row renderer shared by canvas columns and the inbox panel.
+  const renderMemberRow = (m: Card) => (
+    <ColumnMemberRow
+      key={m.id}
+      card={m}
+      selected={selectedIds.has(m.id)}
+      dragging={memberDragId === m.id}
+      onMouseDown={(e) => startMemberDrag(m, e)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openContextMenu(m, e.clientX, e.clientY);
+      }}
+      onDoubleClick={() => {
+        if (m.type === 'board' && m.board_ref) setCurrentBoardId(m.board_ref);
+        else if (m.type === 'document') setDocOverlayId(m.id);
+        else if (m.type === 'image') setLightboxId(m.id);
+      }}
+    >
+      <CardBody
+        card={m}
+        onPatch={(patch) => scheduleCardSave(m.id, patch)}
+        onConvertNote={() => convertNoteToDocument(m)}
+        onDismissConvert={() => dismissConvertPrompt(m)}
+        onDeleteTodoItem={(item) => deleteTodoLine(m, item)}
+        onOpenLink={() => {
+          const url = (m.payload as any).url;
+          if (url) window.open(url, '_blank', 'noopener');
+        }}
+      />
+    </ColumnMemberRow>
+  );
+
   // ── Render ────────────────────────────────────────────────────────────
   const ctxCard = ctxMenu ? cards.find((c) => c.id === ctxMenu.cardId) : null;
   const docCard = docOverlayId ? cards.find((c) => c.id === docOverlayId) : null;
@@ -2625,37 +2762,7 @@ export default function Notes() {
                 dragging={draggingIds.has(card.id)}
                 boardCharge={boardHoverId === card.id}
                 onArrowStart={(e) => startArrowDraft(card, e)}
-                renderMember={(m) => (
-                  <ColumnMemberRow
-                    key={m.id}
-                    card={m}
-                    selected={selectedIds.has(m.id)}
-                    dragging={memberDragId === m.id}
-                    onMouseDown={(e) => startMemberDrag(m, e)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      openContextMenu(m, e.clientX, e.clientY);
-                    }}
-                    onDoubleClick={() => {
-                      if (m.type === 'board' && m.board_ref) setCurrentBoardId(m.board_ref);
-                      else if (m.type === 'document') setDocOverlayId(m.id);
-                      else if (m.type === 'image') setLightboxId(m.id);
-                    }}
-                  >
-                    <CardBody
-                      card={m}
-                      onPatch={(patch) => scheduleCardSave(m.id, patch)}
-                      onConvertNote={() => convertNoteToDocument(m)}
-                      onDismissConvert={() => dismissConvertPrompt(m)}
-                      onDeleteTodoItem={(item) => deleteTodoLine(m, item)}
-                      onOpenLink={() => {
-                        const url = (m.payload as any).url;
-                        if (url) window.open(url, '_blank', 'noopener');
-                      }}
-                    />
-                  </ColumnMemberRow>
-                )}
+                renderMember={renderMemberRow}
                 onMouseDown={(e) => startCardDrag(card, e)}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -2978,6 +3085,50 @@ export default function Notes() {
           onClose={() => setTrashOpen(false)}
           onRestore={doRestore}
         />
+      )}
+
+      {/* Unsorted inbox: slim right-edge tab + docked panel (screen space) */}
+      {!inboxOpen && (
+        <button className="nt-inbox-tab" onClick={toggleInbox} title="Unsorted tray (Ctrl/Cmd+Shift+U)">
+          Unsorted{inboxMembers.length > 0 ? ` · ${inboxMembers.length}` : ''}
+        </button>
+      )}
+      {inboxOpen && (
+        <aside
+          className="nt-inbox-panel"
+          {...(inboxCol ? { 'data-col-id': inboxCol.id } : {})}
+        >
+          <div className="nt-inbox-head">
+            <h3>Unsorted</h3>
+            <span className="col-count">{inboxMembers.length}</span>
+            <button className="btn-quiet" onClick={toggleInbox}>close</button>
+          </div>
+          <input
+            className="nt-inbox-capture"
+            placeholder="Quick capture — type or paste a URL, then Enter"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const el = e.target as HTMLInputElement;
+                quickCapture(el.value);
+                el.value = '';
+              }
+            }}
+          />
+          <div className="nt-inbox-body">
+            {inboxMembers.map((m, i) => (
+              <div key={m.id} className="col-slot">
+                {colDrop?.colId === inboxCol?.id && colDrop?.index === i && <div className="col-indicator" />}
+                {renderMemberRow(m)}
+              </div>
+            ))}
+            {colDrop?.colId === inboxCol?.id && colDrop?.index === inboxMembers.length && (
+              <div className="col-indicator" />
+            )}
+            {inboxMembers.length === 0 && (
+              <div className="col-empty">Drag cards here, or capture something above.</div>
+            )}
+          </div>
+        </aside>
       )}
 
       {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
