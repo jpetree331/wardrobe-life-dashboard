@@ -14,7 +14,7 @@ A web app built around a single contemplative practitioner — organised as a sm
 
 It's built for the person who wants to keep a thoughtful record of their reading and devotional life *without* the gamified grind of a habit tracker. No streaks shouting at you. No "you broke a 73-day chain." Just calm, beautiful infrastructure for paying attention.
 
-Fork it for your own practice. Or read the code — most of the rooms are 200–500 lines of legible React + TypeScript, with the math factored into pure modules and 320+ tests behind it.
+Fork it for your own practice. Or read the code — the rooms are legible React + TypeScript, with the tricky math factored into pure modules and 540+ tests behind it.
 
 ---
 
@@ -27,7 +27,17 @@ A devotional journal you write in directly. Each entry has a date, a mood, a bod
 A year-by-year chronological view of your life — the running list, the long view. Import from XLSX or CSV; export the same. Day-shared with Sanctuary, so a date with a Sanctuary entry shows up tagged on the Timeline.
 
 ### Notes
-A board-style scratchpad. Multiple boards, each with cards you arrange freely. For ideas in flight that aren't ready to be a Sanctuary entry yet.
+An infinite-canvas pinboard in the spirit of Milanote — the room for ideas in flight that aren't ready to be a Sanctuary entry yet. Boards nest inside boards like folders; each is a wide pannable, zoomable canvas that remembers exactly where you left it.
+
+Eleven kinds of card: rich-text notes, checklists, headings, links, documents, images, file attachments, columns, color swatches, comment stickies, and tiles that open nested boards. And the verbs to go with them:
+
+- **Drop anything on it.** Drag images and files in from the desktop. Paste a screenshot and it becomes an image card; paste a bare URL and it becomes a link card that fetches its own title, favicon, and thumbnail; paste long text and it becomes a document, short text a note. Copy cards on one board, paste them on another.
+- **Arrange like you mean it.** Marquee multi-select and group drag. Columns that cards snap into and reorder within. Curved, labeled arrows between cards that follow them as they move. Alt-drag to peel off a duplicate; double-click empty canvas for a fresh note; drop cards onto a board tile (or hold to follow them in) to move them between boards.
+- **A real editor.** TipTap under the hood: markdown as you type (`#` headings, lists, `>` quotes, ``` code fences, `[ ]` checkboxes), plus highlight, strikethrough, inline code, and text links. A note that grows past a threshold politely offers to become a document.
+- **Nothing is ever lost.** Every delete — a card, a column with its contents, a whole board subtree, a single checklist line — lands in a restorable trash. In-session, Cmd/Ctrl+Z walks anything back; across sessions, the trash can rebuild an entire deleted board, structure and all. Hard deletion happens only when you type the word `DELETE`.
+- **Find it again.** Cmd/Ctrl+F searches every board and card across the tree and jumps to the match with a flash. A board-tree sidebar keeps starred and recent boards one click away. An "Unsorted" tray on each board catches quick captures until you're ready to place them.
+- **Get it out.** Export any board as a PNG (1× or 2×), a PDF, or a structural Markdown digest.
+- **Two skins.** Parchment by default, of course — but a faithful Milanote-gray skin is one toggle away, and every card, menu, and overlay follows it.
 
 ### Data
 The reading & Scripture tracker. Five tabs:
@@ -54,6 +64,7 @@ A time-block scheduler. Visually a different room from the rest — vibrant, kid
 - **Multi-translation Scripture.** Read the same passage in ESV and KJV side-by-side without leaving the entry.
 - **Recurrence the right way.** A repeating block stored once shows on every matching day. Edit any occurrence — the whole series updates. DST-immune; no millisecond math across days.
 - **Local-time everything.** Dates aren't UTC strings that drift across timezones. They're local `YYYY-MM-DD`, computed the right way. The heatmap doesn't lose squares to DST.
+- **A trash with a philosophy.** The Notes room never hard-deletes on its own. Everything — down to a single checklist line — is snapshotted and restorable, including entire nested board trees with their columns and arrows reconnected. Permanent deletion exists, but only behind a typed confirmation.
 - **Magic-link auth.** No passwords. No social logins. Just an email and a link.
 - **Reading-plan pace tracking.** Says "behind by 2 sessions" or "ahead by 1" instead of just %-complete. You know exactly where you stand.
 - **Six color themes** for the heatmap, each tuned for a different mood. Switch any time.
@@ -76,13 +87,16 @@ The result feels less like a spreadsheet and more like a leather-bound commonpla
 
 | Layer | Choice |
 |---|---|
-| Framework | React 19 + Vite + TypeScript (strict mode) |
+| Framework | React 18 + Vite + TypeScript (strict mode) |
 | State / data | Direct Supabase client; React's `useState` and `useMemo` |
 | Auth | Supabase magic-link, with row-level security on every table |
 | Database | Postgres (Supabase) — RLS policies on every table, schema in `app/supabase/migrations/` |
-| Scripture API | ESV via a thin Vercel edge function proxy (token never exposed to browser) |
+| Rich text | TipTap v2 (ProseMirror) for note and document editing |
+| Media | Supabase Storage (private bucket, owner-scoped policies) for image and file cards |
+| Scripture & link previews | ESV and OpenGraph metadata via thin Vercel edge function proxies (tokens and fetches never exposed to the browser) |
 | CSV / XLSX | Hand-rolled CSV parser for Goodreads (no dependency); `@e965/xlsx` for Timeline import/export |
-| Testing | Vitest + jsdom — **329 passing tests** across the pure aggregation, parsing, recurrence, calendar, and verse-count layers |
+| Export | `html-to-image` + `jsPDF` for board PNG/PDF; hand-rolled HTML→Markdown digest |
+| Testing | Vitest + jsdom — **545 passing tests** across the aggregation, parsing, recurrence, calendar, verse-count, canvas-geometry, clipboard-routing, undo-history, and trash-restore layers |
 | Hosting | Vercel for the static app + edge functions; Supabase for data |
 
 The aggregation logic — heatmap level bucketing, calendar grid building, plan pace status, top-N rollups, Goodreads CSV parsing, Daybook recurrence expansion — lives in pure helper modules with zero React or Supabase imports, so the math is unit-testable in isolation.

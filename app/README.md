@@ -5,7 +5,8 @@ A personal mind-palace web app for contemplative practice — Scripture reading,
 ## Build status
 
 - **Build 1** — Foundation: Vite + React + TypeScript scaffold, Supabase auth + schema, Hallway with 4 spheres + animations + threshold transition, placeholder Sanctuary and Timeline pages, scripture proxy stub for Vercel.
-- **Build 2** *(this commit)* — Timeline (year tabs, sheet, side editor, ✦ Sanctuary link, xlsx/csv/txt import + xlsx export), Sanctuary (binder, rich editor, inspector, scripture pane with translation switching, mode toggle, selection highlight), full ESV proxy, day-shared link between rooms.
+- **Build 2** — Timeline (year tabs, sheet, side editor, ✦ Sanctuary link, xlsx/csv/txt import + xlsx export), Sanctuary (binder, rich editor, inspector, scripture pane with translation switching, mode toggle, selection highlight), full ESV proxy, day-shared link between rooms.
+- **Notes expansion (2026-07)** — the Notes room grown into a full Milanote-style board system across 19 sprints (one commit each on `main`): 11 card types, marquee multi-select, a per-board undo/redo command layer, a Milanote skin toggle, image/file cards on Supabase Storage, rich link previews, columns, arrows, paste/drop intelligence, a TipTap editor, a registry-driven shortcut map + help overlay, an Unsorted inbox tray, global search, a board-tree sidebar, Trash v2 with board-subtree restore and typed permanent delete, and PNG/PDF/Markdown export.
 - **Build 3** *(planned)* — Tweaks panel (themes, creaminess/lightness sliders, custom colors), search across years, photos per day if asked.
 - **Verify** *(planned)* — End-to-end smoke pass across all seams.
 
@@ -24,12 +25,26 @@ You'll be redirected to `/login` — enter your email, click the link in the ema
 ## One-time Supabase setup
 
 1. Open the Supabase SQL Editor at https://supabase.com/dashboard/project/_/sql
-2. Run `supabase/migrations/0001_init.sql`. Creates `entries`, `user_prefs`, RLS policies, and the `updated_at` trigger.
-3. Run `supabase/migrations/0002_build2.sql`. Adds the `timeline_with_sanctuary` join view.
-4. Run `supabase/migrations/0003_relax_timeline_unique.sql`. Drops the one-per-day index — the Timeline now allows multiple distinct events per date, and the importer skips only exact-text duplicates.
-5. Run `supabase/migrations/0004_notes.sql`. Adds the Notes room: three new tables (`notes_boards`, `notes_cards`, `notes_trash`) with RLS scoped to the calling user.
-6. Run `supabase/migrations/0005_data.sql`. Adds the Data room: five tables (`data_scripture_reads`, `data_book_reads`, `data_daily_page_reads`, `data_reading_plans`, `data_plan_completions`) with RLS.
-7. Confirm under Authentication → Providers that **Email** is enabled (it is, by default — magic links are on by default).
+2. Run **every file in `supabase/migrations/` in numeric order** (`0001` → `0014`). They're all idempotent — safe to re-run. The app fails loudly (a red status bar in the Notes room) if it detects a missing migration, but save yourself the trip:
+
+   | Migration | Adds |
+   |---|---|
+   | `0001_init.sql` | `entries`, `user_prefs`, RLS, the `updated_at` trigger |
+   | `0002_build2.sql` | `timeline_with_sanctuary` join view |
+   | `0003_relax_timeline_unique.sql` | Multiple Timeline events per date |
+   | `0004_notes.sql` | Notes room: `notes_boards`, `notes_cards`, `notes_trash` |
+   | `0005_data.sql` | Data room: the five reading-tracker tables |
+   | `0006_treasury.sql` | Treasury room |
+   | `0007_daybook.sql` | Daybook room |
+   | `0008_practice.sql` | Sanctuary practice tracking |
+   | `0009_notes_image_cards.sql` | Image cards + the private `notes-media` Storage bucket & policies |
+   | `0010_notes_file_cards.sql` | File-attachment cards |
+   | `0011_notes_columns.sql` | Column containers on the Notes canvas |
+   | `0012_notes_arrows.sql` | `notes_arrows` table (card connectors) |
+   | `0013_notes_swatch_comment.sql` | Color swatch + comment cards |
+   | `0014_notes_starred.sql` | Starred boards |
+
+3. Confirm under Authentication → Providers that **Email** is enabled (it is, by default — magic links are on by default).
 
 ## Environment variables
 
@@ -58,16 +73,22 @@ Set the three env vars in Vercel's dashboard before the first deploy. After that
 ```
 app/
   src/
-    components/   small visual primitives (Build 2 fills this in)
+    components/   small visual primitives
     hooks/        useAuth and friends
-    lib/          supabase client, design tokens, env access
-    pages/        Hallway, Login, Sanctuary, Timeline
+    lib/          supabase client, design tokens, env access, and the
+                  pure logic modules (notes*, data aggregation, recurrence,
+                  imports) — unit-tested, no React/Supabase imports where
+                  possible
+    pages/        Hallway, Login, Sanctuary, Timeline, Notes, Data,
+                  Treasury, Daybook
     App.tsx       routes + protected wrapper
     main.tsx      entry point
   api/
-    scripture.ts  Vercel edge function — ESV proxy (stub in Build 1)
+    scripture.ts  Vercel edge function — ESV proxy
+    link-meta.ts  Vercel edge function — auth-gated link-preview fetcher
   supabase/
-    migrations/   SQL files; run via Supabase SQL Editor
+    migrations/   SQL files; run ALL of them via Supabase SQL Editor
+  test/           Vitest suites for the pure lib modules
   .env.local      local secrets (gitignored)
   .env.example    template
 ```
