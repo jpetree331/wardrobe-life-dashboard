@@ -102,7 +102,7 @@ import { stepOrder, type ZStep } from '../lib/notesZOrder';
 import { loadRecentBoards, loadSavedView, pushRecentBoard, saveSavedView } from '../lib/notesViewStore';
 import { listAllBoards, listAllCards } from '../lib/notes';
 import { searchBoards, searchCards, type BoardHit, type CardHit } from '../lib/notesSearch';
-import { fetchTrashEntry, permanentlyDeleteTrashEntry, reparentBoard, updateBoardMeta } from '../lib/notes';
+import { explainNotesError, fetchTrashEntry, permanentlyDeleteTrashEntry, reparentBoard, updateBoardMeta } from '../lib/notes';
 import { boardPath } from '../lib/notesSearch';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
@@ -814,7 +814,7 @@ export default function Notes() {
         upsertCardLocal(card);
       } catch (err) {
         console.error(err);
-        setStatusMsg(`Could not add "${f.name}".`);
+        setStatusMsg('⚠ ' + (explainNotesError(err) ?? `Could not add "${f.name}".`));
       } finally {
         setUploads((prev) => prev.filter((u) => u.id !== ph.id));
       }
@@ -897,7 +897,7 @@ export default function Notes() {
       if (meta) await applyLinkMeta(card.id, meta);
     } catch (err) {
       console.error(err);
-      setStatusMsg('Could not create link card.');
+      setStatusMsg('⚠ ' + (explainNotesError(err) ?? 'Could not create link card.'));
     }
   }
   const createLinkFromUrlRef = useRef(createLinkFromUrl);
@@ -1178,7 +1178,7 @@ export default function Notes() {
       }
     } catch (err) {
       console.error(err);
-      setStatusMsg('Could not create card.');
+      setStatusMsg('⚠ ' + (explainNotesError(err) ?? 'Could not create card.'));
     }
   }
 
@@ -1773,6 +1773,33 @@ export default function Notes() {
     }
   }
 
+  /** Rename a board from its tile (context menu): board row + tile
+      payload mirror + sidebar, as one undoable command. */
+  async function renameBoardTile(tile: Card, nextName: string) {
+    if (!tile.board_ref) return;
+    const prevName = ((tile.payload as { name?: string }).name ?? '').trim();
+    const apply = async (name: string) => {
+      const cur = cardsRef.current.find((c) => c.id === tile.id) ?? tile;
+      const payload = { ...(cur.payload as Record<string, unknown>), name };
+      patchCardLocal(tile.id, { payload });
+      await updateCard(tile.id, { payload });
+      await renameBoard(tile.board_ref!, name);
+      refreshSidebar();
+    };
+    try {
+      await apply(nextName);
+      getHistory(currentBoardId)?.push({
+        label: 'Rename board',
+        undo: () => apply(prevName || 'Untitled'),
+        do: () => apply(nextName),
+      });
+      setStatusMsg(`Renamed board to "${nextName}".`);
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('⚠ Could not rename the board.');
+    }
+  }
+
   /** Tile icon customization: writes notes_boards.tile_icon AND mirrors
       it in the tile card payload for rendering. */
   function setTileIcon(tile: Card, icon: string) {
@@ -1927,7 +1954,7 @@ export default function Notes() {
       }
     } catch (err) {
       console.error(err);
-      setStatusMsg('Could not capture that.');
+      setStatusMsg('⚠ ' + (explainNotesError(err) ?? 'Could not capture that.'));
     }
   }
 
@@ -3323,7 +3350,7 @@ export default function Notes() {
         </section>
       </main>
 
-      <footer className="nt-status">
+      <footer className={`nt-status${statusMsg.startsWith('⚠') ? ' warn' : ''}`}>
         <div>{statusMsg}</div>
         <div>
           {ancestry[ancestry.length - 1]?.name} · {cards.length} item{cards.length === 1 ? '' : 's'}
@@ -3364,6 +3391,19 @@ export default function Notes() {
                 }}
               >
                 Open board
+              </button>
+              <button
+                className="item"
+                onClick={() => {
+                  setCtxMenu(null);
+                  const current = ((ctxCard.payload as { name?: string }).name ?? '').trim();
+                  const name = window.prompt('Rename board', current);
+                  if (name && name.trim() && name.trim() !== current) {
+                    renameBoardTile(ctxCard, name.trim());
+                  }
+                }}
+              >
+                Rename board…
               </button>
               <button
                 className="item"
@@ -4321,13 +4361,27 @@ function BoardTile({ card }: { card: Card }) {
 function ImageBody({ card, onPatch }: { card: Card; onPatch: (p: Partial<Card>) => void }) {
   const payload = card.payload as ImagePayload;
   const [url, setUrl] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => {
     let alive = true;
+    setLoadFailed(false);
     signedMediaUrl(payload.thumbPath ?? payload.storagePath)
       .then((u) => { if (alive) setUrl(u); })
-      .catch(console.error);
+      .catch((err) => {
+        console.error(err);
+        if (alive) setLoadFailed(true);
+      });
     return () => { alive = false; };
   }, [payload.thumbPath, payload.storagePath]);
+  if (loadFailed) {
+    return (
+      <div className="img-wrap">
+        <div className="img-error">
+          image unavailable — check that migration 0009 (notes-media bucket) is applied
+        </div>
+      </div>
+    );
+  }
 
   const captionRef = useRef<HTMLDivElement>(null);
   useEffect(() => {

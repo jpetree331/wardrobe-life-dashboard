@@ -1519,6 +1519,27 @@
   letter-spacing: 0.04em;
 }
 
+/* Loud variant of the status footer for migration/permission failures */
+.nt-status.warn {
+  background: color-mix(in oklab, var(--red) 12%, var(--bg-2));
+  color: var(--red);
+  font-style: normal;
+  font-size: 13px;
+  border-top-color: color-mix(in oklab, var(--red) 40%, var(--line));
+}
+
+/* Image card load-failure state */
+.img-error {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center;
+  padding: 14px;
+  font-family: var(--notes-font-body); font-style: italic;
+  font-size: 12px; color: var(--red);
+  background: color-mix(in oklab, var(--red) 6%, var(--c-paper));
+  min-height: 60px;
+}
+
 /* Resize handle on the SE corner (visible on hover/select) */
 .nt-resize-se {
   position: absolute; right: 0; bottom: 0;

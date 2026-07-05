@@ -134,6 +134,33 @@ export type Arrow = {
   updated_at: string;
 };
 
+/**
+ * Translate common Supabase/Postgres failures into actionable messages —
+ * above all the "pending migration" cases, which otherwise fail silently
+ * enough to look like the UI doing nothing. Returns null when the error
+ * isn't one we recognize.
+ */
+export function explainNotesError(err: unknown): string | null {
+  const e = err as { code?: string; message?: string; statusCode?: number | string } | null;
+  const msg = e?.message ?? '';
+  if (e?.code === '23514' || /notes_cards_type_check/i.test(msg)) {
+    return 'This card type isn’t enabled in your database yet — run the pending Notes migrations (0009–0014) in the Supabase SQL Editor.';
+  }
+  if (e?.code === '42P01' || /relation .* does not exist/i.test(msg)) {
+    return 'A Notes table is missing — run the pending Notes migrations (0009–0014) in the Supabase SQL Editor.';
+  }
+  if (e?.code === '42703' || /column .* does not exist/i.test(msg)) {
+    return 'The Notes schema is out of date — run the pending Notes migrations (0011–0014) in the Supabase SQL Editor.';
+  }
+  if (/bucket.*not.*found|bucket_id/i.test(msg)) {
+    return 'The notes-media storage bucket is missing — run migration 0009 in the Supabase SQL Editor.';
+  }
+  if (/row.level security|violates.*policy|not.?authorized/i.test(msg) || e?.statusCode === 403) {
+    return 'Storage/database permissions rejected this — check that migration 0009’s policies were applied in Supabase.';
+  }
+  return null;
+}
+
 // ── Auth helper ────────────────────────────────────────────────────────
 
 async function currentUserId(): Promise<string> {
