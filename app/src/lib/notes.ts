@@ -6,6 +6,8 @@
 // 'board' card type is a tile that points at another board via board_ref.
 
 import { supabase } from './supabase';
+import { removeStorageObjects } from './notesMedia';
+import { collectMediaPaths, remapBoardSnapshot, type BoardSnapshot } from './notesTrashRestore';
 
 export type SwatchKey =
   | 'paper' | 'saffron' | 'rose' | 'sage' | 'sky' | 'violet' | 'clay';
@@ -451,10 +453,13 @@ export async function removeTrashEntry(id: string): Promise<void> {
 async function snapshotBoardSubtree(rootBoardId: string): Promise<{
   boards: Board[];
   cards: Card[];
+  arrows: Arrow[];
 }> {
-  // Walk the subtree breadth-first.
+  // Walk the subtree breadth-first. Arrows ride along (Sprint 18) so a
+  // board restore can reconnect them.
   const boards: Board[] = [];
   const cards: Card[] = [];
+  const arrows: Arrow[] = [];
   const queue = [rootBoardId];
   while (queue.length > 0) {
     const id = queue.shift()!;
@@ -463,11 +468,12 @@ async function snapshotBoardSubtree(rootBoardId: string): Promise<{
     boards.push(b);
     const cs = await listCards(id);
     cards.push(...cs);
+    arrows.push(...(await listArrows(id).catch(() => [] as Arrow[])));
     for (const c of cs) {
       if (c.type === 'board' && c.board_ref) queue.push(c.board_ref);
     }
   }
-  return { boards, cards };
+  return { boards, cards, arrows };
 }
 
 /**
@@ -642,28 +648,57 @@ export async function listTrash(): Promise<TrashEntry[]> {
   return (data as TrashEntry[]) || [];
 }
 
-export async function restoreTrash(entry: TrashEntry): Promise<void> {
+export type RestoreOptions = {
+  /** "Restore here": target this board instead of the origin. */
+  hereBoardId?: string;
+  /** Canvas position override (used with hereBoardId). */
+  at?: { x: number; y: number };
+};
+
+export type RestoreResult = {
+  /** Top-level restored cards (tile for boards, column card for columns). */
+  cards: Card[];
+};
+
+export async function restoreTrash(
+  entry: TrashEntry,
+  opts?: RestoreOptions,
+): Promise<RestoreResult> {
   const userId = await currentUserId();
+  const restored: Card[] = [];
   if (entry.kind === 'card') {
     const c = entry.snapshot as Card;
-    // Re-insert the card; if its origin board was deleted, fall back to root.
-    let boardId = c.board_id;
+    // Target: "here" override → origin board → root fallback.
+    let boardId = opts?.hereBoardId ?? c.board_id;
     const board = await getBoard(boardId);
     if (!board) {
       const root = await getOrCreateRootBoard();
       boardId = root.id;
     }
-    const { error } = await supabase.from('notes_cards').insert({
-      // Don't carry the old id — let the DB mint a new one to avoid clashes.
-      user_id: userId,
-      board_id: boardId,
-      type: c.type,
-      x: c.x, y: c.y, w: c.w, h: c.h, z: c.z,
-      color: c.color,
-      payload: c.payload,
-      board_ref: c.board_ref,
-    });
+    // Column membership only survives when the parent column still exists
+    // and we're restoring in place.
+    let parentColumn = opts?.hereBoardId ? null : c.parent_column;
+    if (parentColumn && !(await fetchCard(parentColumn))) parentColumn = null;
+    const { data, error } = await supabase
+      .from('notes_cards')
+      .insert({
+        // Don't carry the old id — let the DB mint a new one to avoid clashes.
+        user_id: userId,
+        board_id: boardId,
+        type: c.type,
+        x: opts?.at?.x ?? c.x,
+        y: opts?.at?.y ?? c.y,
+        w: c.w, h: c.h, z: c.z,
+        color: c.color,
+        payload: c.payload,
+        board_ref: c.board_ref,
+        parent_column: parentColumn,
+        column_index: parentColumn ? c.column_index : null,
+      })
+      .select()
+      .single();
     if (error) throw error;
+    restored.push(data as Card);
   } else if (entry.kind === 'todo_item') {
     const item = entry.snapshot as TodoItem;
     const card = entry.origin_card ? await fetchCard(entry.origin_card) : null;
@@ -690,7 +725,7 @@ export async function restoreTrash(entry: TrashEntry): Promise<void> {
     // Restore column + members as a unit with FRESH ids (originals may
     // clash), remapping members' parent_column onto the new column id.
     const snap = entry.snapshot as { column: Card; members: Card[] };
-    let boardId = snap.column.board_id;
+    let boardId = opts?.hereBoardId ?? snap.column.board_id;
     const board = await getBoard(boardId);
     if (!board) {
       const root = await getOrCreateRootBoard();
@@ -702,7 +737,8 @@ export async function restoreTrash(entry: TrashEntry): Promise<void> {
         user_id: userId,
         board_id: boardId,
         type: 'column',
-        x: snap.column.x, y: snap.column.y,
+        x: opts?.at?.x ?? snap.column.x,
+        y: opts?.at?.y ?? snap.column.y,
         w: snap.column.w, h: snap.column.h, z: snap.column.z,
         color: snap.column.color,
         payload: snap.column.payload,
@@ -710,6 +746,7 @@ export async function restoreTrash(entry: TrashEntry): Promise<void> {
       .select()
       .single();
     if (cErr) throw cErr;
+    restored.push(newCol as Card);
     const sorted = [...snap.members].sort(
       (a, b) => (a.column_index ?? 0) - (b.column_index ?? 0),
     );
@@ -729,12 +766,93 @@ export async function restoreTrash(entry: TrashEntry): Promise<void> {
       if (error) throw error;
     }
   }
-  // 'board' kind restore: out of scope for v1 — boards going to trash is
-  // rarely undone in practice, and re-creating the whole subtree from
-  // snapshot needs careful id remapping. We still SAVE the snapshot so a
-  // later restore command can be added.
+  else if (entry.kind === 'board') {
+    // Trash v2 (Sprint 18): rebuild the entire subtree from the snapshot
+    // with fresh ids via the pure remapper — boards, cards (columns
+    // before members, FK order), nested tiles, and internal arrows.
+    const snap = entry.snapshot as BoardSnapshot;
+    let parentId = opts?.hereBoardId ?? snap.tile.board_id;
+    const parent = await getBoard(parentId);
+    if (!parent) {
+      const root = await getOrCreateRootBoard();
+      parentId = root.id;
+    }
+    const plan = remapBoardSnapshot(snap, parentId, () => crypto.randomUUID());
+    for (const b of plan.boards) {
+      const { error } = await supabase.from('notes_boards').insert({ ...b, user_id: userId });
+      if (error) throw error;
+    }
+    const freeFirst = [...plan.cards].sort(
+      (a, b) => Number(Boolean(a.parent_column)) - Number(Boolean(b.parent_column)),
+    );
+    for (const c of freeFirst) {
+      const { error } = await supabase.from('notes_cards').insert({ ...c, user_id: userId });
+      if (error) throw error;
+    }
+    const { data: tileRow, error: tErr } = await supabase
+      .from('notes_cards')
+      .insert({
+        ...plan.tile,
+        x: opts?.at?.x ?? plan.tile.x,
+        y: opts?.at?.y ?? plan.tile.y,
+        user_id: userId,
+      })
+      .select()
+      .single();
+    if (tErr) throw tErr;
+    for (const a of plan.arrows) {
+      const { error } = await supabase.from('notes_arrows').insert({ ...a, user_id: userId });
+      if (error) throw error;
+    }
+    restored.push(tileRow as Card);
+  }
 
   await supabase.from('notes_trash').delete().eq('id', entry.id);
+  return { cards: restored };
+}
+
+/** Fetch a single trash entry (history redo of a restore). */
+export async function fetchTrashEntry(id: string): Promise<TrashEntry | null> {
+  const { data, error } = await supabase
+    .from('notes_trash')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as TrashEntry | null) || null;
+}
+
+/**
+ * PERMANENT delete of a trash entry — the only place trash rows die
+ * without a restore (never automatic; always user-confirmed upstream).
+ * Media objects referenced by the snapshot are removed from Storage only
+ * when no live card AND no other trash entry still references the same
+ * path (duplicates share storage).
+ */
+export async function permanentlyDeleteTrashEntry(entry: TrashEntry): Promise<void> {
+  const paths = collectMediaPaths(entry.kind, entry.snapshot);
+  if (paths.length > 0) {
+    const others = (await listTrash()).filter((t) => t.id !== entry.id);
+    const otherPaths = new Set(others.flatMap((t) => collectMediaPaths(t.kind, t.snapshot)));
+    const deletable: string[] = [];
+    for (const p of paths) {
+      if (otherPaths.has(p)) continue;
+      const { data, error } = await supabase
+        .from('notes_cards')
+        .select('id')
+        .or(`payload->>storagePath.eq.${p},payload->>thumbPath.eq.${p}`)
+        .limit(1);
+      if (error) throw error;
+      if ((data ?? []).length === 0) deletable.push(p);
+    }
+    if (deletable.length > 0) {
+      await removeStorageObjects(deletable).catch((err) =>
+        console.error('storage cleanup failed:', err),
+      );
+    }
+  }
+  const { error } = await supabase.from('notes_trash').delete().eq('id', entry.id);
+  if (error) throw error;
 }
 
 async function fetchCard(id: string): Promise<Card | null> {

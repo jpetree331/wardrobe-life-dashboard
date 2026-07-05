@@ -102,7 +102,8 @@ import { stepOrder, type ZStep } from '../lib/notesZOrder';
 import { loadRecentBoards, loadSavedView, pushRecentBoard, saveSavedView } from '../lib/notesViewStore';
 import { listAllBoards, listAllCards } from '../lib/notes';
 import { searchBoards, searchCards, type BoardHit, type CardHit } from '../lib/notesSearch';
-import { reparentBoard, updateBoardMeta } from '../lib/notes';
+import { fetchTrashEntry, permanentlyDeleteTrashEntry, reparentBoard, updateBoardMeta } from '../lib/notes';
+import { boardPath } from '../lib/notesSearch';
 import { buildBoardTree, wouldCreateCycle, type BoardNode } from '../lib/notesBoardTree';
 import { marqueeHits, normalizeRect, type Rect } from '../lib/notesMarquee';
 import { useFavicon } from '../hooks/useFavicon';
@@ -2755,22 +2756,98 @@ export default function Notes() {
     });
   }
 
-  // ── Trash ─────────────────────────────────────────────────────────────
+  // ── Trash (v2 — Sprint 18) ────────────────────────────────────────────
+  const [trashBoards, setTrashBoards] = useState<Board[]>([]);
   async function openTrash() {
     setTrashOpen(true);
     try {
-      setTrash(await listTrash());
+      const [entries, allBoards] = await Promise.all([listTrash(), listAllBoards()]);
+      setTrash(entries);
+      setTrashBoards(allBoards);
     } catch (err) {
       console.error(err);
     }
   }
-  async function doRestore(entry: TrashEntry) {
+
+  async function doRestore(entry: TrashEntry, here = false) {
     try {
-      await restoreTrash(entry);
+      const opts = here && currentBoardId
+        ? { hereBoardId: currentBoardId, at: centerCanvasPoint() }
+        : undefined;
+      const res = await restoreTrash(entry, opts);
       setTrash((prev) => prev.filter((t) => t.id !== entry.id));
       if (currentBoardId) loadBoard(currentBoardId);
+      // History: undo re-trashes the restored cards; redo restores them
+      // again from the re-trash entries.
+      if (res.cards.length > 0 && currentBoardId) {
+        let current = res.cards;
+        let redoEntryIds: string[] = [];
+        getHistory(currentBoardId)?.push({
+          label: 'Restore from trash',
+          undo: async () => {
+            redoEntryIds = [];
+            for (const c of current) {
+              const live = cardsRef.current.find((x) => x.id === c.id) ?? c;
+              if (live.type === 'column') {
+                const members = cardsRef.current.filter((x) => x.parent_column === live.id);
+                removeCardsLocal(new Set([live.id, ...members.map((m) => m.id)]));
+                redoEntryIds.push(await softDeleteColumn(live, members));
+              } else {
+                removeCardsLocal(new Set([live.id]));
+                redoEntryIds.push(await softDeleteCard(live));
+              }
+            }
+          },
+          do: async () => {
+            const next: Card[] = [];
+            for (const id of redoEntryIds) {
+              const again = await fetchTrashEntry(id);
+              if (!again) continue;
+              const r2 = await restoreTrash(again);
+              next.push(...r2.cards);
+            }
+            current = next;
+            if (currentBoardId) loadBoard(currentBoardId);
+          },
+        });
+      }
+      setStatusMsg(here ? 'Restored to this board.' : 'Restored.');
     } catch (err) {
       console.error(err);
+      setStatusMsg('Restore failed.');
+    }
+  }
+
+  async function doPermanentDelete(entry: TrashEntry) {
+    const ok = window.confirm(
+      'Delete forever? The entry (and any media files nothing else uses) will be permanently removed. This cannot be undone.',
+    );
+    if (!ok) return;
+    try {
+      await permanentlyDeleteTrashEntry(entry);
+      setTrash((prev) => prev.filter((t) => t.id !== entry.id));
+      setStatusMsg('Deleted forever.');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Permanent delete failed.');
+    }
+  }
+
+  async function doEmptyTrash() {
+    const typed = window.prompt(
+      `Permanently delete all ${trash.length} trash entries? Type DELETE to confirm.`,
+    );
+    if (typed !== 'DELETE') {
+      setStatusMsg('Empty trash cancelled.');
+      return;
+    }
+    try {
+      for (const t of [...trash]) await permanentlyDeleteTrashEntry(t);
+      setTrash([]);
+      setStatusMsg('Trash emptied.');
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Emptying the trash failed part-way; reopen to see what remains.');
     }
   }
 
@@ -3318,8 +3395,12 @@ export default function Notes() {
       {trashOpen && (
         <TrashDrawer
           entries={trash}
+          boards={trashBoards}
           onClose={() => setTrashOpen(false)}
-          onRestore={doRestore}
+          onRestore={(e) => doRestore(e, false)}
+          onRestoreHere={(e) => doRestore(e, true)}
+          onDeleteForever={doPermanentDelete}
+          onEmpty={doEmptyTrash}
         />
       )}
 
@@ -4671,36 +4752,90 @@ function HelpOverlay({ onClose }: { onClose: () => void }) {
 
 function TrashDrawer({
   entries,
+  boards,
   onClose,
   onRestore,
+  onRestoreHere,
+  onDeleteForever,
+  onEmpty,
 }: {
   entries: TrashEntry[];
+  boards: Board[];
   onClose: () => void;
   onRestore: (entry: TrashEntry) => void;
+  onRestoreHere: (entry: TrashEntry) => void;
+  onDeleteForever: (entry: TrashEntry) => void;
+  onEmpty: () => void;
 }) {
+  const [kindFilter, setKindFilter] = useState<'all' | TrashEntry['kind']>('all');
+  const [query, setQuery] = useState('');
+  const byId = useMemo(
+    () => new Map(boards.map((b) => [b.id, { id: b.id, name: b.name, parent_id: b.parent_id, is_root: b.is_root }])),
+    [boards],
+  );
+  const shown = entries.filter((t) => {
+    if (kindFilter !== 'all' && t.kind !== kindFilter) return false;
+    if (query.trim() && !trashPreview(t).toLowerCase().includes(query.trim().toLowerCase())) return false;
+    return true;
+  });
+  const originOf = (t: TrashEntry): string => {
+    if (!t.origin_board) return '';
+    const path = boardPath(t.origin_board, byId);
+    return path.length ? `from ${path.join(' › ')}` : '';
+  };
   return (
     <aside className="nt-trash">
       <div className="head">
         <h3>Trash</h3>
         <button className="btn-quiet" onClick={onClose}>close</button>
       </div>
+      <div className="nt-trash-tools">
+        <input
+          className="trash-search"
+          placeholder="Search the trash…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value as typeof kindFilter)}>
+          <option value="all">all kinds</option>
+          <option value="card">cards</option>
+          <option value="column">columns</option>
+          <option value="board">boards</option>
+          <option value="arrow">arrows</option>
+          <option value="todo_item">to-do lines</option>
+        </select>
+      </div>
       <div className="body">
-        {entries.length === 0 ? (
-          <div className="empty">Nothing in the trash.</div>
+        {shown.length === 0 ? (
+          <div className="empty">
+            {entries.length === 0 ? 'Nothing in the trash.' : 'Nothing matches.'}
+          </div>
         ) : (
-          entries.map((t) => (
+          shown.map((t) => (
             <div className="row" key={t.id}>
               <div className="info">
-                <div className="meta">{t.kind.replace('_', ' ')} · {timeAgo(t.deleted_at)}</div>
+                <div className="meta">
+                  {t.kind.replace('_', ' ')} · {timeAgo(t.deleted_at)}
+                  {originOf(t) && <span className="origin"> · {originOf(t)}</span>}
+                </div>
                 <div className="preview">{trashPreview(t)}</div>
               </div>
               <div className="actions">
                 <button onClick={() => onRestore(t)}>Restore</button>
+                {t.kind !== 'todo_item' && t.kind !== 'arrow' && (
+                  <button onClick={() => onRestoreHere(t)} title="Restore onto the current board">here</button>
+                )}
+                <button className="danger" onClick={() => onDeleteForever(t)} title="Delete forever">✕</button>
               </div>
             </div>
           ))
         )}
       </div>
+      {entries.length > 0 && (
+        <div className="nt-trash-foot">
+          <button className="btn-quiet danger" onClick={onEmpty}>Empty trash…</button>
+        </div>
+      )}
     </aside>
   );
 }

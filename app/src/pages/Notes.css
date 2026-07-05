@@ -1214,6 +1214,36 @@
   font-family: var(--notes-font-body); font-style: italic;
   color: var(--ink-faint);
 }
+.nt-trash-tools {
+  display: flex; gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.nt-trash-tools .trash-search {
+  flex: 1; min-width: 0;
+  padding: 5px 9px;
+  font-family: var(--notes-font-body); font-size: 12.5px;
+  color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--notes-control-radius);
+  outline: none;
+}
+.nt-trash-tools select {
+  font-family: var(--notes-font-body); font-size: 12px;
+  color: var(--ink-soft); background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--notes-control-radius);
+  padding: 4px 6px;
+}
+.nt-trash .row .meta .origin { text-transform: none; letter-spacing: 0.02em; }
+.nt-trash .row .actions button.danger { color: var(--red); border-color: color-mix(in oklab, var(--red) 40%, var(--line)); }
+.nt-trash-foot {
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-3);
+  text-align: right;
+}
+.nt-trash-foot .btn-quiet.danger { color: var(--red); border-color: color-mix(in oklab, var(--red) 45%, var(--line-strong)); }
 
 /* Document overlay */
 .nt-doc-overlay {
