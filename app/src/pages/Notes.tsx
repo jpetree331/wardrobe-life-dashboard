@@ -99,6 +99,19 @@ export default function Notes() {
   const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [docOverlayId, setDocOverlayId] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState('Drag a card type onto the canvas. Scroll to pan, ⌘+scroll to zoom.');
+  // Theme: parchment (default) or the Milanote skin. Device-local choice.
+  const [theme, setTheme] = useState<'parchment' | 'milanote'>(() => {
+    try {
+      return window.localStorage.getItem('notes-theme') === 'milanote' ? 'milanote' : 'parchment';
+    } catch {
+      return 'parchment';
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('notes-theme', theme);
+    } catch { /* best-effort */ }
+  }, [theme]);
   // Floating format toolbar over text selection inside a Note body.
   const [fmtToolbar, setFmtToolbar] = useState<{ top: number; left: number } | null>(null);
 
@@ -1114,7 +1127,7 @@ export default function Notes() {
   const redoLabel = hist?.peekRedoLabel();
 
   return (
-    <div className="notes-page">
+    <div className={`notes-page theme-${theme}`}>
       <header className="nt-ribbon">
         <div className="left">
           <Link className="back" to="/">← hallway</Link>
@@ -1189,6 +1202,13 @@ export default function Notes() {
             +
           </button>
           <button className="btn-quiet" onClick={doFit} title="Fit to view">fit</button>
+          <button
+            className="btn-quiet"
+            onClick={() => setTheme((t) => (t === 'parchment' ? 'milanote' : 'parchment'))}
+            title={theme === 'parchment' ? 'Switch to the Milanote skin' : 'Switch to parchment'}
+          >
+            {theme === 'parchment' ? 'skin: parchment' : 'skin: milanote'}
+          </button>
           <button className="btn-quiet" onClick={openTrash} title="Trash">Trash</button>
         </div>
       </header>

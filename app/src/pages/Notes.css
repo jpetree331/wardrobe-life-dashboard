@@ -1,8 +1,16 @@
 /* Notes — Milanote-style infinite-canvas room.
-   Scoped under .notes-page so nothing leaks into other rooms. */
+   Scoped under .notes-page so nothing leaks into other rooms.
+
+   THEME SYSTEM: every theme-relevant value is a custom property defined on
+   .notes-page. The defaults below ARE the parchment theme (so
+   .theme-parchment needs no overrides and stays pixel-identical);
+   .theme-milanote re-scopes the same properties to the Milanote look.
+   New UI must use these variables — never hardcoded colors/fonts. */
 
 .notes-page {
-  /* Card swatch tokens — parchment-friendly, mirrors the design file. */
+  /* Card swatch tokens — parchment-friendly, mirrors the design file.
+     The Milanote theme maps the SAME keys to Milanote-adjacent hues, so
+     card data never migrates. */
   --c-paper:   #faf5e8;
   --c-saffron: #f3e3b8;
   --c-rose:    #f0d6cb;
@@ -12,14 +20,69 @@
   --c-clay:    #e7d6c4;
   --canvas-grid: #2b241914;
 
-  background: var(--bg);
-  color: var(--ink);
-  font-family: 'EB Garamond', Georgia, serif;
+  /* Theme tokens (parchment defaults). */
+  --notes-font-body: 'EB Garamond', Georgia, serif;
+  --notes-font-display: 'Cormorant Garamond', serif;
+  --notes-font-mono: 'JetBrains Mono', 'Menlo', monospace;
+  --notes-card-radius: 3px;
+  --notes-tile-radius: 14px;
+  --notes-control-radius: 2px;
+  --notes-card-shadow: 0 8px 24px -14px rgba(43,36,25,0.25), 0 1px 0 rgba(255,255,255,0.4) inset;
+  --notes-card-shadow-hover: 0 14px 36px -16px rgba(43,36,25,0.35);
+  --notes-scrim: rgba(43,36,25,0.4);
+  --notes-canvas-bg: var(--bg);
+  --notes-ribbon-bg: var(--bg-2);
+  --notes-card-border: var(--line);
+  --notes-ink: var(--ink);
+  --notes-accent: var(--accent);
+
+  background: var(--notes-canvas-bg);
+  color: var(--notes-ink);
+  font-family: var(--notes-font-body);
   -webkit-font-smoothing: antialiased;
   height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr auto;
   overflow: hidden;
+}
+
+/* ── Milanote skin ─────────────────────────────────────────────────────
+   Re-scopes the Wardrobe tokens Notes.css consumes (--bg, --ink, --line,
+   --accent…) INSIDE .notes-page only — the rest of the app never sees
+   these values. Light warm-gray canvas, white cards, soft small shadows,
+   system sans, charcoal ink, muted Milanote-adjacent swatches. */
+.notes-page.theme-milanote {
+  --bg: #f2f1ee;
+  --bg-2: #fafaf9;
+  --bg-3: #ecebe8;
+  --page: #ffffff;
+  --ink: #33322e;
+  --ink-soft: #6d6c67;
+  --ink-faint: #a09f99;
+  --line: #e4e3df;
+  --line-strong: #d1d0cb;
+  --accent: #4a90e2;
+  --accent-strong: #3676c9;
+  --red: #e0484f;
+  --canvas-grid: #00000012;
+
+  --c-paper:   #ffffff;
+  --c-saffron: #fbe9a8;
+  --c-rose:    #f6c9c5;
+  --c-sage:    #cfe5c9;
+  --c-sky:     #c9ddf2;
+  --c-violet:  #ded1ef;
+  --c-clay:    #dbd1c6;
+
+  --notes-font-body: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, Roboto, sans-serif;
+  --notes-font-display: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, Roboto, sans-serif;
+  --notes-font-mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  --notes-card-radius: 3px;
+  --notes-tile-radius: 8px;
+  --notes-control-radius: 4px;
+  --notes-card-shadow: 0 1px 3px rgba(0,0,0,0.10), 0 1px 2px rgba(0,0,0,0.06);
+  --notes-card-shadow-hover: 0 4px 12px rgba(0,0,0,0.14);
+  --notes-scrim: rgba(20,20,20,0.35);
 }
 
 /* Ribbon */
@@ -31,20 +94,20 @@
 }
 .nt-ribbon .left { display: flex; align-items: center; gap: 18px; min-width: 0; flex: 1; }
 .nt-ribbon .back {
-  font-family: 'EB Garamond', serif; font-style: italic;
+  font-family: var(--notes-font-body); font-style: italic;
   color: var(--ink-soft); text-decoration: none; font-size: 14px;
   border-bottom: 1px solid transparent; padding-bottom: 2px;
   flex-shrink: 0;
 }
 .nt-ribbon .back:hover { color: var(--ink); border-bottom-color: var(--line-strong); }
 .nt-ribbon .place {
-  font-family: 'Cormorant Garamond', serif; font-weight: 400;
+  font-family: var(--notes-font-display); font-weight: 400;
   font-size: 16px; letter-spacing: 0.32em; text-transform: uppercase;
   color: var(--ink-soft); flex-shrink: 0;
 }
 .nt-ribbon .breadcrumbs {
   display: flex; align-items: center; gap: 4px; min-width: 0; overflow-x: auto;
-  font-family: 'Cormorant Garamond', serif; font-size: 16px;
+  font-family: var(--notes-font-display); font-size: 16px;
   color: var(--ink-soft); letter-spacing: 0.04em;
 }
 .nt-ribbon .crumb {
@@ -61,10 +124,10 @@
 }
 .nt-ribbon .right { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
 .nt-ribbon .btn-quiet {
-  font-family: 'EB Garamond', serif; font-size: 13px;
+  font-family: var(--notes-font-body); font-size: 13px;
   background: transparent; border: 1px solid var(--line-strong);
   color: var(--ink-soft); padding: 5px 12px; cursor: pointer;
-  border-radius: 2px; letter-spacing: 0.04em;
+  border-radius: var(--notes-control-radius); letter-spacing: 0.04em;
 }
 .nt-ribbon .btn-quiet:hover { color: var(--ink); border-color: var(--ink-soft); }
 .nt-ribbon .btn-quiet:disabled {
@@ -72,7 +135,7 @@
   color: var(--ink-faint); border-color: var(--line);
 }
 .nt-ribbon .zoom-readout {
-  font-family: 'EB Garamond', serif; font-style: italic;
+  font-family: var(--notes-font-body); font-style: italic;
   font-size: 12px; color: var(--ink-faint);
   min-width: 44px; text-align: center;
 }
@@ -97,7 +160,7 @@
   gap: 4px; padding: 8px 4px; border-radius: 4px;
   color: var(--ink-soft); cursor: grab;
   background: transparent; border: 0;
-  font-family: 'EB Garamond', serif; font-size: 10px;
+  font-family: var(--notes-font-body); font-size: 10px;
   letter-spacing: 0.06em;
   user-select: none;
   transition: background 150ms ease, color 150ms ease;
@@ -144,7 +207,7 @@
 }
 .nt-empty {
   position: absolute; left: 80px; top: 80px;
-  font-family: 'EB Garamond', serif;
+  font-family: var(--notes-font-body);
   color: var(--ink-faint);
   font-style: italic;
   pointer-events: none;
@@ -158,9 +221,9 @@
 .nt-card {
   position: absolute;
   background: var(--c-paper);
-  border: 1px solid var(--line);
-  box-shadow: 0 8px 24px -14px rgba(43,36,25,0.25), 0 1px 0 rgba(255,255,255,0.4) inset;
-  border-radius: 3px;
+  border: 1px solid var(--notes-card-border);
+  box-shadow: var(--notes-card-shadow);
+  border-radius: var(--notes-card-radius);
   transition: box-shadow 200ms ease, border-color 200ms ease, transform 200ms ease;
   user-select: none;
   /* The canvas wrapper sets cursor: grab; without this the cursor "leaks"
@@ -176,14 +239,14 @@
 .notes-page .nt-card input[type="url"] { cursor: text; }
 .nt-card:hover {
   border-color: var(--line-strong);
-  box-shadow: 0 14px 36px -16px rgba(43,36,25,0.35);
+  box-shadow: var(--notes-card-shadow-hover);
   z-index: 2;
 }
 .nt-card.selected {
   border-color: var(--accent-strong);
   box-shadow:
     0 0 0 2px color-mix(in oklab, var(--accent) 40%, transparent),
-    0 14px 36px -16px rgba(43,36,25,0.35);
+    var(--notes-card-shadow-hover);
   z-index: 3;
 }
 .nt-drag-handle {
@@ -195,7 +258,7 @@
   position: absolute; top: -10px; left: 8px;
   background: var(--bg);
   border: 1px solid var(--line);
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--ink-faint);
   padding: 1px 8px;
@@ -217,7 +280,7 @@
 .nt-card.type-note .body {
   flex: 1;
   min-height: 40px;
-  font-family: 'EB Garamond', serif; font-size: 14px;
+  font-family: var(--notes-font-body); font-size: 14px;
   color: var(--ink); line-height: 1.5;
   outline: none;
   overflow: hidden;
@@ -230,12 +293,12 @@
   pointer-events: none;
 }
 .nt-card.type-note .body h1 {
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-weight: 500; font-size: 19px;
   margin: 0 0 6px;
 }
 .nt-card.type-note .body h2 {
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-weight: 500; font-size: 16px;
   margin: 8px 0 4px;
 }
@@ -250,7 +313,7 @@
 /* Todo card */
 .nt-card.type-todo { padding: 14px 14px 12px; min-width: 220px; min-height: 100px; }
 .nt-card.type-todo .todo-title {
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-size: 13px; letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--ink-soft); margin: 0 0 8px;
   outline: none;
@@ -271,7 +334,7 @@
 .nt-card.type-todo li input[type="checkbox"] {
   appearance: none;
   width: 14px; height: 14px;
-  border: 1px solid var(--line-strong); border-radius: 2px;
+  border: 1px solid var(--line-strong); border-radius: var(--notes-control-radius);
   background: var(--bg);
   cursor: pointer; flex-shrink: 0;
   margin-top: 4px;
@@ -301,7 +364,7 @@
   background: transparent; border: 0; cursor: pointer;
   color: var(--ink-faint); font-style: italic; font-size: 12px;
   padding: 4px 0; margin-top: 4px;
-  font-family: 'EB Garamond', serif;
+  font-family: var(--notes-font-body);
 }
 .nt-card.type-todo .add:hover { color: var(--ink); }
 
@@ -316,7 +379,7 @@
   border-color: transparent;
 }
 .nt-card.type-heading .body {
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-weight: 500;
   font-size: 28px;
   color: var(--ink);
@@ -334,7 +397,7 @@
 /* Link card */
 .nt-card.type-link { padding: 12px 14px; min-width: 220px; }
 .nt-card.type-link .title {
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-size: 16px; color: var(--ink);
   margin-bottom: 4px; outline: none;
 }
@@ -344,7 +407,7 @@
 }
 .nt-card.type-link .url-input {
   width: 100%;
-  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-family: var(--notes-font-mono);
   font-size: 11px; color: var(--accent-strong);
   background: transparent;
   border: 0; outline: none;
@@ -353,7 +416,7 @@
 .nt-card.type-link .open {
   display: inline-block;
   background: transparent; border: 0; cursor: pointer;
-  font-family: 'EB Garamond', serif; font-style: italic;
+  font-family: var(--notes-font-body); font-style: italic;
   color: var(--ink-soft); font-size: 12px;
   padding: 4px 0 0;
 }
@@ -381,18 +444,18 @@
               0 20px 0 var(--ink-faint);
 }
 .nt-card.type-document .doc.icon-mode .doc-title {
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-size: 14px; color: var(--ink);
   padding: 0 8px; line-height: 1.2;
 }
 .nt-card.type-document .doc.preview-mode { padding: 14px 16px; height: 100%; }
 .nt-card.type-document .doc.preview-mode .doc-title {
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-size: 18px; color: var(--ink); margin-bottom: 6px;
   border-bottom: 1px solid var(--line); padding-bottom: 4px;
 }
 .nt-card.type-document .doc.preview-mode .doc-preview {
-  font-family: 'EB Garamond', serif;
+  font-family: var(--notes-font-body);
   font-size: 13px; color: var(--ink-soft);
   line-height: 1.5;
   overflow: hidden;
@@ -403,7 +466,7 @@
 .nt-card.type-document .doc-mode-toggle {
   position: absolute; top: 4px; right: 4px;
   background: transparent; border: 0; cursor: pointer;
-  color: var(--ink-faint); font-family: 'EB Garamond', serif;
+  color: var(--ink-faint); font-family: var(--notes-font-body);
   font-style: italic; font-size: 11px;
   padding: 2px 6px;
   opacity: 0; transition: opacity 150ms ease;
@@ -426,7 +489,7 @@
 }
 .nt-card.type-board .board-tile {
   width: 86px; height: 86px;
-  border-radius: 14px;
+  border-radius: var(--notes-tile-radius);
   display: flex; align-items: center; justify-content: center;
   color: rgba(43,36,25,0.4);
   box-shadow: 0 8px 22px -10px rgba(43,36,25,0.3);
@@ -443,13 +506,13 @@
   width: 42px; height: 42px; opacity: 0.55;
 }
 .nt-card.type-board .board-label {
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-size: 14px; color: var(--ink); text-align: center;
   line-height: 1.15;
   min-width: 100px;
 }
 .nt-card.type-board .board-meta {
-  font-family: 'EB Garamond', serif; font-style: italic;
+  font-family: var(--notes-font-body); font-style: italic;
   font-size: 11px; color: var(--ink-faint);
 }
 
@@ -460,11 +523,11 @@
   box-shadow: 0 14px 30px -10px rgba(43,36,25,0.35);
   padding: 6px;
   min-width: 180px;
-  font-family: 'EB Garamond', serif;
+  font-family: var(--notes-font-body);
 }
 .nt-ctx .label {
   padding: 4px 10px;
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--ink-faint);
 }
@@ -484,7 +547,7 @@
   display: block; width: 100%; text-align: left;
   background: transparent; border: 0;
   padding: 6px 10px; font-size: 13.5px;
-  color: var(--ink); cursor: pointer; border-radius: 2px;
+  color: var(--ink); cursor: pointer; border-radius: var(--notes-control-radius);
   font-family: inherit;
 }
 .nt-ctx .item:hover { background: var(--bg-3); }
@@ -511,7 +574,7 @@
   display: flex; justify-content: space-between; align-items: center;
 }
 .nt-trash h3 {
-  margin: 0; font-family: 'Cormorant Garamond', serif;
+  margin: 0; font-family: var(--notes-font-display);
   font-weight: 400; font-size: 13px;
   letter-spacing: 0.24em; text-transform: uppercase;
   color: var(--ink-soft);
@@ -525,12 +588,12 @@
 .nt-trash .row:hover { background: var(--bg); }
 .nt-trash .row .info { flex: 1; min-width: 0; }
 .nt-trash .row .meta {
-  font-family: 'Cormorant Garamond', serif;
+  font-family: var(--notes-font-display);
   font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
   color: var(--ink-faint);
 }
 .nt-trash .row .preview {
-  font-family: 'EB Garamond', serif;
+  font-family: var(--notes-font-body);
   font-size: 13.5px; color: var(--ink);
   line-height: 1.45;
   overflow: hidden;
@@ -542,21 +605,21 @@
 .nt-trash .row .actions { display: flex; flex-direction: column; gap: 4px; }
 .nt-trash .row .actions button {
   background: transparent; border: 1px solid var(--line);
-  color: var(--ink-soft); font-family: 'EB Garamond', serif;
+  color: var(--ink-soft); font-family: var(--notes-font-body);
   font-size: 11.5px; padding: 3px 8px; cursor: pointer;
-  letter-spacing: 0.04em; border-radius: 2px;
+  letter-spacing: 0.04em; border-radius: var(--notes-control-radius);
 }
 .nt-trash .row .actions button:hover { color: var(--ink); border-color: var(--ink-soft); }
 .nt-trash .empty {
   padding: 40px 20px; text-align: center;
-  font-family: 'EB Garamond', serif; font-style: italic;
+  font-family: var(--notes-font-body); font-style: italic;
   color: var(--ink-faint);
 }
 
 /* Document overlay */
 .nt-doc-overlay {
   position: fixed; inset: 0; z-index: 200;
-  background: rgba(43,36,25,0.4);
+  background: var(--notes-scrim);
   backdrop-filter: blur(4px);
   display: flex; align-items: flex-start; justify-content: center;
   padding: 40px 0;
@@ -576,12 +639,12 @@
 }
 .nt-doc-page .doc-head h2 {
   margin: 0;
-  font-family: 'Cormorant Garamond', serif; font-weight: 400;
+  font-family: var(--notes-font-display); font-weight: 400;
   font-size: 11px; letter-spacing: 0.32em; text-transform: uppercase;
   color: var(--ink-faint);
 }
 .nt-doc-page .doc-head button {
-  font-family: 'EB Garamond', serif; font-style: italic;
+  font-family: var(--notes-font-body); font-style: italic;
   background: transparent; border: 0; cursor: pointer;
   color: var(--ink-soft); font-size: 13px;
 }
@@ -593,8 +656,8 @@
 }
 .nt-doc-page .doc-tlbl button {
   background: transparent; border: 0; cursor: pointer;
-  color: var(--ink-soft); font-family: 'EB Garamond', serif;
-  font-size: 13.5px; padding: 4px 8px; border-radius: 2px; min-width: 28px;
+  color: var(--ink-soft); font-family: var(--notes-font-body);
+  font-size: 13.5px; padding: 4px 8px; border-radius: var(--notes-control-radius); min-width: 28px;
 }
 .nt-doc-page .doc-tlbl button:hover { background: var(--bg-3); color: var(--ink); }
 .nt-doc-page .doc-tlbl .b { font-weight: 700; }
@@ -602,7 +665,7 @@
 .nt-doc-page .doc-tlbl .u { text-decoration: underline; }
 .nt-doc-page .doc-tlbl .sep { width: 1px; background: var(--line); margin: 2px 4px; }
 .nt-doc-page .doc-page-title {
-  font-family: 'Cormorant Garamond', serif; font-weight: 500;
+  font-family: var(--notes-font-display); font-weight: 500;
   font-size: 36px; color: var(--ink);
   border: 0; outline: none; background: transparent;
   width: 100%;
@@ -610,7 +673,7 @@
   letter-spacing: 0.01em;
 }
 .nt-doc-page .doc-body {
-  font-family: 'EB Garamond', serif; font-size: 17px;
+  font-family: var(--notes-font-body); font-size: 17px;
   line-height: 1.7; color: var(--ink);
   outline: none; min-height: 50vh;
 }
@@ -624,7 +687,7 @@
   display: flex; align-items: center; justify-content: space-between;
   padding: 6px 22px;
   background: var(--bg-2); border-top: 1px solid var(--line);
-  font-family: 'EB Garamond', serif; font-style: italic;
+  font-family: var(--notes-font-body); font-style: italic;
   font-size: 12px; color: var(--ink-faint);
   letter-spacing: 0.04em;
 }
@@ -653,7 +716,7 @@
   margin-top: 10px; padding: 8px 10px;
   background: color-mix(in oklab, var(--accent) 14%, transparent);
   border: 1px dashed var(--accent);
-  font-family: 'EB Garamond', serif; font-style: italic;
+  font-family: var(--notes-font-body); font-style: italic;
   font-size: 12px; color: var(--ink-soft);
   display: flex; align-items: center; justify-content: space-between;
   gap: 10px;
@@ -663,8 +726,8 @@
 .nt-convert-prompt button {
   background: var(--accent); color: var(--bg);
   border: 0; padding: 4px 10px; cursor: pointer;
-  font-family: 'EB Garamond', serif; font-size: 12px;
-  letter-spacing: 0.04em; border-radius: 2px;
+  font-family: var(--notes-font-body); font-size: 12px;
+  letter-spacing: 0.04em; border-radius: var(--notes-control-radius);
 }
 .nt-convert-prompt button.ghost {
   background: transparent; color: var(--ink-soft);
@@ -679,14 +742,14 @@
   display: inline-flex; gap: 2px;
   border-radius: 4px;
   box-shadow: 0 12px 30px -10px rgba(0,0,0,0.45);
-  font-family: 'EB Garamond', serif;
+  font-family: var(--notes-font-body);
   user-select: none;
 }
 .nt-fmt-toolbar button {
   background: transparent; border: 0; cursor: pointer;
   color: var(--bg);
   font-family: inherit; font-size: 13px;
-  padding: 5px 9px; border-radius: 2px; min-width: 28px;
+  padding: 5px 9px; border-radius: var(--notes-control-radius); min-width: 28px;
 }
 .nt-fmt-toolbar button:hover { background: rgba(255, 255, 255, 0.12); }
 .nt-fmt-toolbar .b { font-weight: 700; }
