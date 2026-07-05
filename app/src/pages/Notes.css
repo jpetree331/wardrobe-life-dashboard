@@ -395,7 +395,27 @@
 .nt-card.type-heading.selected .body { border-bottom-color: var(--accent); }
 
 /* Link card */
-.nt-card.type-link { padding: 12px 14px; min-width: 220px; }
+.nt-card.type-link { padding: 12px 14px; min-width: 220px; overflow: hidden; }
+.nt-card.type-link .link-thumb {
+  margin: -12px -14px 10px;
+  height: 92px; overflow: hidden;
+  border-bottom: 1px solid var(--line);
+}
+.nt-card.type-link .link-thumb img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  user-select: none;
+}
+.nt-card.type-link .link-head { display: flex; align-items: baseline; gap: 7px; }
+.nt-card.type-link .link-favicon {
+  width: 14px; height: 14px; flex-shrink: 0;
+  align-self: center; user-select: none;
+}
+.nt-card.type-link .link-head .title { flex: 1; min-width: 0; }
+.nt-card.type-link .link-domain {
+  font-family: var(--notes-font-body); font-style: italic;
+  font-size: 11px; color: var(--ink-faint);
+  margin-top: 2px;
+}
 .nt-card.type-link .title {
   font-family: var(--notes-font-display);
   font-size: 16px; color: var(--ink);
@@ -586,6 +606,15 @@
 }
 .nt-card.type-file .file-actions button:hover { color: var(--ink); border-color: var(--ink-soft); }
 .nt-card.type-file audio { width: 100%; height: 32px; }
+
+/* Embedded player (YouTube/Vimeo) in the lightbox */
+.nt-lightbox .lb-embed {
+  width: min(960px, calc(100vw - 160px));
+  aspect-ratio: 16 / 9;
+  border: 0;
+  box-shadow: 0 30px 90px -30px rgba(0,0,0,0.6);
+  background: #000;
+}
 
 /* Video in the lightbox */
 .nt-lightbox .lb-inner video {

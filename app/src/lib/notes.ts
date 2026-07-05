@@ -40,6 +40,17 @@ export type ImagePayload = {
   naturalH: number;
 };
 
+export type LinkPayload = {
+  title: string;
+  url: string;
+  // Metadata fields (Sprint 7) — additive; old cards simply lack them.
+  description?: string;
+  image?: string;
+  favicon?: string;
+  siteName?: string;
+  fetchedAt?: string;
+};
+
 export type FilePayload = {
   storagePath: string;      // notes-media bucket
   filename: string;
@@ -50,7 +61,7 @@ export type FilePayload = {
 export type CardPayload =
   | { body: string }                                                   // note, heading
   | { title: string; items: TodoItem[] }                               // todo
-  | { title: string; url: string }                                     // link
+  | LinkPayload                                                         // link
   | { title: string; body: string; mode: 'icon' | 'preview' }          // document
   | { name: string }                                                   // board tile mirror
   | ImagePayload                                                        // image

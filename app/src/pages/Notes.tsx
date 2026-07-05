@@ -32,7 +32,9 @@ import {
   updateCard,
 } from '../lib/notes';
 import { BoardHistory, BurstCoalescer, hasUserContent, type Command } from '../lib/notesHistory';
-import type { FilePayload, ImagePayload } from '../lib/notes';
+import type { FilePayload, ImagePayload, LinkPayload } from '../lib/notes';
+import { domainOf, embedUrlFor, isProbablyUrl, type LinkMeta } from '../lib/notesLinkMeta';
+import { fetchLinkMeta } from '../lib/notesLinkClient';
 import {
   aspectResize,
   fanOutOffsets,
@@ -162,6 +164,9 @@ export default function Notes() {
     return h;
   }, []);
 
+  const patchCardLocal = useCallback((id: string, patch: Partial<Card>) => {
+    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }, []);
   const upsertCardLocal = useCallback((card: Card) => {
     setCards((prev) => {
       const i = prev.findIndex((c) => c.id === card.id);
@@ -548,15 +553,90 @@ export default function Notes() {
   const centerCanvasPointRef = useRef(centerCanvasPoint);
   centerCanvasPointRef.current = centerCanvasPoint;
 
-  // Paste files from the clipboard (canvas scope only — typing keeps its
-  // native paste) → media cards at the viewport center.
+  // ── Link cards: metadata (Sprint 7) ───────────────────────────────────
+
+  /**
+   * Merge fetched metadata into a link card. NEVER overwrites a manually
+   * entered title. Applied outside history — metadata arrival is a system
+   * fill-in, not an undoable user edit.
+   */
+  const applyLinkMeta = useCallback(
+    async (cardId: string, meta: LinkMeta) => {
+      const cur = cardsRef.current.find((c) => c.id === cardId);
+      if (!cur || cur.type !== 'link') return;
+      const p = cur.payload as LinkPayload;
+      const payload: LinkPayload = {
+        ...p,
+        title: p.title?.trim() ? p.title : meta.title ?? '',
+        description: meta.description,
+        image: meta.image,
+        favicon: meta.favicon,
+        siteName: meta.siteName,
+        fetchedAt: new Date().toISOString(),
+      };
+      patchCardLocal(cardId, { payload });
+      await updateCard(cardId, { payload }).catch(console.error);
+    },
+    [patchCardLocal],
+  );
+
+  const refreshLinkMeta = useCallback(
+    async (card: Card) => {
+      const url = (card.payload as LinkPayload).url;
+      if (!url) return;
+      setStatusMsg('Fetching link details…');
+      const meta = await fetchLinkMeta(url);
+      if (meta) {
+        await applyLinkMeta(card.id, meta);
+        setStatusMsg('Link details updated.');
+      } else {
+        setStatusMsg('Could not fetch link details.');
+      }
+    },
+    [applyLinkMeta],
+  );
+
+  /** Paste-to-create: a bare URL becomes a link card + metadata fetch. */
+  async function createLinkFromUrl(url: string) {
+    if (!currentBoardId) return;
+    const at = centerCanvasPoint();
+    try {
+      const card = await createCard({
+        board_id: currentBoardId,
+        type: 'link',
+        x: at.x, y: at.y, w: DEFAULT_W.link, h: DEFAULT_H.link,
+        payload: { title: '', url },
+      });
+      upsertCardLocal(card);
+      selectOnly(card.id);
+      getHistory(currentBoardId)?.push(makeCreateCommand([card], 'Add link'));
+      setStatusMsg('Link card created — fetching details…');
+      const meta = await fetchLinkMeta(url);
+      if (meta) await applyLinkMeta(card.id, meta);
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Could not create link card.');
+    }
+  }
+  const createLinkFromUrlRef = useRef(createLinkFromUrl);
+  createLinkFromUrlRef.current = createLinkFromUrl;
+
+  // Paste routing (canvas scope only — typing keeps its native paste):
+  // clipboard files → media cards; a bare URL → link card with metadata.
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
       if (isTypingContext(e.target)) return;
       const files = [...(e.clipboardData?.files ?? [])];
-      if (files.length === 0) return;
-      e.preventDefault();
-      createMediaCardsRef.current(files, centerCanvasPointRef.current());
+      if (files.length > 0) {
+        e.preventDefault();
+        createMediaCardsRef.current(files, centerCanvasPointRef.current());
+        return;
+      }
+      const text = e.clipboardData?.getData('text/plain') ?? '';
+      if (isProbablyUrl(text)) {
+        e.preventDefault();
+        createLinkFromUrlRef.current(text.trim());
+      }
     }
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
@@ -710,10 +790,6 @@ export default function Notes() {
   // card; the debounce flush pairs it with the post-burst card to push a
   // single history command for the whole burst.
   const burstRef = useRef(new BurstCoalescer<Card>());
-
-  const patchCardLocal = useCallback((id: string, patch: Partial<Card>) => {
-    setCards((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-  }, []);
 
   const pushBurstCommand = useCallback(
     (before: Card, after: Card) => {
@@ -1445,6 +1521,11 @@ export default function Notes() {
                     fileGroup((card.payload as FilePayload).mimeType, (card.payload as FilePayload).filename) === 'video'
                   ) {
                     setLightboxId(card.id);
+                  } else if (
+                    card.type === 'link' &&
+                    embedUrlFor((card.payload as LinkPayload).url || '')
+                  ) {
+                    setLightboxId(card.id);
                   }
                 }}
                 onPatch={(patch) => scheduleCardSave(card.id, patch)}
@@ -1545,6 +1626,17 @@ export default function Notes() {
               Convert to Document
             </button>
           )}
+          {ctxCard.type === 'link' && (
+            <button
+              className="item"
+              onClick={() => {
+                setCtxMenu(null);
+                refreshLinkMeta(ctxCard);
+              }}
+            >
+              Refresh metadata
+            </button>
+          )}
           <div className="sep" />
           <button className="item delete" onClick={() => deleteCards(actionTargets(ctxCard))}>
             Delete{selectedIds.size > 1 && selectedIds.has(ctxCard.id) ? ` ${selectedIds.size} cards` : ''}
@@ -1590,8 +1682,8 @@ export default function Notes() {
       {lightboxId && (() => {
         const lbCard = cards.find((c) => c.id === lightboxId);
         if (!lbCard) return null;
-        if (lbCard.type === 'file') {
-          // Video lightbox: single item, no stepping.
+        if (lbCard.type === 'file' || lbCard.type === 'link') {
+          // Video / embed lightbox: single item, no stepping.
           return (
             <MediaLightbox
               card={lbCard}
@@ -1992,23 +2084,44 @@ function LinkBody({
   onPatch: (p: Partial<Card>) => void;
   onOpen: () => void;
 }) {
-  const payload = card.payload as { title: string; url: string };
+  const payload = card.payload as LinkPayload;
   const titleRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (titleRef.current && document.activeElement !== titleRef.current) {
       titleRef.current.textContent = payload.title || '';
     }
   }, [payload.title]);
+  const domain = domainOf(payload.url || '');
+  const embeddable = payload.url ? embedUrlFor(payload.url) !== null : false;
   return (
     <>
-      <div
-        ref={titleRef}
-        className="title"
-        contentEditable
-        suppressContentEditableWarning
-        data-placeholder="Link title"
-        onInput={(e) => onPatch({ payload: { ...payload, title: (e.target as HTMLDivElement).textContent || '' } })}
-      />
+      {payload.image && (
+        <div className="link-thumb">
+          <img src={payload.image} alt="" draggable={false} loading="lazy" />
+        </div>
+      )}
+      <div className="link-head">
+        {payload.favicon && (
+          <img
+            className="link-favicon"
+            src={payload.favicon}
+            alt=""
+            draggable={false}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        )}
+        <div
+          ref={titleRef}
+          className="title"
+          contentEditable
+          suppressContentEditableWarning
+          data-placeholder="Link title"
+          onInput={(e) => onPatch({ payload: { ...payload, title: (e.target as HTMLDivElement).textContent || '' } })}
+        />
+      </div>
+      {(domain || payload.siteName) && (
+        <div className="link-domain">{payload.siteName || domain}{embeddable ? ' · double-click to play' : ''}</div>
+      )}
       <input
         className="url-input"
         type="url"
@@ -2144,12 +2257,20 @@ function MediaLightbox({
   onNavigate: (dir: 1 | -1) => void;
 }) {
   const isVideo = card.type === 'file';
+  const isEmbed = card.type === 'link';
   const imgPayload = card.payload as ImagePayload;
   const filePayload = card.payload as FilePayload;
-  const storagePath = isVideo ? filePayload.storagePath : imgPayload.storagePath;
-  const caption = isVideo ? filePayload.filename : imgPayload.caption || '';
+  const linkPayload = card.payload as LinkPayload;
+  const embedSrc = isEmbed ? embedUrlFor(linkPayload.url || '') : null;
+  const storagePath = isEmbed ? '' : isVideo ? filePayload.storagePath : imgPayload.storagePath;
+  const caption = isEmbed
+    ? linkPayload.title || domainOf(linkPayload.url || '')
+    : isVideo
+      ? filePayload.filename
+      : imgPayload.caption || '';
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
+    if (!storagePath) return;
     let alive = true;
     setUrl(null);
     // Lightbox always shows the ORIGINAL, not the canvas rendition.
@@ -2164,7 +2285,17 @@ function MediaLightbox({
         <button className="lb-nav prev" onClick={(e) => { e.stopPropagation(); onNavigate(-1); }} title="Previous (←)">‹</button>
       )}
       <figure className="lb-inner" onClick={(e) => e.stopPropagation()}>
-        {url ? (
+        {isEmbed ? (
+          embedSrc && (
+            <iframe
+              className="lb-embed"
+              src={embedSrc}
+              title={caption}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+          )
+        ) : url ? (
           isVideo ? (
             // eslint-disable-next-line jsx-a11y/media-has-caption
             <video src={url} controls autoPlay />
