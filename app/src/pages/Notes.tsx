@@ -19,14 +19,19 @@ import {
   createCard,
   getBoardAncestry,
   getOrCreateRootBoard,
+  hardDeleteCardRow,
+  hardDeleteEmptyBoard,
+  insertCardRow,
   listCards,
   listTrash,
+  removeTrashEntry,
   renameBoard,
   restoreTrash,
   softDeleteCard,
   softDeleteTodoItem,
   updateCard,
 } from '../lib/notes';
+import { BoardHistory, BurstCoalescer, hasUserContent, type Command } from '../lib/notesHistory';
 import {
   fitView,
   type View,
@@ -99,6 +104,48 @@ export default function Notes() {
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  // Latest cards, readable inside timers/commands without stale closures.
+  const cardsRef = useRef<Card[]>([]);
+  useEffect(() => { cardsRef.current = cards; }, [cards]);
+
+  // ── Undo/redo (see lib/notesHistory.ts for the API contract) ──────────
+  // One history per board, session-scoped. historyTick re-renders the
+  // ribbon buttons when a stack changes.
+  const historiesRef = useRef(new Map<string, BoardHistory>());
+  const [, setHistoryTick] = useState(0);
+  const getHistory = useCallback((boardId: string | null): BoardHistory | null => {
+    if (!boardId) return null;
+    let h = historiesRef.current.get(boardId);
+    if (!h) {
+      h = new BoardHistory();
+      h.onChange = () => setHistoryTick((t) => t + 1);
+      historiesRef.current.set(boardId, h);
+    }
+    return h;
+  }, []);
+
+  const upsertCardLocal = useCallback((card: Card) => {
+    setCards((prev) => {
+      const i = prev.findIndex((c) => c.id === card.id);
+      if (i === -1) return [...prev, card];
+      const next = prev.slice();
+      next[i] = card;
+      return next;
+    });
+  }, []);
+  const removeCardsLocal = useCallback((ids: Set<string>) => {
+    setCards((prev) => prev.filter((c) => !ids.has(c.id)));
+  }, []);
+
+  const doUndo = useCallback(async () => {
+    const cmd = await getHistory(currentBoardId)?.undo();
+    if (cmd) setStatusMsg(`Undid: ${cmd.label.toLowerCase()}`);
+  }, [getHistory, currentBoardId]);
+  const doRedo = useCallback(async () => {
+    const cmd = await getHistory(currentBoardId)?.redo();
+    if (cmd) setStatusMsg(`Redid: ${cmd.label.toLowerCase()}`);
+  }, [getHistory, currentBoardId]);
 
   // ── Selection helpers ─────────────────────────────────────────────────
   const selectOnly = useCallback((id: string) => setSelectedIds(new Set([id])), []);
@@ -334,11 +381,30 @@ export default function Notes() {
       document.removeEventListener('mouseup', onUp);
       const dx = (ev.clientX - startX) / k;
       const dy = (ev.clientY - startY) / k;
-      // Persist all moved cards if the gesture actually moved.
+      // Persist all moved cards if the gesture actually moved; one history
+      // command per gesture covering the whole group.
       if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
-        for (const [id, p] of startPositions) {
-          updateCard(id, { x: p.x + dx, y: p.y + dy }).catch(console.error);
-        }
+        const moves = [...startPositions].map(([id, p]) => ({
+          id,
+          from: p,
+          to: { x: p.x + dx, y: p.y + dy },
+        }));
+        for (const m of moves) updateCard(m.id, m.to).catch(console.error);
+        getHistory(currentBoardId)?.push({
+          label: moves.length > 1 ? `Move ${moves.length} cards` : 'Move',
+          undo: async () => {
+            for (const m of moves) {
+              patchCardLocal(m.id, m.from);
+              await updateCard(m.id, m.from);
+            }
+          },
+          do: async () => {
+            for (const m of moves) {
+              patchCardLocal(m.id, m.to);
+              await updateCard(m.id, m.to);
+            }
+          },
+        });
       }
     };
     document.addEventListener('mousemove', onMove);
@@ -380,13 +446,37 @@ export default function Notes() {
     try {
       if (type === 'board') {
         const name = window.prompt('Board name', 'New board') || 'New board';
-        const { tile } = await createBoardWithTile({
-          parent_board_id: currentBoardId,
+        const parentId = currentBoardId;
+        const created = await createBoardWithTile({
+          parent_board_id: parentId,
           name,
           x, y,
         });
-        setCards((prev) => [...prev, tile]);
-        selectOnly(tile.id);
+        setCards((prev) => [...prev, created.tile]);
+        selectOnly(created.tile.id);
+        // Undo only while the board is still empty; a board with content
+        // must go through the trash (divergence rule 1). Ids are mutable
+        // closure state because redo re-creates with fresh ids.
+        let boardId = created.board.id;
+        let tileId = created.tile.id;
+        getHistory(parentId)?.push({
+          label: 'Create board',
+          undo: async () => {
+            const contents = await listCards(boardId);
+            if (contents.length > 0) {
+              setStatusMsg('Board has content — delete its tile to send it to the trash instead.');
+              throw new Error('cannot undo: board is not empty');
+            }
+            removeCardsLocal(new Set([tileId]));
+            await hardDeleteEmptyBoard(boardId);
+          },
+          do: async () => {
+            const again = await createBoardWithTile({ parent_board_id: parentId, name, x, y });
+            boardId = again.board.id;
+            tileId = again.tile.id;
+            upsertCardLocal(again.tile);
+          },
+        });
       } else {
         const payload = defaultPayloadFor(type);
         const card = await createCard({
@@ -397,6 +487,7 @@ export default function Notes() {
         });
         setCards((prev) => [...prev, card]);
         selectOnly(card.id);
+        getHistory(currentBoardId)?.push(makeCreateCommand([card], 'Create card'));
       }
     } catch (err) {
       console.error(err);
@@ -404,35 +495,124 @@ export default function Notes() {
     }
   }
 
-  // ── Per-card payload edit (debounced save) ────────────────────────────
+  /**
+   * Command for cards that were just created (drop, duplicate, paste…).
+   * Undo removes them — hard-remove only if still contentless at undo
+   * time, otherwise soft-delete through the trash (divergence rule 1).
+   * Redo re-inserts the rows with their original ids and retracts any
+   * trash entries the undo created.
+   */
+  function makeCreateCommand(created: Card[], label: string): Command {
+    const snapshots = created.slice();
+    const trashIds: (string | null)[] = snapshots.map(() => null);
+    return {
+      label: snapshots.length > 1 ? `${label} (${snapshots.length})` : label,
+      undo: async () => {
+        for (let i = 0; i < snapshots.length; i++) {
+          // Use the card's CURRENT state — it may have gained content.
+          const cur = cardsRef.current.find((c) => c.id === snapshots[i].id) ?? snapshots[i];
+          snapshots[i] = cur;
+          removeCardsLocal(new Set([cur.id]));
+          if (hasUserContent(cur)) {
+            trashIds[i] = await softDeleteCard(cur);
+          } else {
+            trashIds[i] = null;
+            await hardDeleteCardRow(cur.id);
+          }
+        }
+        clearSelection();
+      },
+      do: async () => {
+        for (let i = 0; i < snapshots.length; i++) {
+          const row = await insertCardRow(snapshots[i]);
+          upsertCardLocal(row);
+          const t = trashIds[i];
+          if (t) {
+            await removeTrashEntry(t);
+            trashIds[i] = null;
+          }
+        }
+      },
+    };
+  }
+
+  // ── Per-card payload edit (debounced save + coalesced history) ────────
   const saveTimers = useRef<Map<string, number>>(new Map());
+  // One editing burst per card: the first edit snapshots the pre-burst
+  // card; the debounce flush pairs it with the post-burst card to push a
+  // single history command for the whole burst.
+  const burstRef = useRef(new BurstCoalescer<Card>());
+
   const patchCardLocal = useCallback((id: string, patch: Partial<Card>) => {
     setCards((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
   }, []);
 
+  const pushBurstCommand = useCallback(
+    (before: Card, after: Card) => {
+      const persistable = (c: Card) => ({
+        x: c.x, y: c.y, w: c.w, h: c.h, z: c.z,
+        color: c.color, type: c.type, payload: c.payload,
+      });
+      const b = persistable(before);
+      const a = persistable(after);
+      if (JSON.stringify(b) === JSON.stringify(a)) return; // no-op burst
+      const label =
+        before.type !== after.type ? 'Convert to document'
+        : before.color !== after.color ? 'Change color'
+        : before.z !== after.z ? 'Reorder'
+        : before.x !== after.x || before.y !== after.y ? 'Move'
+        : before.w !== after.w || before.h !== after.h ? 'Resize'
+        : 'Edit';
+      getHistory(after.board_id)?.push({
+        label,
+        undo: async () => {
+          const cur = cardsRef.current.find((c) => c.id === before.id);
+          if (cur) upsertCardLocal({ ...cur, ...b });
+          await updateCard(before.id, b as Partial<Card> as any);
+        },
+        do: async () => {
+          const cur = cardsRef.current.find((c) => c.id === after.id);
+          if (cur) upsertCardLocal({ ...cur, ...a });
+          await updateCard(after.id, a as Partial<Card> as any);
+        },
+      });
+    },
+    [getHistory, upsertCardLocal],
+  );
+
   const scheduleCardSave = useCallback(
-    (id: string, patch: Partial<Card>, delay = 500) => {
+    (id: string, patch: Partial<Card>, opts?: { delay?: number; history?: boolean }) => {
+      const delay = opts?.delay ?? 500;
+      const withHistory = opts?.history !== false;
+      if (withHistory) {
+        const before = cardsRef.current.find((c) => c.id === id);
+        if (before) burstRef.current.begin(id, before);
+      }
       patchCardLocal(id, patch);
       const existing = saveTimers.current.get(id);
       if (existing) window.clearTimeout(existing);
       const handle = window.setTimeout(async () => {
+        saveTimers.current.delete(id);
+        const after = cardsRef.current.find((c) => c.id === id);
+        const before = burstRef.current.flush(id);
         try {
           await updateCard(id, patch as any);
         } catch (err) {
           console.error(err);
-        } finally {
-          saveTimers.current.delete(id);
+          return;
         }
+        if (withHistory && before && after) pushBurstCommand(before, after);
       }, delay);
       saveTimers.current.set(id, handle);
     },
-    [patchCardLocal],
+    [patchCardLocal, pushBurstCommand],
   );
 
   useEffect(() => {
     return () => {
       for (const handle of saveTimers.current.values()) window.clearTimeout(handle);
       saveTimers.current.clear();
+      burstRef.current.clear();
     };
   }, []);
 
@@ -448,21 +628,49 @@ export default function Notes() {
       setCards((prev) => prev.filter((c) => !ids.has(c.id)));
       setSelectedIds(new Set());
       setCtxMenu(null);
+      // Board tiles delete whole subtrees; their restore path is Trash v2
+      // (Sprint 18), so they're excluded from undo — trash still has them.
+      const plain = targets.filter((t) => !(t.type === 'board' && t.board_ref));
+      const boards = targets.filter((t) => t.type === 'board' && t.board_ref);
       try {
         // Each card gets its own restorable trash entry.
-        for (const t of targets) await softDeleteCard(t);
+        const trashIds: string[] = [];
+        for (const t of plain) trashIds.push(await softDeleteCard(t));
+        for (const b of boards) await softDeleteCard(b);
         setStatusMsg(
           targets.length === 1
             ? 'Moved 1 card to the trash.'
             : `Moved ${targets.length} cards to the trash.`,
         );
+        if (plain.length > 0) {
+          const snapshots = plain.slice();
+          const tIds = trashIds.slice();
+          getHistory(currentBoardId)?.push({
+            label: snapshots.length > 1 ? `Delete ${snapshots.length} cards` : 'Delete',
+            undo: async () => {
+              // Restore rows with original ids AND retract the trash
+              // entries so undoing a delete leaves no ghost in the trash.
+              for (let i = 0; i < snapshots.length; i++) {
+                const row = await insertCardRow(snapshots[i]);
+                upsertCardLocal(row);
+                await removeTrashEntry(tIds[i]);
+              }
+            },
+            do: async () => {
+              for (let i = 0; i < snapshots.length; i++) {
+                removeCardsLocal(new Set([snapshots[i].id]));
+                tIds[i] = await softDeleteCard(snapshots[i]);
+              }
+            },
+          });
+        }
       } catch (err) {
         console.error(err);
         setStatusMsg('Delete failed; refreshing.');
         if (currentBoardId) loadBoard(currentBoardId);
       }
     },
-    [currentBoardId, loadBoard],
+    [currentBoardId, loadBoard, getHistory, upsertCardLocal, removeCardsLocal],
   );
 
   const duplicateCards = useCallback(
@@ -486,12 +694,55 @@ export default function Notes() {
         }
         setCards((prev) => [...prev, ...dups]);
         setSelectedIds(new Set(dups.map((d) => d.id)));
+        getHistory(currentBoardId)?.push(makeCreateCommand(dups, 'Duplicate'));
       } catch (err) {
         console.error(err);
       }
     },
-    [currentBoardId],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- makeCreateCommand closes over stable refs only
+    [currentBoardId, getHistory],
   );
+
+  // ── Arrow-nudge coalescing ─────────────────────────────────────────────
+  // Rapid arrow presses accumulate locally; 500ms after the last press the
+  // whole run persists and becomes ONE composite history command.
+  const nudgeRef = useRef<{
+    timer: number | null;
+    ids: string[];
+    before: Map<string, { x: number; y: number }>;
+  } | null>(null);
+
+  const flushNudge = useCallback(() => {
+    const n = nudgeRef.current;
+    if (!n) return;
+    if (n.timer) window.clearTimeout(n.timer);
+    nudgeRef.current = null;
+    const moves = n.ids
+      .map((id) => {
+        const cur = cardsRef.current.find((c) => c.id === id);
+        const from = n.before.get(id);
+        if (!cur || !from || (cur.x === from.x && cur.y === from.y)) return null;
+        return { id, from, to: { x: cur.x, y: cur.y } };
+      })
+      .filter((m): m is { id: string; from: { x: number; y: number }; to: { x: number; y: number } } => m !== null);
+    if (moves.length === 0) return;
+    for (const m of moves) updateCard(m.id, m.to).catch(console.error);
+    getHistory(currentBoardId)?.push({
+      label: moves.length > 1 ? `Move ${moves.length} cards` : 'Move',
+      undo: async () => {
+        for (const m of moves) {
+          patchCardLocal(m.id, m.from);
+          await updateCard(m.id, m.from);
+        }
+      },
+      do: async () => {
+        for (const m of moves) {
+          patchCardLocal(m.id, m.to);
+          await updateCard(m.id, m.to);
+        }
+      },
+    });
+  }, [currentBoardId, getHistory, patchCardLocal]);
 
   // ── Keyboard: canvas shortcuts (see lib/notesShortcutRegistry.ts) ─────
   // All canvas shortcuts are suppressed while typing (input/textarea/
@@ -556,10 +807,23 @@ export default function Notes() {
           duplicateCards(cards.filter((c) => selectedIds.has(c.id)));
           return;
         }
+        if (e.key === 'z' || e.key === 'Z') {
+          e.preventDefault();
+          if (e.shiftKey) doRedo();
+          else doUndo();
+          return;
+        }
+        if (e.key === 'y' || e.key === 'Y') {
+          // Windows-style redo.
+          e.preventDefault();
+          doRedo();
+          return;
+        }
         return;
       }
 
       // Arrow nudge: 1px canvas-space, Shift = 10px — whole selection.
+      // A run of presses coalesces into one history command (flushNudge).
       if (
         selectedIds.size &&
         (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')
@@ -568,11 +832,25 @@ export default function Notes() {
         const step = e.shiftKey ? 10 : 1;
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-        for (const card of cards) {
-          if (selectedIds.has(card.id)) {
-            scheduleCardSave(card.id, { x: card.x + dx, y: card.y + dy });
-          }
+        const ids = [...selectedIds];
+        const open = nudgeRef.current;
+        // Selection changed mid-run → close the previous run first.
+        if (open && (open.ids.length !== ids.length || !ids.every((id) => open.before.has(id)))) {
+          flushNudge();
         }
+        if (!nudgeRef.current) {
+          const before = new Map<string, { x: number; y: number }>();
+          for (const c of cardsRef.current) {
+            if (selectedIds.has(c.id)) before.set(c.id, { x: c.x, y: c.y });
+          }
+          nudgeRef.current = { timer: null, ids, before };
+        }
+        setCards((prev) =>
+          prev.map((c) => (selectedIds.has(c.id) ? { ...c, x: c.x + dx, y: c.y + dy } : c)),
+        );
+        const n = nudgeRef.current;
+        if (n.timer) window.clearTimeout(n.timer);
+        n.timer = window.setTimeout(flushNudge, 500);
         return;
       }
 
@@ -585,7 +863,7 @@ export default function Notes() {
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, scheduleCardSave, deleteCards, duplicateCards, clearSelection]);
+  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, deleteCards, duplicateCards, clearSelection, doUndo, doRedo, flushNudge]);
 
   // ── Floating format toolbar ───────────────────────────────────────────
   // Show when the user makes a non-collapsed selection inside a Note body
@@ -641,7 +919,26 @@ export default function Notes() {
     const maxZ = cards.reduce((acc, c) => Math.max(acc, c.z), 0);
     const group = cards.filter((c) => ids.has(c.id)).sort((a, b) => a.z - b.z);
     if (group.length === 1 && group[0].z >= maxZ) return; // already on top
-    group.forEach((c, i) => scheduleCardSave(c.id, { z: maxZ + 1 + i }));
+    const changes = group.map((c, i) => ({ id: c.id, from: c.z, to: maxZ + 1 + i }));
+    for (const ch of changes) {
+      patchCardLocal(ch.id, { z: ch.to });
+      updateCard(ch.id, { z: ch.to }).catch(console.error);
+    }
+    getHistory(currentBoardId)?.push({
+      label: changes.length > 1 ? `Bring ${changes.length} cards to front` : 'Bring to front',
+      undo: async () => {
+        for (const ch of changes) {
+          patchCardLocal(ch.id, { z: ch.from });
+          await updateCard(ch.id, { z: ch.from });
+        }
+      },
+      do: async () => {
+        for (const ch of changes) {
+          patchCardLocal(ch.id, { z: ch.to });
+          await updateCard(ch.id, { z: ch.to });
+        }
+      },
+    });
   }
 
   // ── Resize handle ─────────────────────────────────────────────────────
@@ -669,6 +966,19 @@ export default function Notes() {
       const w = Math.max(140, startW + dx);
       const h = Math.max(60, startH + dy);
       updateCard(card.id, { w, h }).catch(console.error);
+      if (w !== startW || h !== startH) {
+        getHistory(currentBoardId)?.push({
+          label: 'Resize',
+          undo: async () => {
+            patchCardLocal(card.id, { w: startW, h: startH });
+            await updateCard(card.id, { w: startW, h: startH });
+          },
+          do: async () => {
+            patchCardLocal(card.id, { w, h });
+            await updateCard(card.id, { w, h });
+          },
+        });
+      }
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -719,7 +1029,62 @@ export default function Notes() {
 
   function setColour(card: Card, color: SwatchKey) {
     setCtxMenu(null);
-    for (const t of actionTargets(card)) scheduleCardSave(t.id, { color });
+    const targets = actionTargets(card);
+    const before = targets.map((t) => ({ id: t.id, color: t.color }));
+    for (const t of targets) {
+      patchCardLocal(t.id, { color });
+      updateCard(t.id, { color }).catch(console.error);
+    }
+    getHistory(currentBoardId)?.push({
+      label: targets.length > 1 ? `Color ${targets.length} cards` : 'Change color',
+      undo: async () => {
+        for (const b of before) {
+          patchCardLocal(b.id, { color: b.color });
+          await updateCard(b.id, { color: b.color });
+        }
+      },
+      do: async () => {
+        for (const t of targets) {
+          patchCardLocal(t.id, { color });
+          await updateCard(t.id, { color });
+        }
+      },
+    });
+  }
+
+  // ── To-do line delete (soft-delete + undoable command) ────────────────
+  async function deleteTodoLine(card: Card, item: TodoItem) {
+    const itemsBefore: TodoItem[] = (card.payload as any).items ?? [];
+    const idx = itemsBefore.findIndex((it) => it.id === item.id);
+    let res: { card: Card; trashId: string };
+    try {
+      res = await softDeleteTodoItem(card, item);
+    } catch (err) {
+      console.error(err);
+      return;
+    }
+    patchCardLocal(card.id, { payload: res.card.payload });
+    let trashId = res.trashId;
+    getHistory(currentBoardId)?.push({
+      label: 'Delete to-do line',
+      undo: async () => {
+        const cur = cardsRef.current.find((c) => c.id === card.id);
+        if (!cur) return;
+        const items = [...(((cur.payload as any).items as TodoItem[]) ?? [])];
+        items.splice(idx < 0 || idx > items.length ? items.length : idx, 0, item);
+        const payload = { ...(cur.payload as any), items };
+        patchCardLocal(card.id, { payload });
+        await updateCard(card.id, { payload });
+        await removeTrashEntry(trashId);
+      },
+      do: async () => {
+        const cur = cardsRef.current.find((c) => c.id === card.id);
+        if (!cur) return;
+        const again = await softDeleteTodoItem(cur, item);
+        patchCardLocal(card.id, { payload: again.card.payload });
+        trashId = again.trashId;
+      },
+    });
   }
 
   // ── Trash ─────────────────────────────────────────────────────────────
@@ -744,6 +1109,9 @@ export default function Notes() {
   // ── Render ────────────────────────────────────────────────────────────
   const ctxCard = ctxMenu ? cards.find((c) => c.id === ctxMenu.cardId) : null;
   const docCard = docOverlayId ? cards.find((c) => c.id === docOverlayId) : null;
+  const hist = currentBoardId ? getHistory(currentBoardId) : null;
+  const undoLabel = hist?.peekUndoLabel();
+  const redoLabel = hist?.peekRedoLabel();
 
   return (
     <div className="notes-page">
@@ -761,9 +1129,22 @@ export default function Notes() {
                     onClick={() => !last && setCurrentBoardId(b.id)}
                     onDoubleClick={async () => {
                       const name = window.prompt('Rename board', b.name);
-                      if (name && name.trim()) {
-                        await renameBoard(b.id, name.trim());
+                      if (name && name.trim() && name.trim() !== b.name) {
+                        const prevName = b.name;
+                        const nextName = name.trim();
+                        await renameBoard(b.id, nextName);
                         if (currentBoardId) loadBoard(currentBoardId);
+                        getHistory(currentBoardId)?.push({
+                          label: 'Rename board',
+                          undo: async () => {
+                            await renameBoard(b.id, prevName);
+                            if (currentBoardId) loadBoard(currentBoardId);
+                          },
+                          do: async () => {
+                            await renameBoard(b.id, nextName);
+                            if (currentBoardId) loadBoard(currentBoardId);
+                          },
+                        });
                       }
                     }}
                   >
@@ -776,6 +1157,22 @@ export default function Notes() {
           </nav>
         </div>
         <div className="right">
+          <button
+            className="btn-quiet"
+            disabled={!hist?.canUndo()}
+            onClick={doUndo}
+            title={undoLabel ? `Undo ${undoLabel.toLowerCase()}` : 'Undo'}
+          >
+            ↺
+          </button>
+          <button
+            className="btn-quiet"
+            disabled={!hist?.canRedo()}
+            onClick={doRedo}
+            title={redoLabel ? `Redo ${redoLabel.toLowerCase()}` : 'Redo'}
+          >
+            ↻
+          </button>
           <button
             className="btn-quiet"
             onClick={() => setView((v) => zoomAroundCursor(v, 0.85, 0, 0))}
@@ -848,12 +1245,7 @@ export default function Notes() {
                 onResizeStart={(e) => startResize(card, e)}
                 onConvertNote={() => convertNoteToDocument(card)}
                 onDismissConvert={() => dismissConvertPrompt(card)}
-                onDeleteTodoItem={async (item) => {
-                  const updated = await softDeleteTodoItem(card, item).catch((e) => {
-                    console.error(e); return null;
-                  });
-                  if (updated) patchCardLocal(card.id, { payload: updated.payload });
-                }}
+                onDeleteTodoItem={(item) => deleteTodoLine(card, item)}
                 onOpenLink={() => {
                   const url = (card.payload as any).url;
                   if (url) window.open(url, '_blank', 'noopener');

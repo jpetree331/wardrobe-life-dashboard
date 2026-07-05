@@ -67,6 +67,10 @@
   border-radius: 2px; letter-spacing: 0.04em;
 }
 .nt-ribbon .btn-quiet:hover { color: var(--ink); border-color: var(--ink-soft); }
+.nt-ribbon .btn-quiet:disabled {
+  opacity: 0.35; cursor: default;
+  color: var(--ink-faint); border-color: var(--line);
+}
 .nt-ribbon .zoom-readout {
   font-family: 'EB Garamond', serif; font-style: italic;
   font-size: 12px; color: var(--ink-faint);

@@ -240,18 +240,25 @@ export async function updateCard(id: string, patch: Partial<{
  * Soft-delete a card. Inserts a snapshot into notes_trash, then deletes the
  * row from notes_cards. If the card is a board-tile, the underlying board
  * (and all descendants) also go to trash atomically.
+ *
+ * Returns the id of the created trash entry so the undo layer can retract
+ * it when a delete is undone (no ghost trash rows).
  */
-export async function softDeleteCard(card: Card): Promise<void> {
+export async function softDeleteCard(card: Card): Promise<string> {
   const userId = await currentUserId();
   if (card.type === 'board' && card.board_ref) {
     // Snapshot the entire board subtree so we could restore it later.
     const subtree = await snapshotBoardSubtree(card.board_ref);
-    const { error: tErr } = await supabase.from('notes_trash').insert({
-      user_id: userId,
-      kind: 'board',
-      origin_board: card.board_id,
-      snapshot: { tile: card, subtree },
-    });
+    const { data: tRow, error: tErr } = await supabase
+      .from('notes_trash')
+      .insert({
+        user_id: userId,
+        kind: 'board',
+        origin_board: card.board_id,
+        snapshot: { tile: card, subtree },
+      })
+      .select('id')
+      .single();
     if (tErr) throw tErr;
     // ON DELETE CASCADE on notes_boards will take everything below.
     const { error } = await supabase.from('notes_boards').delete().eq('id', card.board_ref);
@@ -259,16 +266,75 @@ export async function softDeleteCard(card: Card): Promise<void> {
     // The tile card itself is also gone via cascade from board_ref FK,
     // but in case the FK isn't cascading (shouldn't happen), explicit:
     await supabase.from('notes_cards').delete().eq('id', card.id);
-    return;
+    return (tRow as { id: string }).id;
   }
-  const { error: tErr } = await supabase.from('notes_trash').insert({
-    user_id: userId,
-    kind: 'card',
-    origin_board: card.board_id,
-    snapshot: card,
-  });
+  const { data: tRow, error: tErr } = await supabase
+    .from('notes_trash')
+    .insert({
+      user_id: userId,
+      kind: 'card',
+      origin_board: card.board_id,
+      snapshot: card,
+    })
+    .select('id')
+    .single();
   if (tErr) throw tErr;
   const { error } = await supabase.from('notes_cards').delete().eq('id', card.id);
+  if (error) throw error;
+  return (tRow as { id: string }).id;
+}
+
+/**
+ * Re-insert a card row PRESERVING its original id. History-layer only:
+ * used to undo a delete (paired with removeTrashEntry) and to redo a
+ * create — keeping the id stable means later history commands that
+ * reference the card stay valid.
+ */
+export async function insertCardRow(card: Card): Promise<Card> {
+  const userId = await currentUserId();
+  const { data, error } = await supabase
+    .from('notes_cards')
+    .insert({
+      id: card.id,
+      user_id: userId,
+      board_id: card.board_id,
+      type: card.type,
+      x: card.x, y: card.y, w: card.w, h: card.h, z: card.z,
+      color: card.color,
+      payload: card.payload,
+      board_ref: card.board_ref,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Card;
+}
+
+/**
+ * Hard-delete a card row WITHOUT a trash snapshot. History-layer only, and
+ * only for undoing the creation of a card with no user content (divergence
+ * rule 1: anything with content must go through softDeleteCard instead —
+ * callers check hasUserContent before choosing this path).
+ */
+export async function hardDeleteCardRow(id: string): Promise<void> {
+  const { error } = await supabase.from('notes_cards').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/**
+ * Hard-delete a board row (cascades to its cards, sub-boards, and its own
+ * tile via board_ref FK). History-layer only, for undoing the creation of
+ * a board that is still EMPTY — callers must verify emptiness first; a
+ * board with any content goes through softDeleteCard(tile) instead.
+ */
+export async function hardDeleteEmptyBoard(boardId: string): Promise<void> {
+  const { error } = await supabase.from('notes_boards').delete().eq('id', boardId);
+  if (error) throw error;
+}
+
+/** Remove a trash entry (used when an undo retracts a soft-delete). */
+export async function removeTrashEntry(id: string): Promise<void> {
+  const { error } = await supabase.from('notes_trash').delete().eq('id', id);
   if (error) throw error;
 }
 
@@ -294,20 +360,31 @@ async function snapshotBoardSubtree(rootBoardId: string): Promise<{
   return { boards, cards };
 }
 
-/** Soft-delete a single to-do item (a line within a to-do card). */
-export async function softDeleteTodoItem(card: Card, item: TodoItem): Promise<Card> {
+/**
+ * Soft-delete a single to-do item (a line within a to-do card).
+ * Returns the updated card and the trash entry id (for undo retraction).
+ */
+export async function softDeleteTodoItem(
+  card: Card,
+  item: TodoItem,
+): Promise<{ card: Card; trashId: string }> {
   const userId = await currentUserId();
-  const { error: tErr } = await supabase.from('notes_trash').insert({
-    user_id: userId,
-    kind: 'todo_item',
-    origin_card: card.id,
-    snapshot: item,
-  });
+  const { data: tRow, error: tErr } = await supabase
+    .from('notes_trash')
+    .insert({
+      user_id: userId,
+      kind: 'todo_item',
+      origin_card: card.id,
+      snapshot: item,
+    })
+    .select('id')
+    .single();
   if (tErr) throw tErr;
   const items = ((card.payload as any).items ?? []).filter(
     (it: TodoItem) => it.id !== item.id,
   );
-  return updateCard(card.id, { payload: { ...(card.payload as any), items } });
+  const updated = await updateCard(card.id, { payload: { ...(card.payload as any), items } });
+  return { card: updated, trashId: (tRow as { id: string }).id };
 }
 
 // ── Trash ──────────────────────────────────────────────────────────────

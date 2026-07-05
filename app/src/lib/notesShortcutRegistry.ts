@@ -34,6 +34,10 @@ export const SHORTCUTS: ShortcutDef[] = [
   { id: 'zoom-100',    keys: ['Mod 0'],        label: 'Zoom to 100%, centered on content', category: 'View', when: 'not typing' },
   { id: 'zoom-fit',    keys: ['Mod Shift 0'],  label: 'Fit all cards in view',      category: 'View', when: 'not typing' },
 
+  // ── Editing ─────────────────────────────────────────────────────────
+  { id: 'undo',        keys: ['Mod Z'],            label: 'Undo',                     category: 'Editing', when: 'not typing' },
+  { id: 'redo',        keys: ['Mod Shift Z', 'Ctrl Y'], label: 'Redo',                category: 'Editing', when: 'not typing' },
+
   // ── Selection ───────────────────────────────────────────────────────
   { id: 'select-all',  keys: ['Mod A'],            label: 'Select all cards on the board', category: 'Selection', when: 'not typing' },
   { id: 'duplicate',   keys: ['Mod D'],            label: 'Duplicate selection',      category: 'Selection', when: 'selection, not typing' },
