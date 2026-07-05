@@ -438,19 +438,23 @@
   overflow-x: auto;
 }
 .notes-page .ProseMirror pre code { background: transparent; padding: 0; }
-/* Task lists inside notes/documents (checkbox toggling works on canvas) */
+/* Task lists inside notes/documents (checkbox toggling works on canvas).
+   IMPORTANT: TipTap's TaskItem NodeView renders the live <li> WITHOUT the
+   data-type="taskItem" attribute (only the serialized HTML has it), so
+   these selectors anchor on the parent ul[data-type="taskList"], which
+   DOES survive into the live DOM. */
 .notes-page .ProseMirror ul[data-type="taskList"] {
   list-style: none; padding-left: 2px; margin: 0 0 8px;
 }
-.notes-page .ProseMirror li[data-type="taskItem"] {
+.notes-page .ProseMirror ul[data-type="taskList"] > li {
   display: flex; gap: 8px; align-items: flex-start;
   padding: 1px 0;
 }
-.notes-page .ProseMirror li[data-type="taskItem"] > label {
+.notes-page .ProseMirror ul[data-type="taskList"] > li > label {
   flex-shrink: 0; margin-top: 3px;
 }
-.notes-page .ProseMirror li[data-type="taskItem"] > div { flex: 1; min-width: 0; }
-.notes-page .ProseMirror li[data-type="taskItem"] input[type="checkbox"] {
+.notes-page .ProseMirror ul[data-type="taskList"] > li > div { flex: 1; min-width: 0; }
+.notes-page .ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
   appearance: none;
   width: 13px; height: 13px;
   border: 1px solid var(--line-strong); border-radius: 2px;
@@ -458,16 +462,24 @@
   cursor: pointer;
   position: relative;
 }
-.notes-page .ProseMirror li[data-type="taskItem"] input[type="checkbox"]:checked {
+.notes-page .ProseMirror ul[data-type="taskList"] input[type="checkbox"]:checked {
   background: var(--ink); border-color: var(--ink);
 }
-.notes-page .ProseMirror li[data-type="taskItem"] input[type="checkbox"]:checked::after {
+.notes-page .ProseMirror ul[data-type="taskList"] input[type="checkbox"]:checked::after {
   content: "✓"; color: var(--bg);
   position: absolute; left: 1px; top: -2.5px;
   font-size: 10px;
 }
-.notes-page .ProseMirror li[data-type="taskItem"][data-checked="true"] > div {
+.notes-page .ProseMirror ul[data-type="taskList"] > li[data-checked="true"] > div {
   color: var(--ink-faint); text-decoration: line-through;
+}
+/* Blockquotes: visible everywhere TipTap renders (doc overlay included —
+   previously only note bodies had a scoped rule, so overlay quotes looked
+   like "nothing happened"). */
+.notes-page .ProseMirror blockquote {
+  margin: 8px 0; padding-left: 12px;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-soft); font-style: italic;
 }
 /* Document overlay editor wrapper */
 .nt-doc-page .doc-editor { min-height: 50vh; display: flex; flex-direction: column; }
