@@ -35,11 +35,16 @@ export const SHORTCUTS: ShortcutDef[] = [
   { id: 'zoom-fit',    keys: ['Mod Shift 0'],  label: 'Fit all cards in view',      category: 'View', when: 'not typing' },
 
   // ── Selection ───────────────────────────────────────────────────────
-  { id: 'nudge',       keys: ['Arrow keys'],       label: 'Nudge selected card 1px',  category: 'Selection', when: 'card selected, not typing' },
-  { id: 'nudge-fast',  keys: ['Shift Arrow keys'], label: 'Nudge selected card 10px', category: 'Selection', when: 'card selected, not typing' },
-  { id: 'delete',      keys: ['Delete'],           label: 'Move selected card to trash', category: 'Selection', when: 'card selected, not typing' },
+  { id: 'select-all',  keys: ['Mod A'],            label: 'Select all cards on the board', category: 'Selection', when: 'not typing' },
+  { id: 'duplicate',   keys: ['Mod D'],            label: 'Duplicate selection',      category: 'Selection', when: 'selection, not typing' },
+  { id: 'toggle-select', keys: ['Shift Click', 'Mod Click'], label: 'Add / remove a card from the selection', category: 'Selection' },
+  { id: 'nudge',       keys: ['Arrow keys'],       label: 'Nudge selection 1px',      category: 'Selection', when: 'selection, not typing' },
+  { id: 'nudge-fast',  keys: ['Shift Arrow keys'], label: 'Nudge selection 10px',     category: 'Selection', when: 'selection, not typing' },
+  { id: 'delete',      keys: ['Delete'],           label: 'Move selection to trash',  category: 'Selection', when: 'selection, not typing' },
 
   // ── Canvas ──────────────────────────────────────────────────────────
+  { id: 'marquee',     keys: ['Drag empty canvas'], label: 'Marquee select',          category: 'Canvas' },
+  { id: 'pan',         keys: ['Space Drag', 'Middle-mouse Drag'], label: 'Pan the canvas', category: 'Canvas' },
   { id: 'escape',      keys: ['Esc'],          label: 'Exit editing / close menu, overlay, trash / deselect', category: 'Canvas' },
 ];
 

@@ -117,10 +117,21 @@
     linear-gradient(to right, var(--canvas-grid) 1px, transparent 1px) 0 0/40px 40px,
     linear-gradient(to bottom, var(--canvas-grid) 1px, transparent 1px) 0 0/40px 40px,
     var(--bg);
-  cursor: grab;
+  /* Plain drag on empty canvas is marquee-select; Space+drag pans. */
+  cursor: default;
 }
-.nt-canvas-wrap.panning { cursor: grabbing; }
+.nt-canvas-wrap.space-pan { cursor: grab; }
+.nt-canvas-wrap.panning { cursor: grabbing !important; }
 .nt-canvas-wrap.adding { cursor: copy; }
+
+/* Marquee selection rectangle (wrapper space, above the canvas) */
+.nt-marquee {
+  position: absolute;
+  border: 1px solid var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  pointer-events: none;
+  z-index: 6;
+}
 .nt-canvas {
   position: absolute; left: 0; top: 0;
   width: 12000px; height: 8000px;

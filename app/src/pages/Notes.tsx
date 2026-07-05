@@ -41,6 +41,7 @@ import {
   shouldOfferConvert,
 } from '../lib/notesShortcuts';
 import { loadSavedView, saveSavedView } from '../lib/notesViewStore';
+import { marqueeHits, normalizeRect, type Rect } from '../lib/notesMarquee';
 import { useFavicon } from '../hooks/useFavicon';
 import './Notes.css';
 
@@ -82,7 +83,12 @@ export default function Notes() {
   const [ancestry, setAncestry] = useState<Board[]>([]);
   const [cards, setCards] = useState<Card[]>([]);
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Marquee rectangle while drag-selecting, in wrapper (screen) space.
+  const [marquee, setMarquee] = useState<Rect | null>(null);
+  // Space held = pan mode on the canvas (Milanote model: plain drag on
+  // empty canvas selects; Space+drag or middle-mouse pans).
+  const [spaceHeld, setSpaceHeld] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; cardId: string } | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
   const [trash, setTrash] = useState<TrashEntry[]>([]);
@@ -93,6 +99,21 @@ export default function Notes() {
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  // ── Selection helpers ─────────────────────────────────────────────────
+  const selectOnly = useCallback((id: string) => setSelectedIds(new Set([id])), []);
+  const clearSelection = useCallback(
+    () => setSelectedIds((prev) => (prev.size ? new Set<string>() : prev)),
+    [],
+  );
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   // ── Bootstrap: ensure root board, load it ──────────────────────────────
   useEffect(() => {
@@ -122,7 +143,7 @@ export default function Notes() {
       ]);
       setCards(cardList);
       setAncestry(chain);
-      setSelectedId(null);
+      setSelectedIds(new Set());
       // Restore this board's saved view; else fit its cards; else identity.
       const saved = loadSavedView(boardId);
       if (saved) {
@@ -178,13 +199,39 @@ export default function Notes() {
     return () => wrap.removeEventListener('wheel', onWheel);
   }, []);
 
-  // Empty-space panning (drag empty canvas)
-  function startPan(e: React.MouseEvent) {
-    if (e.button !== 0) return;
+  // Track Space for pan mode. preventDefault stops the page scrolling on
+  // Space while the canvas has focus; typing contexts keep their space.
+  useEffect(() => {
+    function down(e: KeyboardEvent) {
+      if (e.code !== 'Space' || isTypingContext(e.target)) return;
+      e.preventDefault();
+      setSpaceHeld(true);
+    }
+    function up(e: KeyboardEvent) {
+      if (e.code === 'Space') setSpaceHeld(false);
+    }
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+    };
+  }, []);
+
+  // Empty-canvas gestures: plain drag = marquee select; Space+drag or
+  // middle-mouse drag = pan (Milanote model).
+  function onCanvasMouseDown(e: React.MouseEvent) {
+    const pan = e.button === 1 || (e.button === 0 && spaceHeld);
+    if (!pan && e.button !== 0) return;
     if ((e.target as HTMLElement).closest('.nt-card')) return;
     if ((e.target as HTMLElement).closest('.nt-ctx')) return;
-    setSelectedId(null);
     setCtxMenu(null);
+    if (pan) startPanGesture(e);
+    else startMarqueeGesture(e);
+  }
+
+  function startPanGesture(e: React.MouseEvent) {
+    e.preventDefault();
     const startX = e.clientX;
     const startY = e.clientY;
     const startView = view;
@@ -205,6 +252,37 @@ export default function Notes() {
     document.addEventListener('mouseup', onUp);
   }
 
+  function startMarqueeGesture(e: React.MouseEvent) {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const r = wrap.getBoundingClientRect();
+    const x1 = e.clientX - r.left;
+    const y1 = e.clientY - r.top;
+    // View and cards are stable for the duration of the gesture (no pan or
+    // edits mid-marquee), so capturing them from this render is safe.
+    const gestureView = view;
+    const gestureCards = cards;
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    const baseSelection = additive ? new Set(selectedIds) : new Set<string>();
+    if (!additive) clearSelection();
+    let dragging = false;
+    const onMove = (ev: MouseEvent) => {
+      const rect = normalizeRect(x1, y1, ev.clientX - r.left, ev.clientY - r.top);
+      if (!dragging && rect.w < 4 && rect.h < 4) return; // click, not drag
+      dragging = true;
+      setMarquee(rect);
+      const hits = marqueeHits(rect, gestureView, gestureCards);
+      setSelectedIds(new Set([...baseSelection, ...hits]));
+    };
+    const onUp = () => {
+      setMarquee(null);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
   function doFit() {
     const wrap = wrapRef.current;
     if (!wrap) return;
@@ -212,7 +290,7 @@ export default function Notes() {
     setView(fitView(cards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })), r.width, r.height));
   }
 
-  // ── Card drag ──────────────────────────────────────────────────────────
+  // ── Card drag (single or whole selection) ─────────────────────────────
   function startCardDrag(card: Card, e: React.MouseEvent) {
     if (e.button !== 0) return;
     const target = e.target as HTMLElement;
@@ -221,20 +299,34 @@ export default function Notes() {
     }
     e.preventDefault();
     e.stopPropagation();
+    setCtxMenu(null);
+
+    // Shift/Cmd/Ctrl+click toggles membership instead of dragging.
+    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+      toggleSelect(card.id);
+      return;
+    }
+
+    // Dragging a card inside the current selection moves the whole group;
+    // dragging an unselected card selects it alone first.
+    const movingIds = selectedIds.has(card.id) ? selectedIds : new Set([card.id]);
+    if (!selectedIds.has(card.id)) selectOnly(card.id);
+
+    const startPositions = new Map<string, { x: number; y: number }>();
+    for (const c of cards) {
+      if (movingIds.has(c.id)) startPositions.set(c.id, { x: c.x, y: c.y });
+    }
     const startX = e.clientX;
     const startY = e.clientY;
-    const startCardX = card.x;
-    const startCardY = card.y;
     const k = view.k;
-    setSelectedId(card.id);
-    setCtxMenu(null);
     const onMove = (ev: MouseEvent) => {
       const dx = (ev.clientX - startX) / k;
       const dy = (ev.clientY - startY) / k;
       setCards((prev) =>
-        prev.map((c) =>
-          c.id === card.id ? { ...c, x: startCardX + dx, y: startCardY + dy } : c,
-        ),
+        prev.map((c) => {
+          const p = startPositions.get(c.id);
+          return p ? { ...c, x: p.x + dx, y: p.y + dy } : c;
+        }),
       );
     };
     const onUp = (ev: MouseEvent) => {
@@ -242,11 +334,11 @@ export default function Notes() {
       document.removeEventListener('mouseup', onUp);
       const dx = (ev.clientX - startX) / k;
       const dy = (ev.clientY - startY) / k;
-      const newX = startCardX + dx;
-      const newY = startCardY + dy;
-      // Persist if it actually moved.
+      // Persist all moved cards if the gesture actually moved.
       if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
-        updateCard(card.id, { x: newX, y: newY }).catch(console.error);
+        for (const [id, p] of startPositions) {
+          updateCard(id, { x: p.x + dx, y: p.y + dy }).catch(console.error);
+        }
       }
     };
     document.addEventListener('mousemove', onMove);
@@ -294,7 +386,7 @@ export default function Notes() {
           x, y,
         });
         setCards((prev) => [...prev, tile]);
-        setSelectedId(tile.id);
+        selectOnly(tile.id);
       } else {
         const payload = defaultPayloadFor(type);
         const card = await createCard({
@@ -304,7 +396,7 @@ export default function Notes() {
           payload,
         });
         setCards((prev) => [...prev, card]);
-        setSelectedId(card.id);
+        selectOnly(card.id);
       }
     } catch (err) {
       console.error(err);
@@ -344,6 +436,63 @@ export default function Notes() {
     };
   }, []);
 
+  // ── Group actions: delete + duplicate ─────────────────────────────────
+  // All context-menu / keyboard card actions operate on the current
+  // selection (or the single card they were invoked on when it isn't part
+  // of the selection).
+
+  const deleteCards = useCallback(
+    async (targets: Card[]) => {
+      if (targets.length === 0) return;
+      const ids = new Set(targets.map((t) => t.id));
+      setCards((prev) => prev.filter((c) => !ids.has(c.id)));
+      setSelectedIds(new Set());
+      setCtxMenu(null);
+      try {
+        // Each card gets its own restorable trash entry.
+        for (const t of targets) await softDeleteCard(t);
+        setStatusMsg(
+          targets.length === 1
+            ? 'Moved 1 card to the trash.'
+            : `Moved ${targets.length} cards to the trash.`,
+        );
+      } catch (err) {
+        console.error(err);
+        setStatusMsg('Delete failed; refreshing.');
+        if (currentBoardId) loadBoard(currentBoardId);
+      }
+    },
+    [currentBoardId, loadBoard],
+  );
+
+  const duplicateCards = useCallback(
+    async (targets: Card[]) => {
+      if (targets.length === 0 || !currentBoardId) return;
+      setCtxMenu(null);
+      try {
+        const dups: Card[] = [];
+        // Uniform +16/+16 offset preserves the group's relative layout.
+        for (const card of targets) {
+          const dup = await createCard({
+            board_id: currentBoardId,
+            type: card.type,
+            x: card.x + 16, y: card.y + 16,
+            w: card.w ?? undefined, h: card.h ?? undefined,
+            color: card.color,
+            payload: structuredClone(card.payload as any),
+            board_ref: null, // duplicating a board tile copies its visual, not its target board
+          });
+          dups.push(dup);
+        }
+        setCards((prev) => [...prev, ...dups]);
+        setSelectedIds(new Set(dups.map((d) => d.id)));
+      } catch (err) {
+        console.error(err);
+      }
+    },
+    [currentBoardId],
+  );
+
   // ── Keyboard: canvas shortcuts (see lib/notesShortcutRegistry.ts) ─────
   // All canvas shortcuts are suppressed while typing (input/textarea/
   // contentEditable — the shared isTypingContext helper), except Esc, which
@@ -364,16 +513,15 @@ export default function Notes() {
           setCtxMenu(null);
         } else if (trashOpen) {
           setTrashOpen(false);
-        } else if (selectedId) {
-          setSelectedId(null);
+        } else if (selectedIds.size) {
+          clearSelection();
         }
         return;
       }
 
       if (typing) return;
 
-      // Zoom: Mod+= / Mod+- around viewport center; Mod+0 = 100% centered
-      // on content; Mod+Shift+0 = fit all.
+      // Mod shortcuts: zoom, select-all, duplicate.
       if (e.ctrlKey || e.metaKey) {
         const wrap = wrapRef.current;
         if (!wrap) return;
@@ -398,44 +546,46 @@ export default function Notes() {
           );
           return;
         }
+        if (e.key === 'a' || e.key === 'A') {
+          e.preventDefault();
+          setSelectedIds(new Set(cards.map((c) => c.id)));
+          return;
+        }
+        if (e.key === 'd' || e.key === 'D') {
+          e.preventDefault();
+          duplicateCards(cards.filter((c) => selectedIds.has(c.id)));
+          return;
+        }
         return;
       }
 
-      // Arrow nudge: 1px canvas-space, Shift = 10px.
+      // Arrow nudge: 1px canvas-space, Shift = 10px — whole selection.
       if (
-        selectedId &&
+        selectedIds.size &&
         (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')
       ) {
-        const card = cards.find((c) => c.id === selectedId);
-        if (!card) return;
         e.preventDefault();
         const step = e.shiftKey ? 10 : 1;
         const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
         const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
-        scheduleCardSave(card.id, { x: card.x + dx, y: card.y + dy });
+        for (const card of cards) {
+          if (selectedIds.has(card.id)) {
+            scheduleCardSave(card.id, { x: card.x + dx, y: card.y + dy });
+          }
+        }
         return;
       }
 
-      // Delete sends the selected card to trash.
+      // Delete sends the whole selection to trash.
       if (e.key === 'Delete') {
-        if (!selectedId) return;
-        const card = cards.find((c) => c.id === selectedId);
-        if (!card) return;
+        if (!selectedIds.size) return;
         e.preventDefault();
-        // Inline soft-delete; the regular deleteCard isn't memoized and
-        // would force this effect to re-attach on every render.
-        setCards((prev) => prev.filter((c) => c.id !== card.id));
-        setSelectedId(null);
-        setCtxMenu(null);
-        softDeleteCard(card).catch((err) => {
-          console.error(err);
-          if (currentBoardId) loadBoard(currentBoardId);
-        });
+        deleteCards(cards.filter((c) => selectedIds.has(c.id)));
       }
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [selectedId, cards, currentBoardId, loadBoard, docOverlayId, ctxMenu, trashOpen, scheduleCardSave]);
+  }, [selectedIds, cards, docOverlayId, ctxMenu, trashOpen, scheduleCardSave, deleteCards, duplicateCards, clearSelection]);
 
   // ── Floating format toolbar ───────────────────────────────────────────
   // Show when the user makes a non-collapsed selection inside a Note body
@@ -484,12 +634,14 @@ export default function Notes() {
     }, 0);
   }
 
-  // ── Bring to front ────────────────────────────────────────────────────
+  // ── Bring to front (whole selection, preserving relative z-order) ─────
   function bringToFront(card: Card) {
     setCtxMenu(null);
+    const ids = selectedIds.has(card.id) ? selectedIds : new Set([card.id]);
     const maxZ = cards.reduce((acc, c) => Math.max(acc, c.z), 0);
-    if (card.z >= maxZ) return; // already on top
-    scheduleCardSave(card.id, { z: maxZ + 1 });
+    const group = cards.filter((c) => ids.has(c.id)).sort((a, b) => a.z - b.z);
+    if (group.length === 1 && group[0].z >= maxZ) return; // already on top
+    group.forEach((c, i) => scheduleCardSave(c.id, { z: maxZ + 1 + i }));
   }
 
   // ── Resize handle ─────────────────────────────────────────────────────
@@ -542,7 +694,9 @@ export default function Notes() {
 
   // ── Context menu ──────────────────────────────────────────────────────
   function openContextMenu(card: Card, clientX: number, clientY: number) {
-    setSelectedId(card.id);
+    // Right-clicking inside the selection keeps it (menu applies to the
+    // group); right-clicking an unselected card selects it alone.
+    if (!selectedIds.has(card.id)) selectOnly(card.id);
     setCtxMenu({ x: clientX, y: clientY, cardId: card.id });
   }
   useEffect(() => {
@@ -556,40 +710,16 @@ export default function Notes() {
     return () => document.removeEventListener('mousedown', close);
   }, [ctxMenu]);
 
-  // ── Delete + duplicate + colour swatch actions ────────────────────────
-  async function deleteCard(card: Card) {
-    setCards((prev) => prev.filter((c) => c.id !== card.id));
-    setCtxMenu(null);
-    try {
-      await softDeleteCard(card);
-    } catch (err) {
-      console.error(err);
-      setStatusMsg('Delete failed; refreshing.');
-      if (currentBoardId) loadBoard(currentBoardId);
-    }
+  /** The cards an action invoked on `card` should apply to. */
+  function actionTargets(card: Card): Card[] {
+    return selectedIds.has(card.id)
+      ? cards.filter((c) => selectedIds.has(c.id))
+      : [card];
   }
-  async function duplicateCard(card: Card) {
-    if (!currentBoardId) return;
-    setCtxMenu(null);
-    try {
-      const dup = await createCard({
-        board_id: currentBoardId,
-        type: card.type,
-        x: card.x + 16, y: card.y + 16,
-        w: card.w ?? undefined, h: card.h ?? undefined,
-        color: card.color,
-        payload: structuredClone(card.payload as any),
-        board_ref: null, // duplicating a board tile copies its visual, not its target board
-      });
-      setCards((prev) => [...prev, dup]);
-      setSelectedId(dup.id);
-    } catch (err) {
-      console.error(err);
-    }
-  }
+
   function setColour(card: Card, color: SwatchKey) {
     setCtxMenu(null);
-    scheduleCardSave(card.id, { color });
+    for (const t of actionTargets(card)) scheduleCardSave(t.id, { color });
   }
 
   // ── Trash ─────────────────────────────────────────────────────────────
@@ -684,9 +814,9 @@ export default function Notes() {
         </aside>
 
         <section
-          className="nt-canvas-wrap"
+          className={`nt-canvas-wrap${spaceHeld ? ' space-pan' : ''}`}
           ref={wrapRef}
-          onMouseDown={startPan}
+          onMouseDown={onCanvasMouseDown}
           onDragOver={onCanvasDragOver}
           onDrop={onCanvasDrop}
         >
@@ -701,13 +831,12 @@ export default function Notes() {
               <CardView
                 key={card.id}
                 card={card}
-                selected={selectedId === card.id}
+                selected={selectedIds.has(card.id)}
                 onMouseDown={(e) => startCardDrag(card, e)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   openContextMenu(card, e.clientX, e.clientY);
                 }}
-                onClick={() => setSelectedId(card.id)}
                 onDoubleClick={() => {
                   if (card.type === 'board' && card.board_ref) {
                     setCurrentBoardId(card.board_ref);
@@ -738,6 +867,12 @@ export default function Notes() {
               </div>
             )}
           </div>
+          {marquee && (
+            <div
+              className="nt-marquee"
+              style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h } as CSSProperties}
+            />
+          )}
         </section>
       </main>
 
@@ -766,8 +901,8 @@ export default function Notes() {
             ))}
           </div>
           <div className="sep" />
-          <button className="item" onClick={() => duplicateCard(ctxCard)}>
-            Duplicate
+          <button className="item" onClick={() => duplicateCards(actionTargets(ctxCard))}>
+            Duplicate{selectedIds.size > 1 && selectedIds.has(ctxCard.id) ? ` ${selectedIds.size} cards` : ''}
           </button>
           <button className="item" onClick={() => bringToFront(ctxCard)}>
             Bring to front
@@ -806,8 +941,8 @@ export default function Notes() {
             </button>
           )}
           <div className="sep" />
-          <button className="item delete" onClick={() => deleteCard(ctxCard)}>
-            Delete
+          <button className="item delete" onClick={() => deleteCards(actionTargets(ctxCard))}>
+            Delete{selectedIds.size > 1 && selectedIds.has(ctxCard.id) ? ` ${selectedIds.size} cards` : ''}
           </button>
         </div>
       )}
@@ -857,7 +992,6 @@ function CardView({
   selected,
   onMouseDown,
   onContextMenu,
-  onClick,
   onDoubleClick,
   onPatch,
   onResizeStart,
@@ -870,7 +1004,6 @@ function CardView({
   selected: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent) => void;
-  onClick: () => void;
   onDoubleClick: () => void;
   onPatch: (patch: Partial<Card>) => void;
   onResizeStart: (e: React.MouseEvent) => void;
@@ -900,7 +1033,6 @@ function CardView({
       style={baseStyle}
       onMouseDown={onMouseDown}
       onContextMenu={onContextMenu}
-      onClick={onClick}
       onDoubleClick={onDoubleClick}
     >
       <div className="nt-drag-handle" />
