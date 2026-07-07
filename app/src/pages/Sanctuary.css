@@ -536,6 +536,28 @@
 .sa-pane-max:hover { color: var(--ink); }
 .sa-pane-max[aria-pressed="true"] { color: var(--accent); }
 
+/* Scripture text-size control (shown in fill-the-pane mode) */
+.sa-pane-tabs-right { display: inline-flex; align-items: center; gap: 10px; }
+.sa-sc-zoom {
+  display: inline-flex; align-items: center; gap: 2px;
+  border: 1px solid var(--line-strong); border-radius: 999px;
+  padding: 1px 3px;
+}
+.sa-sc-zoom button {
+  border: 0; background: transparent; cursor: pointer;
+  color: var(--ink-soft); font-size: 15px; line-height: 1;
+  width: 22px; height: 22px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+}
+.sa-sc-zoom button:hover:not(:disabled) { color: var(--ink); background: var(--bg); }
+.sa-sc-zoom button:disabled { opacity: 0.35; cursor: default; }
+.sa-sc-zoom-val {
+  font-family: 'EB Garamond', serif; font-size: 11px; font-style: italic;
+  color: var(--ink-faint); min-width: 16px; text-align: center;
+  user-select: none;
+}
+
 /* Maximized — the Scripture pane covers the whole grid (the Sanctuary body
    between the ribbon and the status bar). Absolute within the position:
    relative grid, so it stays inside the browser tab and never spills onto a

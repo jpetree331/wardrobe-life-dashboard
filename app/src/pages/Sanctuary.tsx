@@ -109,6 +109,12 @@ export default function Sanctuary() {
   const [scResult, setScResult] = useState<ScriptureResult | null>(null);
   const [scLoading, setScLoading] = useState(false);
   const [scError, setScError] = useState<string | null>(null);
+  // Scripture reading text size (px), adjustable via the −/+ control shown in
+  // the fill-the-pane mode. Persisted; clamped to [12, 40].
+  const [scZoom, setScZoom] = useState<number>(() => {
+    const saved = typeof window !== 'undefined' ? Number(window.localStorage.getItem('sa-sc-zoom')) : NaN;
+    return Number.isFinite(saved) && saved >= 12 && saved <= 40 ? saved : 17;
+  });
 
   // ✦ Keep verse — when a scripture ref in the inspector is "kept", we
   // open the Treasury modal pre-filled with the entry's date + parsed
@@ -268,6 +274,11 @@ export default function Sanctuary() {
   useEffect(() => {
     if (mode !== 'dual' && scriptureMax) setScriptureMax(false);
   }, [mode, scriptureMax]);
+
+  // Persist the Scripture reading text size.
+  useEffect(() => {
+    window.localStorage.setItem('sa-sc-zoom', String(scZoom));
+  }, [scZoom]);
 
   // Esc restores the maximized Scripture pane to the split view.
   useEffect(() => {
@@ -1651,15 +1662,38 @@ export default function Sanctuary() {
                     Inspector
                   </button>
                 </div>
-                <button
-                  className="sa-pane-max"
-                  onClick={() => setScriptureMax((v) => !v)}
-                  title={scriptureMax ? 'Restore split view (Esc)' : 'Fill the pane'}
-                  aria-label={scriptureMax ? 'Restore split view' : 'Fill the pane'}
-                  aria-pressed={scriptureMax}
-                >
-                  {scriptureMax ? '⤡' : '⤢'}
-                </button>
+                <div className="sa-pane-tabs-right">
+                  {scriptureMax && paneTab === 'scripture' && (
+                    <div className="sa-sc-zoom" role="group" aria-label="Scripture text size">
+                      <button
+                        onClick={() => setScZoom((z) => Math.max(12, z - 1))}
+                        title="Smaller text"
+                        aria-label="Smaller text"
+                        disabled={scZoom <= 12}
+                      >
+                        −
+                      </button>
+                      <span className="sa-sc-zoom-val" title="Text size">{scZoom}</span>
+                      <button
+                        onClick={() => setScZoom((z) => Math.min(40, z + 1))}
+                        title="Larger text"
+                        aria-label="Larger text"
+                        disabled={scZoom >= 40}
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    className="sa-pane-max"
+                    onClick={() => setScriptureMax((v) => !v)}
+                    title={scriptureMax ? 'Restore split view (Esc)' : 'Fill the pane'}
+                    aria-label={scriptureMax ? 'Restore split view' : 'Fill the pane'}
+                    aria-pressed={scriptureMax}
+                  >
+                    {scriptureMax ? '⤡' : '⤢'}
+                  </button>
+                </div>
               </div>
               {paneTab === 'scripture' && (
                 <div className="sa-sc-controls">
@@ -1705,6 +1739,9 @@ export default function Sanctuary() {
                 className="sa-scripture-body"
                 ref={scriptureBodyRef}
                 onClick={handleScriptureClick}
+                // The −/+ zoom applies in fill-the-pane reading mode only; the
+                // narrow split view keeps its natural size.
+                style={scriptureMax ? { fontSize: scZoom } : undefined}
               >
                 {scLoading && <div className="sa-sc-loading">Fetching…</div>}
                 {scError && <div className="sa-sc-error">{scError}</div>}
