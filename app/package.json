@@ -6,7 +6,9 @@
   "description": "Wardrobe — a personal mind-palace web app for contemplative practice",
   "scripts": {
     "dev": "vite",
+    "dev:desktop": "vite --mode desktop",
     "build": "tsc -b && vite build",
+    "build:desktop": "tsc -b && vite build --mode desktop --outDir dist-desktop",
     "preview": "vite preview --port 4173",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -14,6 +16,7 @@
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",
+    "@electric-sql/pglite": "^0.5.4",
     "@supabase/supabase-js": "^2.45.0",
     "@tiptap/extension-highlight": "^2.27.2",
     "@tiptap/extension-link": "^2.27.2",
