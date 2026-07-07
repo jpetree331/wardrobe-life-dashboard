@@ -1,0 +1,2 @@
+# Rust build output (CI builds this; never committed)
+/target/

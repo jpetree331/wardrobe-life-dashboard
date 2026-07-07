@@ -1,0 +1,25 @@
+[package]
+name = "wardrobe"
+version = "0.1.0"
+description = "Wardrobe — a quiet desktop app for the contemplative life. Local data, no accounts."
+authors = ["jpetree331"]
+edition = "2021"
+
+# The Rust shell is deliberately minimal: it opens a native window onto the
+# local-mode web app (dist-desktop). All app logic lives in the web code;
+# data lives in the webview's storage on this machine.
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+# Smaller binaries for the installer.
+panic = "abort"
+codegen-units = 1
+lto = true
+strip = true
