@@ -12,6 +12,7 @@ import {
 import { parseFile } from '../lib/timelineImport';
 import { localToday } from '../lib/dates';
 import { useFavicon } from '../hooks/useFavicon';
+import { TimelineBackupModal } from '../components/TimelineBackupModal';
 import './Timeline.css';
 
 type YearTab = number | 'all';
@@ -28,6 +29,10 @@ export default function Timeline() {
   const [activeYear, setActiveYear] = useState<YearTab>('all');
   const [rows, setRows] = useState<TimelineRow[]>([]);
   const [years, setYears] = useState<{ year: number; count: number }[]>([]);
+  // Back up: holds ALL timeline rows (fetched read-only) while the modal is
+  // open; null when closed.
+  const [backupRows, setBackupRows] = useState<TimelineRow[] | null>(null);
+  const [backupLoading, setBackupLoading] = useState(false);
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => {
     if (typeof window === 'undefined') return 'desc';
     const saved = window.localStorage.getItem('tl-sort-order');
@@ -385,6 +390,23 @@ export default function Timeline() {
           </button>
           <button className="tl-btn-quiet" onClick={() => fileInputRef.current?.click()}>Import…</button>
           <button className="tl-btn-quiet" onClick={exportXlsx}>Export</button>
+          <button
+            className="tl-btn-quiet"
+            disabled={backupLoading}
+            title="Back up your Timeline — read-only, nothing can be changed"
+            onClick={async () => {
+              setBackupLoading(true);
+              try {
+                setBackupRows(await listTimeline('all'));
+              } catch (err) {
+                console.error(err);
+              } finally {
+                setBackupLoading(false);
+              }
+            }}
+          >
+            {backupLoading ? 'loading…' : '⤓ Back up'}
+          </button>
           <button className="tl-btn-quiet" onClick={addToday}>+ entry</button>
         </div>
       </header>
@@ -565,6 +587,10 @@ export default function Timeline() {
             </div>
           </div>
         </div>
+      )}
+
+      {backupRows !== null && (
+        <TimelineBackupModal rows={backupRows} onClose={() => setBackupRows(null)} />
       )}
     </div>
   );

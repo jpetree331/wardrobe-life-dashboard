@@ -86,6 +86,7 @@ import {
 } from '../lib/bibleVerseCounts';
 import { localToday } from '../lib/dates';
 import { useFavicon } from '../hooks/useFavicon';
+import { DataBackupModal } from '../components/DataBackupModal';
 import './Data.css';
 
 // ── Types & constants ────────────────────────────────────────────────
@@ -124,6 +125,7 @@ export default function Data() {
   const [sanctuaryEntries, setSanctuaryEntries] = useState<SanctuaryEntryLite[]>([]);
   const [timelineDates, setTimelineDates] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
+  const [backupOpen, setBackupOpen] = useState(false);
   const [statusMsg, setStatusMsg] = useState('Loading…');
 
   const [modal, setModal] = useState<
@@ -192,6 +194,7 @@ export default function Data() {
           <button className="btn-quiet" onClick={() => setModal('scripture')}>+ Scripture</button>
           <button className="btn-quiet" onClick={() => setModal('book')}>+ Book</button>
           <button className="btn-quiet" onClick={() => setModal('daily-pages')} title="Log pages read on a day you didn't finish a book">+ Daily pages</button>
+          <button className="btn-quiet" onClick={() => setBackupOpen(true)} title="Back up your reading records — read-only, nothing can be changed">⤓ Back up</button>
         </div>
       </header>
 
@@ -250,6 +253,13 @@ export default function Data() {
       </main>
 
       <footer className="dt-status">{statusMsg}</footer>
+
+      {backupOpen && (
+        <DataBackupModal
+          tables={{ scriptureReads, bookReads, dailyPages, plans, planCompletions }}
+          onClose={() => setBackupOpen(false)}
+        />
+      )}
 
       {modal === 'scripture' && (
         <AddScriptureModal
