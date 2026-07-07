@@ -29,6 +29,7 @@ import {
   type ParsedSanctuaryEntry,
 } from '../lib/sanctuaryImport';
 import { TreasuryVerseModal } from '../components/TreasuryVerseModal';
+import { SanctuaryExportModal } from '../components/SanctuaryExportModal';
 import {
   buildBinderTree,
   expansionKeysForEntry,
@@ -115,6 +116,9 @@ export default function Sanctuary() {
   // we just toggle the prefill payload on/off.
   const [keepingRef, setKeepingRef] = useState<{ ref: string; entryId: string; entryDate: string } | null>(null);
   const [keptToast, setKeptToast] = useState<string | null>(null);
+
+  // Back up / export modal (read-only; works off the already-loaded entries).
+  const [exportOpen, setExportOpen] = useState(false);
 
   const [sel, setSel] = useState<{
     top: number;
@@ -1183,6 +1187,13 @@ export default function Sanctuary() {
           </div>
         </div>
         <div className="right">
+          <button
+            className="sa-backup-btn"
+            onClick={() => setExportOpen(true)}
+            title="Back up or export your entries — read-only, nothing can be changed"
+          >
+            ⤓ Back up
+          </button>
           <div className="sa-mode-toggle" role="group" aria-label="Layout mode">
             <button aria-pressed={mode === 'single'} onClick={() => setMode('single')}>
               Single
@@ -1803,6 +1814,10 @@ export default function Sanctuary() {
           onCancel={() => setImportPreview(null)}
           onConfirm={performImport}
         />
+      )}
+
+      {exportOpen && (
+        <SanctuaryExportModal entries={entries} onClose={() => setExportOpen(false)} />
       )}
 
       {keepingRef && (
