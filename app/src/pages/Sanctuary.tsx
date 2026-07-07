@@ -156,6 +156,19 @@ export default function Sanctuary() {
     return Number.isFinite(n) && n >= 240 && n <= 620 ? n : 320;
   });
 
+  // Left binder collapse — hides the binder entirely (the editor takes the
+  // freed space) with a slim reopen tab at the left edge. Persisted, so a
+  // reader who prefers a wide page keeps it collapsed across visits.
+  const [binderCollapsed, setBinderCollapsed] = useState<boolean>(() => {
+    return typeof window !== 'undefined'
+      && window.localStorage.getItem('sa-binder-collapsed') === '1';
+  });
+
+  // Scripture pane "fill" — expands the right pane to cover the whole
+  // Sanctuary body area (within the browser tab, never the OS screen or a
+  // neighbouring window). Session-only: a reload returns to the split view.
+  const [scriptureMax, setScriptureMax] = useState(false);
+
   // Year / month folder expansion in the binder. Set of keys ("2024" or
   // "2024-04"). Persisted to localStorage; auto-includes the active entry's
   // year and month on first load so the user lands on something visible.
@@ -240,6 +253,27 @@ export default function Sanctuary() {
   useEffect(() => {
     window.localStorage.setItem('sa-right-width', String(rightWidth));
   }, [rightWidth]);
+
+  // Persist binder collapse
+  useEffect(() => {
+    window.localStorage.setItem('sa-binder-collapsed', binderCollapsed ? '1' : '0');
+  }, [binderCollapsed]);
+
+  // The Scripture pane only exists in dual mode — leaving it drops the
+  // maximize so we never return to a maximized-but-invisible pane.
+  useEffect(() => {
+    if (mode !== 'dual' && scriptureMax) setScriptureMax(false);
+  }, [mode, scriptureMax]);
+
+  // Esc restores the maximized Scripture pane to the split view.
+  useEffect(() => {
+    if (!scriptureMax) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setScriptureMax(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [scriptureMax]);
 
   // Persist expanded folders
   useEffect(() => {
@@ -1161,12 +1195,27 @@ export default function Sanctuary() {
       </header>
 
       <div
-        className={`sa-grid${mode === 'dual' ? ' dual' : ''}`}
+        className={`sa-grid${mode === 'dual' ? ' dual' : ''}${
+          binderCollapsed ? ' binder-collapsed' : ''
+        }${scriptureMax ? ' scripture-max' : ''}`}
         style={{
           ['--sa-binder-width' as any]: `${binderWidth}px`,
           ['--sa-right-width' as any]: `${rightWidth}px`,
         }}
       >
+        {/* Reopen tab — appears at the left edge when the binder is hidden.
+            Absolutely positioned, so it doesn't consume a grid column. */}
+        {binderCollapsed && (
+          <button
+            className="sa-binder-reopen"
+            onClick={() => setBinderCollapsed(false)}
+            title="Show binder"
+            aria-label="Show binder"
+          >
+            ▸
+          </button>
+        )}
+
         {/* Binder */}
         <aside className="sa-panel sa-binder-panel" aria-label="Binder">
           <div className="sa-panel-head">
@@ -1201,6 +1250,14 @@ export default function Sanctuary() {
               </button>
               <button className="tool" onClick={newEntry}>
                 + new
+              </button>
+              <button
+                className="tool sa-binder-collapse"
+                onClick={() => setBinderCollapsed(true)}
+                title="Collapse binder"
+                aria-label="Collapse binder"
+              >
+                «
               </button>
             </div>
           </div>
@@ -1350,7 +1407,7 @@ export default function Sanctuary() {
           </div>
         </aside>
         <div
-          className="sa-binder-splitter"
+          className="sa-binder-splitter sa-left-splitter"
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize binder"
@@ -1566,20 +1623,31 @@ export default function Sanctuary() {
         {mode === 'dual' && (
           <section className="sa-scripture-pane" aria-label="Scripture">
             <div className="sa-scripture-head">
-              <div className="sa-pane-tabs" role="tablist">
+              <div className="sa-pane-tabs-row">
+                <div className="sa-pane-tabs" role="tablist">
+                  <button
+                    className="sa-pane-tab"
+                    aria-pressed={paneTab === 'scripture'}
+                    onClick={() => setPaneTab('scripture')}
+                  >
+                    Scripture
+                  </button>
+                  <button
+                    className="sa-pane-tab"
+                    aria-pressed={paneTab === 'inspector'}
+                    onClick={() => setPaneTab('inspector')}
+                  >
+                    Inspector
+                  </button>
+                </div>
                 <button
-                  className="sa-pane-tab"
-                  aria-pressed={paneTab === 'scripture'}
-                  onClick={() => setPaneTab('scripture')}
+                  className="sa-pane-max"
+                  onClick={() => setScriptureMax((v) => !v)}
+                  title={scriptureMax ? 'Restore split view (Esc)' : 'Fill the pane'}
+                  aria-label={scriptureMax ? 'Restore split view' : 'Fill the pane'}
+                  aria-pressed={scriptureMax}
                 >
-                  Scripture
-                </button>
-                <button
-                  className="sa-pane-tab"
-                  aria-pressed={paneTab === 'inspector'}
-                  onClick={() => setPaneTab('inspector')}
-                >
-                  Inspector
+                  {scriptureMax ? '⤡' : '⤢'}
                 </button>
               </div>
               {paneTab === 'scripture' && (

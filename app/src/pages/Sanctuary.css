@@ -80,8 +80,50 @@
   grid-template-columns:
     var(--sa-binder-width, 280px) 4px 1fr 4px var(--sa-right-width, 320px);
   min-height: 0;
+  /* Positioning context for the binder reopen tab and the maximized
+     Scripture pane (both absolutely positioned within the grid). */
+  position: relative;
 }
 .sa-grid.dual .sa-inspector { display: none; }
+
+/* Collapsed binder — zero the binder + left-splitter columns so the editor
+   takes the freed space. The panel is kept in the DOM (clipped) rather than
+   display:none'd, because the grid auto-places its items in order and
+   removing one would shift every following column. */
+.sa-grid.binder-collapsed {
+  grid-template-columns: 0 0 1fr 4px var(--sa-right-width, 320px);
+}
+.sa-grid.binder-collapsed .sa-binder-panel {
+  overflow: hidden;
+  border-right: 0;
+}
+.sa-grid.binder-collapsed .sa-left-splitter { pointer-events: none; }
+.sa-grid.binder-collapsed .sa-left-splitter::after { display: none; }
+
+/* The reopen tab — a slim affordance hugging the left edge. */
+.sa-binder-reopen {
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  width: 18px; height: 54px;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-left: 0;
+  border-radius: 0 7px 7px 0;
+  background: var(--bg-2);
+  color: var(--ink-soft);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.sa-binder-reopen:hover { background: var(--accent); color: var(--bg); }
+/* When the Scripture pane is filling the area, the binder tab would float
+   over it — hide it there. */
+.sa-grid.scripture-max .sa-binder-reopen { display: none; }
+
+.sa-binder-collapse { font-size: 14px; line-height: 1; }
 
 /* The drag handle. A thin vertical strip; widens slightly on hover so it's
    easier to grab. */
@@ -481,7 +523,29 @@
   background: var(--bg-2);
   display: flex; flex-direction: column; gap: 8px;
 }
+.sa-pane-tabs-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
 .sa-pane-tabs { display: inline-flex; gap: 4px; }
+.sa-pane-max {
+  border: 0; background: transparent; cursor: pointer;
+  color: var(--ink-faint); font-size: 16px; line-height: 1;
+  padding: 2px 4px;
+  transition: color 150ms ease;
+}
+.sa-pane-max:hover { color: var(--ink); }
+.sa-pane-max[aria-pressed="true"] { color: var(--accent); }
+
+/* Maximized — the Scripture pane covers the whole grid (the Sanctuary body
+   between the ribbon and the status bar). Absolute within the position:
+   relative grid, so it stays inside the browser tab and never spills onto a
+   neighbouring window. */
+.sa-grid.scripture-max .sa-scripture-pane {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-left: 0;
+}
 .sa-pane-tab {
   font-family: 'Cormorant Garamond', serif;
   font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase;
