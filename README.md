@@ -103,7 +103,15 @@ The aggregation logic — heatmap level bucketing, calendar grid building, plan 
 
 ---
 
-## Running your own
+## Getting Wardrobe — two paths
+
+**Not technical? Use the desktop app.** Download the installer for your computer from the [Releases page](https://github.com/jpetree331/wardrobe-life-dashboard/releases) — `.msi` for Windows, `.dmg` for Mac — and double-click it. That's the whole setup: no accounts, no sign-in, nothing to configure. Your journal lives in a file on your own computer and works entirely offline. (The first launch may show a one-time "unknown developer" warning — on Windows click *More info → Run anyway*; on Mac right-click the app and choose *Open*.) Scripture reading uses the public-domain translations (KJV and others) built in; the hosted version below adds ESV.
+
+**Comfortable with a terminal? Host your own on Vercel.** You get the same app reachable from any device — phone included — with your data in your own free Supabase project, magic-link login, and ESV support. Follow the steps below and in [`app/README.md`](app/README.md).
+
+The desktop app and the hosted app are the same codebase — the desktop build simply embeds a real Postgres (PGlite) inside the app and points every query at it instead of the cloud.
+
+## Running your own (hosted)
 
 The data model assumes one user per Supabase project — but the source is here, the migrations are versioned, and you can stand up your own copy in about ten minutes.
 
