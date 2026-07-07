@@ -17,6 +17,7 @@ import {
   planPaceStatus,
   planTotalChapters,
   planTotalSessions,
+  scriptureLabelsByDate,
   sessionsThroughDate,
   sumByDate,
   topAuthorsByCount,
@@ -80,6 +81,40 @@ describe('sumByDate', () => {
     ];
     const out = sumByDate(items, (it) => it.d, (it) => it.n);
     expect(out.get('2026-04-19')).toBe(5);
+  });
+});
+
+describe('scriptureLabelsByDate', () => {
+  it('groups unique "Book Chapter" labels per day in first-seen order', () => {
+    const reads = [
+      { read_date: '2026-04-19', book: 'Luke', chapter: 24 },
+      { read_date: '2026-04-19', book: 'John', chapter: 1 },
+      { read_date: '2026-04-19', book: 'Luke', chapter: 24 }, // dupe → ignored
+      { read_date: '2026-04-20', book: 'Psalms', chapter: 23 },
+    ];
+    const out = scriptureLabelsByDate(reads);
+    expect(out.get('2026-04-19')).toEqual(['Luke 24', 'John 1']);
+    expect(out.get('2026-04-20')).toEqual(['Psalms 23']);
+    expect(out.size).toBe(2);
+  });
+
+  it('skips rows with no date or book', () => {
+    const reads = [
+      { read_date: '', book: 'Luke', chapter: 24 },
+      { read_date: '2026-04-19', book: '', chapter: 1 },
+      { read_date: '2026-04-19', book: 'Mark', chapter: 5 },
+    ];
+    const out = scriptureLabelsByDate(reads);
+    expect(out.get('2026-04-19')).toEqual(['Mark 5']);
+    expect(out.size).toBe(1);
+  });
+
+  it('lists the same chapter once even across many verse-range reads', () => {
+    const reads = [
+      { read_date: '2026-04-19', book: 'Romans', chapter: 8, verse_from: 1, verse_to: 4 },
+      { read_date: '2026-04-19', book: 'Romans', chapter: 8, verse_from: 28, verse_to: 30 },
+    ];
+    expect(scriptureLabelsByDate(reads).get('2026-04-19')).toEqual(['Romans 8']);
   });
 });
 

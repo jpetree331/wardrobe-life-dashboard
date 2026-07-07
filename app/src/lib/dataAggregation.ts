@@ -98,6 +98,28 @@ export function sumByDate<T>(items: T[], pickDate: (it: T) => string, pickAmount
 }
 
 /**
+ * Group scripture reads into per-day human-readable passage labels — used
+ * by the Stillness tab's Scripture overlay tooltip. Each label is
+ * "Book Chapter" (e.g. "Luke 24"); a day that touched the same chapter
+ * more than once lists it only once, in first-seen order. Verse ranges
+ * collapse to their chapter, since the heatmap counts by chapter/verse and
+ * the tooltip pairs these labels with a separate verse total.
+ */
+export function scriptureLabelsByDate<
+  T extends { read_date: string; book: string; chapter: number },
+>(reads: T[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const r of reads) {
+    if (!r.read_date || !r.book) continue;
+    const label = `${r.book} ${r.chapter}`;
+    const list = out.get(r.read_date);
+    if (!list) out.set(r.read_date, [label]);
+    else if (!list.includes(label)) list.push(label);
+  }
+  return out;
+}
+
+/**
  * Build the array of cells for a year-grid heatmap. Renders the full
  * Sunday-to-Saturday rectangle covering [Jan 1 .. Dec 31] of the year,
  * which means leading days from the prior year (if Jan 1 isn't a Sunday)

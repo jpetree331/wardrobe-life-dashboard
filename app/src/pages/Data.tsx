@@ -52,6 +52,7 @@ import {
   aggregateBooksByAuthor,
   aggregateScriptureByBookChapter,
   bucketChapterReads,
+  bucketLevel,
   buildCalendarGrid,
   buildHeatGrid,
   computeYearStats,
@@ -66,6 +67,7 @@ import {
   planChapterSequence,
   planPaceStatus,
   planTotalSessions,
+  scriptureLabelsByDate,
   sumByDate,
   topAuthorsByCount,
   topBooksByVerses,
@@ -243,7 +245,7 @@ export default function Data() {
         ) : tab === 'writing' ? (
           <WritingView entries={sanctuaryEntries} />
         ) : tab === 'stillness' ? (
-          <StillnessView entries={sanctuaryEntries} />
+          <StillnessView entries={sanctuaryEntries} scriptureReads={scriptureReads} />
         ) : null}
       </main>
 
@@ -2676,8 +2678,25 @@ const STILLNESS_BLUE = [
 ] as const;
 // Listening prayer — a single warm pinkish-rose pastel (binary, no depth).
 const LISTENING_ROSE = '#e2b3ac';
+// Scripture-reading overlay — a sage-green ramp (index 1..5, more verses →
+// deeper) drawn as a corner wedge over the stillness fill. Saturated enough
+// to read as a small triangle over both the pale and the deep blue cells.
+const SCRIPTURE_GREEN = [
+  '',         // 0 unused
+  '#bcd0a6',
+  '#a3c085',
+  '#84a862',
+  '#5f8442',
+  '#456325',
+] as const;
 
-function StillnessView({ entries }: { entries: SanctuaryEntryLite[] }) {
+function StillnessView({
+  entries,
+  scriptureReads,
+}: {
+  entries: SanctuaryEntryLite[];
+  scriptureReads: ScriptureRead[];
+}) {
   const todayDate = useMemo(() => new Date(), []);
   const currentYear = todayDate.getFullYear();
   const [year, setYear] = useState<number>(currentYear);
@@ -2706,9 +2725,31 @@ function StillnessView({ entries }: { entries: SanctuaryEntryLite[] }) {
 
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
 
-  // Per-cell color: blue depth for stillness, rose for listening prayer,
-  // a blend toward violet when both are present (deepening with time).
-  function cellColor(cell: ReturnType<typeof buildHeatGrid>['cells'][number]): string | null {
+  // Scripture-reading overlay — off by default. When on, each day's
+  // Scripture reading is drawn as a corner wedge (depth = verses) over the
+  // stillness fill, and days with reading but no stillness/prayer light up
+  // too. Persisted so the reader's preferred view returns across visits.
+  const [showScripture, setShowScripture] = useState<boolean>(() => {
+    return typeof window !== 'undefined'
+      && window.localStorage.getItem('dt-stillness-scripture') === '1';
+  });
+  useEffect(() => {
+    window.localStorage.setItem('dt-stillness-scripture', showScripture ? '1' : '0');
+  }, [showScripture]);
+
+  // Scripture per day: total verses (for depth + tooltip) and the passage
+  // labels (for the tooltip). Built once from the reads, independent of the
+  // toggle so flipping it on is instant.
+  const scVersesByDate = useMemo(
+    () => sumByDate(scriptureReads, (r) => r.read_date, (r) => versesInRead(r)),
+    [scriptureReads],
+  );
+  const scLabelsByDate = useMemo(() => scriptureLabelsByDate(scriptureReads), [scriptureReads]);
+
+  // The base stillness/prayer fill for a day (no Scripture overlay): blue
+  // depth for stillness, rose for listening prayer, a blend toward violet
+  // when both. Null when the day has neither.
+  function stillnessFill(cell: ReturnType<typeof buildHeatGrid>['cells'][number]): string | null {
     const p = byDay.get(cell.date);
     if (!p) return null;
     const step = bucketStillness(p.stillnessMin);
@@ -2719,6 +2760,22 @@ function StillnessView({ entries }: { entries: SanctuaryEntryLite[] }) {
     }
     if (lp) return LISTENING_ROSE;
     return STILLNESS_BLUE[step];
+  }
+
+  // Per-cell color. Without the overlay it's just the stillness fill. With
+  // it on, a Scripture-reading day gets a green corner wedge composited over
+  // the fill (or over the empty-cell tone, so reading-only days still show).
+  function cellColor(cell: ReturnType<typeof buildHeatGrid>['cells'][number]): string | null {
+    const base = stillnessFill(cell);
+    if (!showScripture || cell.isFuture) return base;
+    const verses = scVersesByDate.get(cell.date) ?? 0;
+    const scStep = bucketLevel(verses, 'verses-or-pages');
+    if (scStep === 0) return base;
+    const wedge = SCRIPTURE_GREEN[scStep];
+    const fill = base ?? 'var(--heat-empty)';
+    // A hard-stop gradient paints a triangle in the top-right corner; the
+    // fill (or empty tone) sits underneath as the final background layer.
+    return `linear-gradient(to bottom left, ${wedge} 0 50%, transparent 50%) no-repeat top right / 42% 42%, ${fill}`;
   }
 
   const nothingYet = summary.totalStillnessMin === 0 && summary.listeningPrayerDays === 0;
@@ -2750,15 +2807,26 @@ function StillnessView({ entries }: { entries: SanctuaryEntryLite[] }) {
       <section className="wt-section">
         <header className="wt-section-head">
           <h3>Stillness &amp; listening prayer · <em>{year}</em></h3>
-          <div className="wt-year-rail">
-            {years.map((y) => (
-              <button key={y} className={y === year ? 'active' : ''} onClick={() => setYear(y)}>{y}</button>
-            ))}
+          <div className="st-head-controls">
+            <label className="st-sc-toggle" title="Overlay a corner mark on days you read Scripture">
+              <input
+                type="checkbox"
+                checked={showScripture}
+                onChange={(e) => setShowScripture(e.target.checked)}
+              />
+              <span>Scripture</span>
+            </label>
+            <div className="wt-year-rail">
+              {years.map((y) => (
+                <button key={y} className={y === year ? 'active' : ''} onClick={() => setYear(y)}>{y}</button>
+              ))}
+            </div>
           </div>
         </header>
         <p className="wt-section-sub">
           Each square is a day; deeper blue is more time in stillness. Listening-prayer
           days carry a warm rose, and days with both blend toward violet.
+          {showScripture && ' A green corner marks days you read Scripture — deeper for more verses.'}
         </p>
         <div className="wt-heat-wrap" onMouseLeave={() => setTip(null)}>
           <HeatGrid
@@ -2771,6 +2839,16 @@ function StillnessView({ entries }: { entries: SanctuaryEntryLite[] }) {
               const parts: string[] = [];
               if (p && p.stillnessMin > 0) parts.push(`${formatMinutes(p.stillnessMin)} stillness`);
               if (p && p.listeningPrayer) parts.push('listening prayer');
+              if (showScripture) {
+                const verses = scVersesByDate.get(cell.date) ?? 0;
+                if (verses > 0) {
+                  const labels = scLabelsByDate.get(cell.date) ?? [];
+                  const shown = labels.slice(0, 6).join(', ');
+                  const more = labels.length > 6 ? `, +${labels.length - 6} more` : '';
+                  const label = shown ? `${shown}${more} · ` : '';
+                  parts.push(`${label}${verses} verse${verses === 1 ? '' : 's'}`);
+                }
+              }
               setTip({
                 x, y,
                 text: parts.length ? `${parts.join(' · ')} · ${cell.date}` : `nothing · ${cell.date}`,
@@ -2798,6 +2876,13 @@ function StillnessView({ entries }: { entries: SanctuaryEntryLite[] }) {
             <span className="st-swatch" style={{ background: `color-mix(in oklab, ${STILLNESS_BLUE[6]} 55%, ${LISTENING_ROSE} 45%)` }} />
             <span className="st-legend-label">both</span>
           </span>
+          {showScripture && (
+            <span className="st-legend-item">
+              <span className="st-swatch st-swatch-wedge" style={{ ['--wedge' as any]: SCRIPTURE_GREEN[2] }} />
+              <span className="st-swatch st-swatch-wedge" style={{ ['--wedge' as any]: SCRIPTURE_GREEN[4] }} />
+              <span className="st-legend-label">Scripture (more verses → deeper)</span>
+            </span>
+          )}
         </div>
       </section>
 

@@ -2007,3 +2007,29 @@
   font-size: 12.5px; color: var(--ink-faint);
   margin-left: 3px;
 }
+/* A legend swatch showing the Scripture corner wedge — same top-right
+   triangle the cells draw, over the empty-cell tone. */
+.st-swatch-wedge {
+  background:
+    linear-gradient(to bottom left, var(--wedge) 0 50%, transparent 50%) no-repeat top right / 60% 60%,
+    var(--heat-empty);
+  border: 1px solid var(--line);
+}
+
+/* Stillness heatmap header controls — the Scripture toggle sits beside the
+   year rail. */
+.st-head-controls {
+  display: inline-flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.st-sc-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: 'EB Garamond', serif; font-size: 13px;
+  color: var(--ink-soft); cursor: pointer;
+  user-select: none;
+}
+.st-sc-toggle input {
+  width: 14px; height: 14px;
+  accent-color: var(--heat-4, #82a165);
+  cursor: pointer;
+}
+.st-sc-toggle:hover { color: var(--ink); }
