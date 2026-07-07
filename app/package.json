@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build",
     "build:desktop": "tsc -b && vite build --mode desktop --outDir dist-desktop",
     "preview": "vite preview --port 4173",
+    "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "echo 'no linter configured yet'"
