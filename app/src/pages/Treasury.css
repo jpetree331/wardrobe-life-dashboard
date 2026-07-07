@@ -88,6 +88,29 @@
   background: var(--ink); color: var(--bg);
 }
 
+/* Verse text-size control (−/+) — enlarge for a stream/projector, shrink
+   for personal reading. */
+.tr-zoom {
+  display: inline-flex; align-items: center; gap: 2px;
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 1px 3px;
+  background: var(--bg);
+}
+.tr-zoom button {
+  border: 0; background: transparent; cursor: pointer;
+  color: var(--ink-soft); font-size: 15px; line-height: 1;
+  width: 22px; height: 22px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+}
+.tr-zoom button:hover:not(:disabled) { color: var(--ink); background: var(--bg-2); }
+.tr-zoom button:disabled { opacity: 0.35; cursor: default; }
+.tr-zoom-val {
+  font-family: 'EB Garamond', serif; font-size: 11px; font-style: italic;
+  color: var(--ink-faint); min-width: 16px; text-align: center;
+  user-select: none;
+}
+
 .tr-sort label {
   display: flex; align-items: center; gap: 8px;
   font-family: 'Cormorant Garamond', serif;
@@ -207,7 +230,9 @@
 }
 .vc-ref {
   font-family: 'Cormorant Garamond', serif;
-  font-size: 17px;
+  /* Scales with the verse text, keeping the original 17:16 ratio (the
+     default stays pixel-identical to the old fixed 17px). */
+  font-size: calc(var(--tr-verse-size, 16px) * 1.0625);
   color: var(--ink);
   letter-spacing: 0.02em;
 }
@@ -271,7 +296,8 @@
   margin: 4px 0 0;
   font-family: 'EB Garamond', serif;
   font-style: italic;
-  font-size: 16px;
+  /* Driven by the toolbar −/+ control; default matches the original 16px. */
+  font-size: var(--tr-verse-size, 16px);
   line-height: 1.55;
   color: var(--ink);
   letter-spacing: 0.01em;

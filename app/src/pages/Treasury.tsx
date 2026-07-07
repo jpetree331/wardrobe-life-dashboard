@@ -42,6 +42,16 @@ export default function Treasury() {
   const [sortMode, setSortMode] = useState<SortMode>('chronological');
   const [search, setSearch] = useState('');
 
+  // Verse text size (px) — the −/+ control in the toolbar. Generous upper
+  // bound so the list reads clearly on a stream/projector (OBS); persisted.
+  const [zoom, setZoom] = useState<number>(() => {
+    const saved = typeof window !== 'undefined' ? Number(window.localStorage.getItem('tr-verse-zoom')) : NaN;
+    return Number.isFinite(saved) && saved >= 12 && saved <= 44 ? saved : 16;
+  });
+  useEffect(() => {
+    window.localStorage.setItem('tr-verse-zoom', String(zoom));
+  }, [zoom]);
+
   const [modal, setModal] = useState<{ mode: 'add' } | { mode: 'edit'; verse: TreasuryVerse } | null>(null);
 
   const refresh = async () => {
@@ -98,7 +108,10 @@ export default function Treasury() {
   }, [verses, kindFilter, search, sortMode]);
 
   return (
-    <div className="treasury-page">
+    <div
+      className="treasury-page"
+      style={{ ['--tr-verse-size' as never]: `${zoom}px` }}
+    >
       <header className="tr-ribbon">
         <div className="left">
           <Link className="back" to="/">← hallway</Link>
@@ -134,6 +147,24 @@ export default function Treasury() {
               <option value="by-book">By book (Gen → Rev)</option>
             </select>
           </label>
+        </div>
+
+        <div className="tr-zoom" role="group" aria-label="Verse text size" title="Verse text size — enlarge for display, shrink for yourself">
+          <button
+            onClick={() => setZoom((z) => Math.max(12, z - 1))}
+            disabled={zoom <= 12}
+            aria-label="Smaller verse text"
+          >
+            −
+          </button>
+          <span className="tr-zoom-val">{zoom}</span>
+          <button
+            onClick={() => setZoom((z) => Math.min(44, z + 1))}
+            disabled={zoom >= 44}
+            aria-label="Larger verse text"
+          >
+            +
+          </button>
         </div>
 
         <input
