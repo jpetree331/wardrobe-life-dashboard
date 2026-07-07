@@ -1,7 +1,7 @@
 {
   "name": "wardrobe",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Wardrobe — a personal mind-palace web app for contemplative practice",
   "scripts": {
