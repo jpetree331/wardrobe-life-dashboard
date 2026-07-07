@@ -1,6 +1,6 @@
 [package]
 name = "wardrobe"
-version = "0.1.1"
+version = "0.1.2"
 description = "Wardrobe — a quiet desktop app for the contemplative life. Local data, no accounts."
 authors = ["jpetree331"]
 edition = "2021"

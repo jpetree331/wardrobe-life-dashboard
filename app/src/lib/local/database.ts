@@ -24,6 +24,12 @@ const POSTGREST_COMPATIBLE_PARSERS = {
   [types.DATE]: (v: string) => v,
   [types.TIMESTAMP]: isoTimestamp,
   [types.TIMESTAMPTZ]: isoTimestamp,
+  // PostgREST emits numeric/bigint as JSON numbers; PGlite's default is the
+  // wire string, which turns card-position math like `x + dx` into string
+  // concatenation ("240" + 67 → "24067") and makes React drop unitless
+  // "150"-style CSS values, stacking every Notes card at the canvas origin.
+  [types.NUMERIC]: (v: string) => Number(v),
+  [types.INT8]: (v: string) => Number(v),
 };
 
 /** Construct a PGlite with the app's parser settings. `dataDir` omitted →

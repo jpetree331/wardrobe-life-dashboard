@@ -158,6 +158,31 @@ describe('query builder — the shapes the app actually uses', () => {
     expect(miss.data.length).toBe(0);
   });
 
+  it('numeric columns round-trip as JS numbers, not strings (card x/y/w/h)', async () => {
+    // PostgREST emits numeric as JSON numbers; PGlite's default parser hands
+    // back strings, which broke Notes card positioning ("240" + 67 → "24067").
+    const { data: board } = await from('notes_boards')
+      .select('*').eq('is_root', true).single();
+    const { data: card } = await from('notes_cards')
+      .insert({
+        user_id: LOCAL_USER_ID, board_id: board.id, type: 'note',
+        x: 150, y: 240.5, w: 240, h: 140, payload: {},
+      })
+      .select()
+      .single();
+    expect(typeof card.x).toBe('number');
+    expect(typeof card.y).toBe('number');
+    expect(typeof card.w).toBe('number');
+    expect(card.x + 10).toBe(160);       // arithmetic, not concatenation
+    expect(card.y).toBeCloseTo(240.5);
+    // Read-back path (not just insert-returning) must parse the same way.
+    const { data: again } = await from('notes_cards')
+      .select('*').eq('id', card.id).single();
+    expect(typeof again.x).toBe('number');
+    expect(again.w + 67).toBe(307);
+    await from('notes_cards').delete().eq('id', card.id);
+  });
+
   it('bulk insert without .select() resolves with data: null', async () => {
     const rows = [1, 2, 3].map((n) => ({
       user_id: LOCAL_USER_ID, room: 'timeline', entry_date: `2026-03-0${n}`,
