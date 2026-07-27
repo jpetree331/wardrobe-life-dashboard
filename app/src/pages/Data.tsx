@@ -6,7 +6,10 @@ import {
   createDailyPageRead,
   createReadingPlan,
   createScriptureRead,
+  createStillnessEntry,
   deleteReadingPlan,
+  deleteStillnessEntry,
+  listStillnessEntries,
   listAllPlanCompletions,
   listAllScriptureReads,
   listAllSanctuaryEntries,
@@ -24,6 +27,7 @@ import {
   type ReadingPlan,
   type SanctuaryEntryLite,
   type ScriptureRead,
+  type StillnessEntry,
 } from '../lib/data';
 import {
   monthlyWordTotals,
@@ -40,6 +44,7 @@ import {
   practiceByDate,
   practiceSummary,
   stillnessMinutesByDate,
+  totalStillnessMinutes,
 } from '../lib/sanctuaryPractice';
 import {
   buildImportPreview,
@@ -123,6 +128,7 @@ export default function Data() {
   const [planCompletions, setPlanCompletions] = useState<PlanCompletion[]>([]);
   const [sanctuaryDates, setSanctuaryDates] = useState<Set<string>>(new Set());
   const [sanctuaryEntries, setSanctuaryEntries] = useState<SanctuaryEntryLite[]>([]);
+  const [stillnessEntries, setStillnessEntries] = useState<StillnessEntry[]>([]);
   const [timelineDates, setTimelineDates] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
@@ -151,7 +157,7 @@ export default function Data() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, b, dp, p, pc, sd, td, se] = await Promise.all([
+      const [s, b, dp, p, pc, sd, td, se, st] = await Promise.all([
         listAllScriptureReads(),
         listBookReads(),
         listDailyPageReads(),
@@ -160,6 +166,12 @@ export default function Data() {
         listEntryDatesByRoom('sanctuary'),
         listEntryDatesByRoom('timeline'),
         listAllSanctuaryEntries(),
+        // Fail-soft: standalone stillness needs migration 0015 — until it's
+        // run, the rest of the Data room must keep working.
+        listStillnessEntries().catch((err) => {
+          console.error('stillness_entries unavailable (run migration 0015?):', err);
+          return [] as StillnessEntry[];
+        }),
       ]);
       setScriptureReads(s);
       setBookReads(b);
@@ -169,6 +181,7 @@ export default function Data() {
       setSanctuaryDates(sd);
       setTimelineDates(td);
       setSanctuaryEntries(se);
+      setStillnessEntries(st);
       setLoaded(true);
       const dpPagesTotal = dp.reduce((sum, r) => sum + r.pages, 0);
       setStatusMsg(
@@ -248,7 +261,12 @@ export default function Data() {
         ) : tab === 'writing' ? (
           <WritingView entries={sanctuaryEntries} />
         ) : tab === 'stillness' ? (
-          <StillnessView entries={sanctuaryEntries} scriptureReads={scriptureReads} />
+          <StillnessView
+            entries={sanctuaryEntries}
+            standalone={stillnessEntries}
+            scriptureReads={scriptureReads}
+            onChanged={refresh}
+          />
         ) : null}
       </main>
 
@@ -256,7 +274,7 @@ export default function Data() {
 
       {backupOpen && (
         <DataBackupModal
-          tables={{ scriptureReads, bookReads, dailyPages, plans, planCompletions }}
+          tables={{ scriptureReads, bookReads, dailyPages, plans, planCompletions, stillnessEntries }}
           onClose={() => setBackupOpen(false)}
         />
       )}
@@ -2702,26 +2720,50 @@ const SCRIPTURE_GREEN = [
 
 function StillnessView({
   entries,
+  standalone,
   scriptureReads,
+  onChanged,
 }: {
   entries: SanctuaryEntryLite[];
+  standalone: StillnessEntry[];
   scriptureReads: ScriptureRead[];
+  onChanged: () => void | Promise<void>;
 }) {
   const todayDate = useMemo(() => new Date(), []);
   const currentYear = todayDate.getFullYear();
   const [year, setYear] = useState<number>(currentYear);
+  const [addOpen, setAddOpen] = useState(false);
+
+  // Sanctuary practice + standalone stillness entries, merged into one
+  // stream — the aggregators only read entry_date / listening_prayer /
+  // stillness_sessions, so a standalone row wears the Lite shape.
+  const allEntries = useMemo<SanctuaryEntryLite[]>(
+    () => [
+      ...entries,
+      ...standalone.map((s) => ({
+        id: s.id,
+        entry_date: s.entry_date,
+        title: null,
+        body: '',
+        tags: [],
+        listening_prayer: s.listening_prayer,
+        stillness_sessions: s.stillness_sessions,
+      })),
+    ],
+    [entries, standalone],
+  );
 
   // Practice keyed by date (sums minutes, ORs listening prayer).
-  const byDay = useMemo(() => practiceByDate(entries), [entries]);
-  const minutesByDate = useMemo(() => stillnessMinutesByDate(entries), [entries]);
-  const lpDates = useMemo(() => listeningPrayerDates(entries), [entries]);
+  const byDay = useMemo(() => practiceByDate(allEntries), [allEntries]);
+  const minutesByDate = useMemo(() => stillnessMinutesByDate(allEntries), [allEntries]);
+  const lpDates = useMemo(() => listeningPrayerDates(allEntries), [allEntries]);
 
   const grid = useMemo(
     () => buildHeatGrid(year, minutesByDate, 'words', todayDate),
     [year, minutesByDate, todayDate],
   );
-  const summary = useMemo(() => practiceSummary(entries, year), [entries, year]);
-  const monthly = useMemo(() => monthlyStillnessMinutes(entries, year), [entries, year]);
+  const summary = useMemo(() => practiceSummary(allEntries, year), [allEntries, year]);
+  const monthly = useMemo(() => monthlyStillnessMinutes(allEntries, year), [allEntries, year]);
   const monthlyMax = useMemo(() => Math.max(1, ...monthly), [monthly]);
 
   // Years that have any practice, plus the current year.
@@ -2789,14 +2831,23 @@ function StillnessView({
   }
 
   const nothingYet = summary.totalStillnessMin === 0 && summary.listeningPrayerDays === 0;
-  if (entries.length === 0 || nothingYet) {
+  if (allEntries.length === 0 || nothingYet) {
     return (
       <div className="dt-panel">
         <div className="empty">
           No stillness or listening prayer recorded yet. In the{' '}
           <Link to="/sanctuary">Sanctuary</Link> inspector, check <em>Stillness</em> or{' '}
-          <em>Listening prayer</em> on an entry and it will show up here.
+          <em>Listening prayer</em> on an entry — or{' '}
+          <button className="btn-quiet" onClick={() => setAddOpen(true)}>+ add entry</button>{' '}
+          here, apart from the journal.
         </div>
+        {addOpen && (
+          <AddStillnessModal
+            standalone={standalone}
+            onClose={() => setAddOpen(false)}
+            onChanged={onChanged}
+          />
+        )}
       </div>
     );
   }
@@ -2818,6 +2869,13 @@ function StillnessView({
         <header className="wt-section-head">
           <h3>Stillness &amp; listening prayer · <em>{year}</em></h3>
           <div className="st-head-controls">
+            <button
+              className="btn-quiet"
+              onClick={() => setAddOpen(true)}
+              title="Log a stillness sitting or listening-prayer day without a journal entry"
+            >
+              + add entry
+            </button>
             <label className="st-sc-toggle" title="Overlay a corner mark on days you read Scripture">
               <input
                 type="checkbox"
@@ -2913,7 +2971,129 @@ function StillnessView({
           ))}
         </div>
       </section>
+
+      {addOpen && (
+        <AddStillnessModal
+          standalone={standalone}
+          onClose={() => setAddOpen(false)}
+          onChanged={onChanged}
+        />
+      )}
     </div>
+  );
+}
+
+// ── + Stillness entry modal (standalone — apart from the journal) ─────
+
+function AddStillnessModal({
+  standalone,
+  onClose,
+  onChanged,
+}: {
+  standalone: StillnessEntry[];
+  onClose: () => void;
+  onChanged: () => void | Promise<void>;
+}) {
+  const [date, setDate] = useState(localToday());
+  const [minutes, setMinutes] = useState(15);
+  const [listeningPrayer, setListeningPrayer] = useState(false);
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (saving) return;
+    if (minutes <= 0 && !listeningPrayer) {
+      setErr('Enter some minutes of stillness, or check listening prayer.');
+      return;
+    }
+    setSaving(true); setErr(null);
+    try {
+      await createStillnessEntry({
+        entry_date: date,
+        minutes: Math.max(0, Math.round(minutes)),
+        listening_prayer: listeningPrayer,
+        note,
+      });
+      await onChanged();
+      onClose();
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || 'Could not save. Has migration 0015 been run?');
+      setSaving(false);
+    }
+  }
+
+  async function onDelete(id: string) {
+    try {
+      await deleteStillnessEntry(id);
+      await onChanged();
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || 'Could not delete.');
+    }
+  }
+
+  return (
+    <Modal title="+ Stillness" onClose={onClose}>
+      <form className="dt-form" onSubmit={onSubmit}>
+        <div className="row">
+          <label>
+            Date
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+          </label>
+          <label>
+            Minutes
+            <input
+              type="number"
+              min={0}
+              value={minutes}
+              onChange={(e) => setMinutes(Math.max(0, Number(e.target.value) || 0))}
+            />
+          </label>
+        </div>
+        <label className="st-sc-toggle">
+          <input
+            type="checkbox"
+            checked={listeningPrayer}
+            onChange={(e) => setListeningPrayer(e.target.checked)}
+          />
+          <span>Listening prayer</span>
+        </label>
+        <label>
+          Note (optional)
+          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} />
+        </label>
+        <p className="dt-form-hint">
+          Logs practice apart from the Sanctuary journal — no entry is created there.
+          Days with both sources simply add together on the heatmap.
+        </p>
+        {err && <div className="dt-form-err">{err}</div>}
+        <ModalActions onCancel={onClose} saving={saving} />
+      </form>
+      {standalone.length > 0 && (
+        <div className="st-standalone-list">
+          <h4>Logged here (latest {Math.min(standalone.length, 8)})</h4>
+          <ul>
+            {standalone.slice(0, 8).map((s) => {
+              const min = totalStillnessMinutes(s.stillness_sessions);
+              const bits = [
+                min > 0 ? formatMinutes(min) : null,
+                s.listening_prayer ? 'listening prayer' : null,
+                s.note || null,
+              ].filter(Boolean).join(' · ');
+              return (
+                <li key={s.id}>
+                  <span>{s.entry_date}{bits ? ` — ${bits}` : ''}</span>
+                  <button type="button" className="x" onClick={() => onDelete(s.id)} aria-label="Delete">×</button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </Modal>
   );
 }
 

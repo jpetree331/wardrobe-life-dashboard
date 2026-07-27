@@ -183,6 +183,44 @@ describe('query builder — the shapes the app actually uses', () => {
     await from('notes_cards').delete().eq('id', card.id);
   });
 
+  it('.not(col, is, null) filters like PostgREST (scripture-reads shape)', async () => {
+    const ins = await from('entries').insert([
+      { user_id: LOCAL_USER_ID, room: 'sanctuary', entry_date: '2026-06-01', title: 'titled', body: '', body_type: 'plain', tags: [] },
+      { user_id: LOCAL_USER_ID, room: 'sanctuary', entry_date: '2026-06-02', title: null, body: '', body_type: 'plain', tags: [] },
+    ]);
+    expect(ins.error).toBeNull();
+    const { data, error } = await from('entries')
+      .select('title')
+      .gte('entry_date', '2026-06-01')
+      .lte('entry_date', '2026-06-02')
+      .not('title', 'is', null);
+    expect(error).toBeNull();
+    expect(data.map((r: { title: string }) => r.title)).toEqual(['titled']);
+    await from('entries').delete().gte('entry_date', '2026-06-01').lte('entry_date', '2026-06-02');
+  });
+
+  it('stillness_entries (0015) round-trips sessions jsonb and date strings', async () => {
+    const { data: created, error } = await from('stillness_entries')
+      .insert({
+        user_id: LOCAL_USER_ID, entry_date: '2026-07-27',
+        listening_prayer: true,
+        stillness_sessions: [{ start: null, end: null, minutes: 25 }],
+        note: 'test sit',
+      })
+      .select()
+      .single();
+    expect(error).toBeNull();
+    expect(created.entry_date).toBe('2026-07-27');   // date stays a string
+    expect(created.stillness_sessions[0].minutes).toBe(25);
+    expect(created.listening_prayer).toBe(true);
+    const { data: listed } = await from('stillness_entries')
+      .select('*').order('entry_date', { ascending: false });
+    expect(listed.some((r: { id: string }) => r.id === created.id)).toBe(true);
+    await from('stillness_entries').delete().eq('id', created.id);
+    const { data: gone } = await from('stillness_entries').select('*').eq('id', created.id);
+    expect(gone.length).toBe(0);
+  });
+
   it('bulk insert without .select() resolves with data: null', async () => {
     const rows = [1, 2, 3].map((n) => ({
       user_id: LOCAL_USER_ID, room: 'timeline', entry_date: `2026-03-0${n}`,

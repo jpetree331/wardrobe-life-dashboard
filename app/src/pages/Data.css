@@ -2034,6 +2034,27 @@
 }
 .st-sc-toggle:hover { color: var(--ink); }
 
+/* Standalone stillness entries list inside the + Stillness modal. */
+.st-standalone-list {
+  margin-top: 4px; padding: 10px 0 2px;
+  border-top: 1px solid var(--line);
+}
+.st-standalone-list h4 {
+  margin: 0 0 6px; font-family: 'EB Garamond', serif;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.st-standalone-list ul { margin: 0; padding: 0; list-style: none; }
+.st-standalone-list li {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 3px 0; font-size: 13px; color: var(--ink-soft);
+}
+.st-standalone-list li .x {
+  background: none; border: none; cursor: pointer;
+  color: var(--ink-faint); font-size: 15px; line-height: 1; padding: 2px 6px;
+}
+.st-standalone-list li .x:hover { color: var(--red, #a33); }
+
 /* Data backup modal body (reuses the shared .sa-export-* chrome). */
 .sa-data-backup-body { padding: 20px 26px 6px; }
 .sa-data-backup-lead { margin: 0 0 10px; font-size: 14px; color: var(--ink); }

@@ -2,7 +2,7 @@
 // exactly the supabase-js surface this app uses (inventoried by grep, and
 // pinned by test/localClient.test.ts):
 //
-//   .from(t).select(cols).eq/gt/gte/lt/lte/neq/.or(expr)
+//   .from(t).select(cols).eq/gt/gte/lt/lte/neq/.not(col,op,v)/.or(expr)
 //           .order(col, {ascending}).limit(n).single()/.maybeSingle()
 //   .from(t).insert(row | rows[]).select()?.single()?
 //   .from(t).update(patch).eq(...).select()?.single()?
@@ -60,6 +60,7 @@ const OPS: Record<string, string> = {
 
 type Filter =
   | { kind: 'op'; col: string; op: string; value: unknown }
+  | { kind: 'not'; col: string; op: string; value: unknown }
   | { kind: 'or'; expr: string };
 
 type Order = { col: string; ascending: boolean };
@@ -112,6 +113,13 @@ export class LocalQueryBuilder implements PromiseLike<LocalResult<any>> {
   lte(col: string, value: unknown): this { return this.op('lte', col, value); }
   private op(op: string, col: string, value: unknown): this {
     this.filters.push({ kind: 'op', col, op, value });
+    return this;
+  }
+  /** PostgREST .not(col, op, value) — negates `col op value`. The app uses
+   *  `.not('scripture_refs', 'is', null)` (→ col IS NOT NULL); eq/neq/gt/
+   *  gte/lt/lte/like/ilike negate via NOT (...). */
+  not(col: string, op: string, value: unknown): this {
+    this.filters.push({ kind: 'not', col, op, value });
     return this;
   }
   /** PostgREST .or() — comma-separated `col.op.value` clauses, OR-ed together
@@ -200,6 +208,12 @@ export class LocalQueryBuilder implements PromiseLike<LocalResult<any>> {
           return `${colExpr(f.col)} ${sqlOp} $${params.length}`;
         }
         return `${colExpr(f.col)} ${sqlOp} ${this.castValue(f.col, f.value, types, params)}`;
+      }
+      if (f.kind === 'not') {
+        if (f.op === 'is' && f.value === null) return `${colExpr(f.col)} is not null`;
+        const sqlOp = OPS[f.op];
+        if (!sqlOp) throw new Error(`Unsupported not() operator: ${f.op}`);
+        return `not (${colExpr(f.col)} ${sqlOp} ${this.castValue(f.col, f.value, types, params)})`;
       }
       // .or(): parse `col.op.value` clauses; value may itself contain dots
       // (e.g. storage paths), so split on the first `.op.` token only.

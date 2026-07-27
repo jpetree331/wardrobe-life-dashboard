@@ -572,6 +572,72 @@ export async function listAllSanctuaryEntries(): Promise<SanctuaryEntryLite[]> {
   }));
 }
 
+// ── Standalone stillness entries (migration 0015) ───────────────────
+
+/**
+ * A stillness sitting / listening-prayer day logged directly from the
+ * Data room's Stillness tab, apart from the Sanctuary journal. Shares
+ * the practice field shapes with `entries` (0008) so the Stillness tab
+ * can merge both sources by date.
+ */
+export type StillnessEntry = {
+  id: string;
+  entry_date: string;    // YYYY-MM-DD
+  listening_prayer: boolean;
+  stillness_sessions: StillnessSession[];
+  note: string;
+};
+
+export async function listStillnessEntries(): Promise<StillnessEntry[]> {
+  const { data, error } = await supabase
+    .from('stillness_entries')
+    .select('id, entry_date, listening_prayer, stillness_sessions, note')
+    .order('entry_date', { ascending: false });
+  if (error) throw error;
+  return ((data || []) as Array<{
+    id: string;
+    entry_date: string;
+    listening_prayer: boolean | null;
+    stillness_sessions: StillnessSession[] | null;
+    note: string | null;
+  }>).map((r) => ({
+    id: r.id,
+    entry_date: r.entry_date,
+    listening_prayer: !!r.listening_prayer,
+    stillness_sessions: r.stillness_sessions ?? [],
+    note: r.note ?? '',
+  }));
+}
+
+export async function createStillnessEntry(input: {
+  entry_date: string;
+  minutes: number;               // 0 allowed when listening_prayer is true
+  listening_prayer: boolean;
+  note?: string;
+}): Promise<StillnessEntry> {
+  const userId = await currentUserId();
+  const sessions: StillnessSession[] =
+    input.minutes > 0 ? [{ start: null, end: null, minutes: input.minutes }] : [];
+  const { data, error } = await supabase
+    .from('stillness_entries')
+    .insert({
+      user_id: userId,
+      entry_date: input.entry_date,
+      listening_prayer: input.listening_prayer,
+      stillness_sessions: sessions,
+      note: input.note?.trim() || '',
+    })
+    .select('id, entry_date, listening_prayer, stillness_sessions, note')
+    .single();
+  if (error) throw error;
+  return data as StillnessEntry;
+}
+
+export async function deleteStillnessEntry(id: string): Promise<void> {
+  const { error } = await supabase.from('stillness_entries').delete().eq('id', id);
+  if (error) throw error;
+}
+
 // ── Cross-room calendar markers ──────────────────────────────────────
 
 /**

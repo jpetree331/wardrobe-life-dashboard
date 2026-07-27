@@ -8,7 +8,9 @@ import type {
   PlanCompletion,
   ReadingPlan,
   ScriptureRead,
+  StillnessEntry,
 } from './data';
+import { totalStillnessMinutes } from './sanctuaryPractice';
 import {
   backupFilename,
   buildJsonBackup,
@@ -25,6 +27,9 @@ export type DataBackupTables = {
   dailyPages: DailyPageRead[];
   plans: ReadingPlan[];
   planCompletions: PlanCompletion[];
+  /** Standalone stillness entries (migration 0015). Practice logged on
+   *  Sanctuary entries is backed up with the Sanctuary export, not here. */
+  stillnessEntries: StillnessEntry[];
 };
 
 /** Only the manually-logged scripture reads are real rows in
@@ -54,10 +59,12 @@ export function buildDataBackupJson(tables: DataBackupTables, meta: BackupMeta):
   const scripture = ownedScriptureReads(tables.scriptureReads);
   return buildJsonBackup(
     'data-backup',
-    'Complete, lossless backup of the Data room reading records. Each array is ' +
+    'Complete, lossless backup of the Data room records. Each array is ' +
       'the full set of rows from its table: scripture_reads (manual logs only — ' +
       'sanctuary-tagged reads live with your Sanctuary backup), book_reads, ' +
-      'daily_page_reads, reading_plans, and plan_completions — exactly as stored.',
+      'daily_page_reads, reading_plans, plan_completions, and stillness_entries ' +
+      '(standalone practice logs — practice on journal entries lives with your ' +
+      'Sanctuary backup) — exactly as stored.',
     {
       counts: {
         scripture_reads: scripture.length,
@@ -65,12 +72,14 @@ export function buildDataBackupJson(tables: DataBackupTables, meta: BackupMeta):
         daily_page_reads: tables.dailyPages.length,
         reading_plans: tables.plans.length,
         plan_completions: tables.planCompletions.length,
+        stillness_entries: tables.stillnessEntries.length,
       },
       scripture_reads: scripture,
       book_reads: tables.bookReads,
       daily_page_reads: tables.dailyPages,
       reading_plans: tables.plans,
       plan_completions: tables.planCompletions,
+      stillness_entries: tables.stillnessEntries,
     },
     meta,
   );
@@ -145,6 +154,25 @@ export function buildDataReadableHtml(tables: DataBackupTables, meta: BackupMeta
           .join('')}</tbody></table></div>`
     : '';
 
+  const stillness = tables.stillnessEntries
+    .slice()
+    .sort((a, b) => b.entry_date.localeCompare(a.entry_date));
+  const stillnessTable = stillness.length
+    ? `<div class="sheet"><h2 class="sec-title">Stillness (logged apart from the journal)</h2><table>
+        <thead><tr><th>Date</th><th>Minutes</th><th>Listening prayer</th><th>Note</th></tr></thead>
+        <tbody>${stillness
+          .map((s) => {
+            const min = totalStillnessMinutes(s.stillness_sessions);
+            return (
+              `<tr><td class="muted">${escapeHtml(s.entry_date)}</td>` +
+              `<td>${min > 0 ? min : '<span class="muted">—</span>'}</td>` +
+              `<td class="muted">${s.listening_prayer ? 'yes' : '—'}</td>` +
+              `<td class="muted">${escapeHtml(s.note || '')}</td></tr>`
+            );
+          })
+          .join('')}</tbody></table></div>`
+    : '';
+
   const plansTable = plans.length
     ? `<div class="sheet"><h2 class="sec-title">Reading plans</h2><table>
         <thead><tr><th>Plan</th><th>Span</th><th>Books</th></tr></thead>
@@ -160,7 +188,7 @@ export function buildDataReadableHtml(tables: DataBackupTables, meta: BackupMeta
 
   // Concatenate every non-empty section — NOT `a || b || c`, which would keep
   // only the first and silently drop the rest.
-  const anything = [booksTable, scriptureTable, plansTable].filter(Boolean).join('\n');
+  const anything = [booksTable, scriptureTable, stillnessTable, plansTable].filter(Boolean).join('\n');
 
   return `<!doctype html>
 <html lang="en">

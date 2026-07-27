@@ -127,12 +127,17 @@ describe('dataExport', () => {
       dailyPages: [],
       plans: [],
       planCompletions: [],
+      stillnessEntries: [
+        { id: 'st1', entry_date: '2026-05-02', listening_prayer: true, stillness_sessions: [{ start: null, end: null, minutes: 20 }], note: 'quiet' },
+      ],
     };
     const p = JSON.parse(buildDataBackupJson(tables, META));
     expect(p.kind).toBe('data-backup');
     expect(p.counts.scripture_reads).toBe(1); // manual only
     expect(p.scripture_reads.map((r: ScriptureRead) => r.id)).toEqual(['m']);
     expect(p.book_reads[0].id).toBe('bk');
+    expect(p.counts.stillness_entries).toBe(1);
+    expect(p.stillness_entries[0].id).toBe('st1');
   });
 
   it('readable report renders counts, a books table with stars, and escapes text', () => {
@@ -142,6 +147,9 @@ describe('dataExport', () => {
       dailyPages: [],
       plans: [{ id: 'p', user_id: 'u', name: 'NT 90', books: ['Matthew'], start_date: '2026-01-01', end_date: '2026-03-31', days_of_week: [], unit: 'chapters', per_session: 3, created_at: '', updated_at: '' } as ReadingPlan],
       planCompletions: [],
+      stillnessEntries: [
+        { id: 'st2', entry_date: '2026-05-03', listening_prayer: false, stillness_sessions: [{ start: null, end: null, minutes: 45 }], note: 'morning <sit>' },
+      ],
     };
     const html = buildDataReadableHtml(tables, META);
     expect(html.startsWith('<!doctype html>')).toBe(true);
@@ -151,10 +159,12 @@ describe('dataExport', () => {
     expect(html).toContain('★★★★★');
     expect(html).toContain('Mark 5');
     expect(html).toContain('NT 90');
+    expect(html).toContain('Stillness (logged apart from the journal)');
+    expect(html).toContain('morning &lt;sit&gt;');
   });
 
   it('readable report handles an empty Data room gracefully', () => {
-    const empty: DataBackupTables = { scriptureReads: [], bookReads: [], dailyPages: [], plans: [], planCompletions: [] };
+    const empty: DataBackupTables = { scriptureReads: [], bookReads: [], dailyPages: [], plans: [], planCompletions: [], stillnessEntries: [] };
     const html = buildDataReadableHtml(empty, META);
     expect(html).toContain('No reading recorded yet.');
   });
