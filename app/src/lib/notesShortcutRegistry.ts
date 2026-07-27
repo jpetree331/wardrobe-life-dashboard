@@ -29,6 +29,8 @@ export type ShortcutDef = {
 
 export const SHORTCUTS: ShortcutDef[] = [
   // ── View ────────────────────────────────────────────────────────────
+  { id: 'tool-click',  keys: ['V'],            label: 'Click tool (drag selects)',  category: 'View', when: 'not typing' },
+  { id: 'tool-hand',   keys: ['H'],            label: 'Hand tool (drag scrolls)',   category: 'View', when: 'not typing' },
   { id: 'zoom-in',     keys: ['Mod +'],        label: 'Zoom in',                    category: 'View', when: 'not typing' },
   { id: 'zoom-out',    keys: ['Mod -'],        label: 'Zoom out',                   category: 'View', when: 'not typing' },
   { id: 'zoom-100',    keys: ['Mod 0'],        label: 'Zoom to 100%, centered on content', category: 'View', when: 'not typing' },

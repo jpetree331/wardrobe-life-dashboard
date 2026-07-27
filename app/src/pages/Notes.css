@@ -130,6 +130,10 @@
   border-radius: var(--notes-control-radius); letter-spacing: 0.04em;
 }
 .nt-ribbon .btn-quiet:hover { color: var(--ink); border-color: var(--ink-soft); }
+.nt-ribbon .btn-quiet.mode-on {
+  color: var(--ink); border-color: var(--ink);
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+}
 .nt-ribbon .btn-quiet:disabled {
   opacity: 0.35; cursor: default;
   color: var(--ink-faint); border-color: var(--line);

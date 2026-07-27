@@ -249,6 +249,21 @@ export default function Notes() {
       window.localStorage.setItem('notes-theme', theme);
     } catch { /* best-effort */ }
   }, [theme]);
+  // Pointer mode: 'click' = drag on empty canvas marquee-selects (default);
+  // 'hand' = drag on empty canvas pans. Space / middle-mouse pan works in
+  // both. Device-local preference, like the skin.
+  const [handMode, setHandMode] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('notes-hand-mode') === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('notes-hand-mode', handMode ? '1' : '0');
+    } catch { /* best-effort */ }
+  }, [handMode]);
   // Floating format toolbar over text selection inside a Note body.
   const [fmtToolbar, setFmtToolbar] = useState<{ top: number; left: number } | null>(null);
 
@@ -446,10 +461,10 @@ export default function Notes() {
     };
   }, []);
 
-  // Empty-canvas gestures: plain drag = marquee select; Space+drag or
-  // middle-mouse drag = pan (Milanote model).
+  // Empty-canvas gestures: plain drag = marquee select (click tool) or pan
+  // (hand tool); Space+drag or middle-mouse drag = pan in either mode.
   function onCanvasMouseDown(e: React.MouseEvent) {
-    const pan = e.button === 1 || (e.button === 0 && spaceHeld);
+    const pan = e.button === 1 || (e.button === 0 && (spaceHeld || handMode));
     if (!pan && e.button !== 0) return;
     if ((e.target as HTMLElement).closest('.nt-card')) return;
     if ((e.target as HTMLElement).closest('.nt-ctx')) return;
@@ -525,6 +540,21 @@ export default function Notes() {
         cards.filter((c) => !c.parent_column && !isInboxColumn(c)).map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
         r.width,
         r.height,
+      ),
+    );
+  }
+
+  /** Recenter the view on the cards' bounding box without changing zoom. */
+  function doCenter() {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const r = wrap.getBoundingClientRect();
+    setView(
+      viewCenteredOnContent(
+        cards.filter((c) => !c.parent_column && !isInboxColumn(c)).map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
+        r.width,
+        r.height,
+        view.k,
       ),
     );
   }
@@ -2472,6 +2502,18 @@ export default function Notes() {
         return;
       }
 
+      // V / H = click tool / hand tool (Figma-style pointer modes).
+      if ((e.key === 'v' || e.key === 'V') && !e.altKey) {
+        e.preventDefault();
+        setHandMode(false);
+        return;
+      }
+      if ((e.key === 'h' || e.key === 'H') && !e.altKey) {
+        e.preventDefault();
+        setHandMode(true);
+        return;
+      }
+
       // N = new note at viewport center, straight into edit mode.
       if ((e.key === 'n' || e.key === 'N') && !e.altKey) {
         e.preventDefault();
@@ -3079,6 +3121,20 @@ export default function Notes() {
             ↻
           </button>
           <button
+            className={`btn-quiet${handMode ? '' : ' mode-on'}`}
+            onClick={() => setHandMode(false)}
+            title="Click tool — drag on empty canvas to select (V)"
+          >
+            ⇖
+          </button>
+          <button
+            className={`btn-quiet${handMode ? ' mode-on' : ''}`}
+            onClick={() => setHandMode(true)}
+            title="Hand tool — drag the canvas to scroll (H)"
+          >
+            ✋
+          </button>
+          <button
             className="btn-quiet"
             onClick={() => setView((v) => zoomAroundCursor(v, 0.85, 0, 0))}
             title="Zoom out"
@@ -3094,6 +3150,7 @@ export default function Notes() {
             +
           </button>
           <button className="btn-quiet" onClick={doFit} title="Fit to view">fit</button>
+          <button className="btn-quiet" onClick={doCenter} title="Snap the view to your cards (keeps zoom)">center</button>
           <button
             className="btn-quiet"
             onClick={() => setTheme((t) => (t === 'parchment' ? 'milanote' : 'parchment'))}
@@ -3154,7 +3211,7 @@ export default function Notes() {
         </aside>
 
         <section
-          className={`nt-canvas-wrap${spaceHeld ? ' space-pan' : ''}`}
+          className={`nt-canvas-wrap${spaceHeld || handMode ? ' space-pan' : ''}`}
           ref={wrapRef}
           onMouseDown={onCanvasMouseDown}
           onDoubleClick={onCanvasDoubleClick}
