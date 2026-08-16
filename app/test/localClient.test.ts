@@ -221,6 +221,23 @@ describe('query builder — the shapes the app actually uses', () => {
     expect(gone.length).toBe(0);
   });
 
+  it('fiction_log (0016) round-trips, enforces CHECKs, and deletes', async () => {
+    const { data: created, error } = await from('fiction_log')
+      .insert({ user_id: LOCAL_USER_ID, entry_date: '2026-08-16', minutes: 45, words: 300, note: 'ch 3' })
+      .select()
+      .single();
+    expect(error).toBeNull();
+    expect(created.entry_date).toBe('2026-08-16');
+    expect(created.minutes).toBe(45);
+    expect(created.words).toBe(300);
+    const bad = await from('fiction_log')
+      .insert({ user_id: LOCAL_USER_ID, entry_date: '2026-08-16', minutes: -5, words: 0 });
+    expect(bad.error).not.toBeNull();
+    await from('fiction_log').delete().eq('id', created.id);
+    const { data: gone } = await from('fiction_log').select('*').eq('id', created.id);
+    expect(gone.length).toBe(0);
+  });
+
   it('bulk insert without .select() resolves with data: null', async () => {
     const rows = [1, 2, 3].map((n) => ({
       user_id: LOCAL_USER_ID, room: 'timeline', entry_date: `2026-03-0${n}`,

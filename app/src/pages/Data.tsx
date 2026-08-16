@@ -5,10 +5,13 @@ import {
   createBookRead,
   createDailyPageRead,
   createReadingPlan,
+  createFictionLogEntry,
   createScriptureRead,
   createStillnessEntry,
+  deleteFictionLogEntry,
   deleteReadingPlan,
   deleteStillnessEntry,
+  listFictionLog,
   listStillnessEntries,
   listAllPlanCompletions,
   listAllScriptureReads,
@@ -25,10 +28,12 @@ import {
   type DailyPageRead,
   type PlanCompletion,
   type ReadingPlan,
+  type FictionLogEntry,
   type SanctuaryEntryLite,
   type ScriptureRead,
   type StillnessEntry,
 } from '../lib/data';
+import { fictionByDate, fictionSummary } from '../lib/fictionLog';
 import {
   monthlyWordTotals,
   perEntryStats,
@@ -129,6 +134,7 @@ export default function Data() {
   const [sanctuaryDates, setSanctuaryDates] = useState<Set<string>>(new Set());
   const [sanctuaryEntries, setSanctuaryEntries] = useState<SanctuaryEntryLite[]>([]);
   const [stillnessEntries, setStillnessEntries] = useState<StillnessEntry[]>([]);
+  const [fictionLog, setFictionLog] = useState<FictionLogEntry[]>([]);
   const [timelineDates, setTimelineDates] = useState<Set<string>>(new Set());
   const [loaded, setLoaded] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false);
@@ -157,7 +163,7 @@ export default function Data() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, b, dp, p, pc, sd, td, se, st] = await Promise.all([
+      const [s, b, dp, p, pc, sd, td, se, st, fl] = await Promise.all([
         listAllScriptureReads(),
         listBookReads(),
         listDailyPageReads(),
@@ -172,6 +178,10 @@ export default function Data() {
           console.error('stillness_entries unavailable (run migration 0015?):', err);
           return [] as StillnessEntry[];
         }),
+        listFictionLog().catch((err) => {
+          console.error('fiction_log unavailable (run migration 0016?):', err);
+          return [] as FictionLogEntry[];
+        }),
       ]);
       setScriptureReads(s);
       setBookReads(b);
@@ -182,6 +192,7 @@ export default function Data() {
       setTimelineDates(td);
       setSanctuaryEntries(se);
       setStillnessEntries(st);
+      setFictionLog(fl);
       setLoaded(true);
       const dpPagesTotal = dp.reduce((sum, r) => sum + r.pages, 0);
       setStatusMsg(
@@ -259,7 +270,7 @@ export default function Data() {
             onChanged={refresh}
           />
         ) : tab === 'writing' ? (
-          <WritingView entries={sanctuaryEntries} />
+          <WritingView entries={sanctuaryEntries} fictionLog={fictionLog} onChanged={refresh} />
         ) : tab === 'stillness' ? (
           <StillnessView
             entries={sanctuaryEntries}
@@ -274,7 +285,7 @@ export default function Data() {
 
       {backupOpen && (
         <DataBackupModal
-          tables={{ scriptureReads, bookReads, dailyPages, plans, planCompletions, stillnessEntries }}
+          tables={{ scriptureReads, bookReads, dailyPages, plans, planCompletions, stillnessEntries, fictionLog }}
           onClose={() => setBackupOpen(false)}
         />
       )}
@@ -2438,7 +2449,127 @@ function PlanDetail({
 // a stopword toggle. All driven by the same pure helpers in
 // src/lib/sanctuaryStats.ts — easy to test, no DOM dependencies.
 
-function WritingView({ entries }: { entries: SanctuaryEntryLite[] }) {
+// ── Fiction log (the novel) — Writing tab section ─────────────────────
+// A row = "I worked on my fiction this day" (Scrivener, longhand,
+// anywhere). The fiction itself doesn't live in Wardrobe — this only
+// witnesses the days and keeps the chain visible.
+
+function FictionSection({
+  fictionLog,
+  onChanged,
+}: {
+  fictionLog: FictionLogEntry[];
+  onChanged: () => void | Promise<void>;
+}) {
+  const todayDate = useMemo(() => new Date(), []);
+  const currentYear = todayDate.getFullYear();
+  const [year, setYear] = useState<number>(currentYear);
+  const [addOpen, setAddOpen] = useState(false);
+  const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
+
+  const byDay = useMemo(() => fictionByDate(fictionLog), [fictionLog]);
+  const summary = useMemo(() => fictionSummary(fictionLog, year, todayDate), [fictionLog, year, todayDate]);
+
+  const years = useMemo(() => {
+    const s = new Set<number>();
+    for (const d of byDay.keys()) s.add(parseInt(d.slice(0, 4), 10));
+    s.add(currentYear);
+    return Array.from(s).filter(Number.isFinite).sort((a, b) => b - a);
+  }, [byDay, currentYear]);
+
+  const grid = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const [d, day] of byDay) m.set(d, Math.max(1, day.minutes));
+    return buildHeatGrid(year, m, 'words', todayDate);
+  }, [year, byDay, todayDate]);
+
+  // Depth: any log shows; minutes (or words as a stand-in) deepen it.
+  function cellColor(cell: ReturnType<typeof buildHeatGrid>['cells'][number]): string | null {
+    const day = byDay.get(cell.date);
+    if (!day) return null;
+    const score = day.minutes + day.words / 10;
+    if (score >= 60) return 'var(--heat-5)';
+    if (score >= 30) return 'var(--heat-4)';
+    if (score > 0) return 'var(--heat-3)';
+    return 'var(--heat-2)';
+  }
+
+  return (
+    <section className="wt-section fx-section">
+      <header className="wt-section-head">
+        <h3>The novel · <em>{year}</em></h3>
+        <div className="st-head-controls">
+          <button
+            className="btn-quiet"
+            onClick={() => setAddOpen(true)}
+            title="Log a day you worked on your fiction — editing counts"
+          >
+            + log fiction
+          </button>
+          <div className="wt-year-rail">
+            {years.map((y) => (
+              <button key={y} className={y === year ? 'active' : ''} onClick={() => setYear(y)}>{y}</button>
+            ))}
+          </div>
+        </div>
+      </header>
+      <section className="wt-kpis fx-kpis">
+        <KPI label="Streak" value={summary.currentStreak.toLocaleString()} sub={summary.currentStreak === 1 ? 'day — keep the chain' : 'days — keep the chain'} />
+        <KPI label="Longest streak" value={summary.longestStreak.toLocaleString()} sub="days, all-time" />
+        <KPI label={`${year} days`} value={summary.daysThisYear.toLocaleString()} sub="worked on fiction" />
+        <KPI label="Days all-time" value={summary.daysAllTime.toLocaleString()} sub="since first log" />
+        {summary.minutesThisYear > 0 && (
+          <KPI label={`${year} time`} value={formatMinutes(summary.minutesThisYear)} sub="logged" />
+        )}
+        {summary.wordsThisYear > 0 && (
+          <KPI label={`${year} words`} value={summary.wordsThisYear.toLocaleString()} sub="logged" />
+        )}
+      </section>
+      <p className="wt-section-sub">
+        Days you touched the novel — editing counts, Scrivener counts, longhand counts.
+        A bare log is a full square; minutes and words only deepen the color.
+      </p>
+      <div className="wt-heat-wrap" onMouseLeave={() => setTip(null)}>
+        <HeatGrid
+          cells={grid.cells}
+          year={year}
+          cellColor={cellColor}
+          onHover={(cell, x, y) => {
+            if (!cell || cell.isFuture) { setTip(null); return; }
+            const day = byDay.get(cell.date);
+            if (!day) { setTip({ x, y, text: `nothing · ${cell.date}` }); return; }
+            const parts: string[] = [];
+            if (day.minutes > 0) parts.push(formatMinutes(day.minutes));
+            if (day.words > 0) parts.push(`${day.words.toLocaleString()} words`);
+            if (day.sessions > 1) parts.push(`${day.sessions} sessions`);
+            setTip({ x, y, text: `${parts.length ? parts.join(' · ') : 'worked on it'} · ${cell.date}` });
+          }}
+          onLeave={() => setTip(null)}
+        />
+        {tip && (
+          <div className="dt-tooltip" style={{ left: tip.x + 14, top: tip.y + 14 }}>{tip.text}</div>
+        )}
+      </div>
+      {addOpen && (
+        <AddFictionModal
+          fictionLog={fictionLog}
+          onClose={() => setAddOpen(false)}
+          onChanged={onChanged}
+        />
+      )}
+    </section>
+  );
+}
+
+function WritingView({
+  entries,
+  fictionLog,
+  onChanged,
+}: {
+  entries: SanctuaryEntryLite[];
+  fictionLog: FictionLogEntry[];
+  onChanged: () => void | Promise<void>;
+}) {
   const todayDate = useMemo(() => new Date(), []);
   const currentYear = todayDate.getFullYear();
   const [year, setYear] = useState<number>(currentYear);
@@ -2511,7 +2642,8 @@ function WritingView({ entries }: { entries: SanctuaryEntryLite[] }) {
 
   if (entries.length === 0) {
     return (
-      <div className="dt-panel">
+      <div className="dt-panel wt-panel">
+        <FictionSection fictionLog={fictionLog} onChanged={onChanged} />
         <div className="empty">
           No Sanctuary entries yet. Write something in the <Link to="/sanctuary">Sanctuary</Link> and your
           word count will show up here.
@@ -2522,6 +2654,8 @@ function WritingView({ entries }: { entries: SanctuaryEntryLite[] }) {
 
   return (
     <div className="dt-panel wt-panel">
+      <FictionSection fictionLog={fictionLog} onChanged={onChanged} />
+
       {/* ── KPI strip ───────────────────────────────────────────── */}
       <section className="wt-kpis">
         <KPI label="Entries" value={summary.entryCount.toLocaleString()} sub="all-time" />
@@ -2980,6 +3114,111 @@ function StillnessView({
         />
       )}
     </div>
+  );
+}
+
+// ── + Fiction log modal ──────────────────────────────────────────────
+
+function AddFictionModal({
+  fictionLog,
+  onClose,
+  onChanged,
+}: {
+  fictionLog: FictionLogEntry[];
+  onClose: () => void;
+  onChanged: () => void | Promise<void>;
+}) {
+  const [date, setDate] = useState(localToday());
+  const [minutes, setMinutes] = useState(0);
+  const [words, setWords] = useState(0);
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (saving) return;
+    setSaving(true); setErr(null);
+    try {
+      await createFictionLogEntry({ entry_date: date, minutes, words, note });
+      await onChanged();
+      onClose();
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || 'Could not save. Has migration 0016 been run?');
+      setSaving(false);
+    }
+  }
+
+  async function onDelete(id: string) {
+    try {
+      await deleteFictionLogEntry(id);
+      await onChanged();
+    } catch (e: any) {
+      console.error(e);
+      setErr(e?.message || 'Could not delete.');
+    }
+  }
+
+  return (
+    <Modal title="+ Fiction" onClose={onClose}>
+      <form className="dt-form" onSubmit={onSubmit}>
+        <div className="row">
+          <label>
+            Date
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+          </label>
+          <label>
+            Minutes (optional)
+            <input
+              type="number"
+              min={0}
+              value={minutes}
+              onChange={(e) => setMinutes(Math.max(0, Number(e.target.value) || 0))}
+            />
+          </label>
+          <label>
+            Words (optional)
+            <input
+              type="number"
+              min={0}
+              value={words}
+              onChange={(e) => setWords(Math.max(0, Number(e.target.value) || 0))}
+            />
+          </label>
+        </div>
+        <label>
+          Note (optional)
+          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="cut chapter 3's opening…" />
+        </label>
+        <p className="dt-form-hint">
+          A bare log still counts the day — editing counts, Scrivener counts, longhand counts.
+          Save the log even when the work felt small.
+        </p>
+        {err && <div className="dt-form-err">{err}</div>}
+        <ModalActions onCancel={onClose} saving={saving} />
+      </form>
+      {fictionLog.length > 0 && (
+        <div className="st-standalone-list">
+          <h4>Latest {Math.min(fictionLog.length, 8)}</h4>
+          <ul>
+            {fictionLog.slice(0, 8).map((f) => {
+              const bits = [
+                f.minutes > 0 ? formatMinutes(f.minutes) : null,
+                f.words > 0 ? `${f.words.toLocaleString()} words` : null,
+                f.note || null,
+              ].filter(Boolean).join(' · ');
+              return (
+                <li key={f.id}>
+                  <span>{f.entry_date}{bits ? ` — ${bits}` : ''}</span>
+                  <button type="button" className="x" onClick={() => onDelete(f.id)} aria-label="Delete">×</button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </Modal>
   );
 }
 

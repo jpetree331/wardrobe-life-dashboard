@@ -130,6 +130,9 @@ describe('dataExport', () => {
       stillnessEntries: [
         { id: 'st1', entry_date: '2026-05-02', listening_prayer: true, stillness_sessions: [{ start: null, end: null, minutes: 20 }], note: 'quiet' },
       ],
+      fictionLog: [
+        { id: 'fx1', entry_date: '2026-08-16', minutes: 45, words: 300, note: 'chapter 3' },
+      ],
     };
     const p = JSON.parse(buildDataBackupJson(tables, META));
     expect(p.kind).toBe('data-backup');
@@ -138,6 +141,8 @@ describe('dataExport', () => {
     expect(p.book_reads[0].id).toBe('bk');
     expect(p.counts.stillness_entries).toBe(1);
     expect(p.stillness_entries[0].id).toBe('st1');
+    expect(p.counts.fiction_log).toBe(1);
+    expect(p.fiction_log[0].id).toBe('fx1');
   });
 
   it('readable report renders counts, a books table with stars, and escapes text', () => {
@@ -150,6 +155,9 @@ describe('dataExport', () => {
       stillnessEntries: [
         { id: 'st2', entry_date: '2026-05-03', listening_prayer: false, stillness_sessions: [{ start: null, end: null, minutes: 45 }], note: 'morning <sit>' },
       ],
+      fictionLog: [
+        { id: 'fx2', entry_date: '2026-08-15', minutes: 0, words: 0, note: 'cut the <weights>' },
+      ],
     };
     const html = buildDataReadableHtml(tables, META);
     expect(html.startsWith('<!doctype html>')).toBe(true);
@@ -161,10 +169,12 @@ describe('dataExport', () => {
     expect(html).toContain('NT 90');
     expect(html).toContain('Stillness (logged apart from the journal)');
     expect(html).toContain('morning &lt;sit&gt;');
+    expect(html).toContain('Fiction work log');
+    expect(html).toContain('cut the &lt;weights&gt;');
   });
 
   it('readable report handles an empty Data room gracefully', () => {
-    const empty: DataBackupTables = { scriptureReads: [], bookReads: [], dailyPages: [], plans: [], planCompletions: [], stillnessEntries: [] };
+    const empty: DataBackupTables = { scriptureReads: [], bookReads: [], dailyPages: [], plans: [], planCompletions: [], stillnessEntries: [], fictionLog: [] };
     const html = buildDataReadableHtml(empty, META);
     expect(html).toContain('No reading recorded yet.');
   });

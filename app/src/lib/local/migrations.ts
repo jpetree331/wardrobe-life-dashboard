@@ -18,6 +18,7 @@ import m0012 from '../../../supabase/migrations/0012_notes_arrows.sql?raw';
 import m0013 from '../../../supabase/migrations/0013_notes_swatch_comment.sql?raw';
 import m0014 from '../../../supabase/migrations/0014_notes_starred.sql?raw';
 import m0015 from '../../../supabase/migrations/0015_stillness_entries.sql?raw';
+import m0016 from '../../../supabase/migrations/0016_fiction_log.sql?raw';
 
 export const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '0001_init', sql: m0001 },
@@ -35,4 +36,5 @@ export const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '0013_notes_swatch_comment', sql: m0013 },
   { name: '0014_notes_starred', sql: m0014 },
   { name: '0015_stillness_entries', sql: m0015 },
+  { name: '0016_fiction_log', sql: m0016 },
 ];

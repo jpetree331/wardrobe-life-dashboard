@@ -638,6 +638,69 @@ export async function deleteStillnessEntry(id: string): Promise<void> {
   if (error) throw error;
 }
 
+// ── Fiction-work log (migration 0016) ───────────────────────────────
+
+/**
+ * One novel-work session logged from the Writing tab — editing in
+ * Scrivener, drafting anywhere. The fiction itself does not live in
+ * Wardrobe; this only witnesses the day. Minutes/words optional.
+ */
+export type FictionLogEntry = {
+  id: string;
+  entry_date: string;    // YYYY-MM-DD
+  minutes: number;
+  words: number;
+  note: string;
+};
+
+export async function listFictionLog(): Promise<FictionLogEntry[]> {
+  const { data, error } = await supabase
+    .from('fiction_log')
+    .select('id, entry_date, minutes, words, note')
+    .order('entry_date', { ascending: false });
+  if (error) throw error;
+  return ((data || []) as Array<{
+    id: string;
+    entry_date: string;
+    minutes: number | null;
+    words: number | null;
+    note: string | null;
+  }>).map((r) => ({
+    id: r.id,
+    entry_date: r.entry_date,
+    minutes: r.minutes ?? 0,
+    words: r.words ?? 0,
+    note: r.note ?? '',
+  }));
+}
+
+export async function createFictionLogEntry(input: {
+  entry_date: string;
+  minutes: number;
+  words: number;
+  note?: string;
+}): Promise<FictionLogEntry> {
+  const userId = await currentUserId();
+  const { data, error } = await supabase
+    .from('fiction_log')
+    .insert({
+      user_id: userId,
+      entry_date: input.entry_date,
+      minutes: Math.max(0, Math.round(input.minutes)),
+      words: Math.max(0, Math.round(input.words)),
+      note: input.note?.trim() || '',
+    })
+    .select('id, entry_date, minutes, words, note')
+    .single();
+  if (error) throw error;
+  return data as FictionLogEntry;
+}
+
+export async function deleteFictionLogEntry(id: string): Promise<void> {
+  const { error } = await supabase.from('fiction_log').delete().eq('id', id);
+  if (error) throw error;
+}
+
 // ── Cross-room calendar markers ──────────────────────────────────────
 
 /**

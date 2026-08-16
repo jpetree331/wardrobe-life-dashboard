@@ -5,6 +5,7 @@
 import type {
   BookRead,
   DailyPageRead,
+  FictionLogEntry,
   PlanCompletion,
   ReadingPlan,
   ScriptureRead,
@@ -30,6 +31,8 @@ export type DataBackupTables = {
   /** Standalone stillness entries (migration 0015). Practice logged on
    *  Sanctuary entries is backed up with the Sanctuary export, not here. */
   stillnessEntries: StillnessEntry[];
+  /** Fiction-work log (migration 0016) — days the novel was touched. */
+  fictionLog: FictionLogEntry[];
 };
 
 /** Only the manually-logged scripture reads are real rows in
@@ -62,9 +65,10 @@ export function buildDataBackupJson(tables: DataBackupTables, meta: BackupMeta):
     'Complete, lossless backup of the Data room records. Each array is ' +
       'the full set of rows from its table: scripture_reads (manual logs only — ' +
       'sanctuary-tagged reads live with your Sanctuary backup), book_reads, ' +
-      'daily_page_reads, reading_plans, plan_completions, and stillness_entries ' +
+      'daily_page_reads, reading_plans, plan_completions, stillness_entries ' +
       '(standalone practice logs — practice on journal entries lives with your ' +
-      'Sanctuary backup) — exactly as stored.',
+      'Sanctuary backup), and fiction_log (days the novel was worked on) — ' +
+      'exactly as stored.',
     {
       counts: {
         scripture_reads: scripture.length,
@@ -73,6 +77,7 @@ export function buildDataBackupJson(tables: DataBackupTables, meta: BackupMeta):
         reading_plans: tables.plans.length,
         plan_completions: tables.planCompletions.length,
         stillness_entries: tables.stillnessEntries.length,
+        fiction_log: tables.fictionLog.length,
       },
       scripture_reads: scripture,
       book_reads: tables.bookReads,
@@ -80,6 +85,7 @@ export function buildDataBackupJson(tables: DataBackupTables, meta: BackupMeta):
       reading_plans: tables.plans,
       plan_completions: tables.planCompletions,
       stillness_entries: tables.stillnessEntries,
+      fiction_log: tables.fictionLog,
     },
     meta,
   );
@@ -173,6 +179,23 @@ export function buildDataReadableHtml(tables: DataBackupTables, meta: BackupMeta
           .join('')}</tbody></table></div>`
     : '';
 
+  const fiction = tables.fictionLog
+    .slice()
+    .sort((a, b) => b.entry_date.localeCompare(a.entry_date));
+  const fictionTable = fiction.length
+    ? `<div class="sheet"><h2 class="sec-title">Fiction work log</h2><table>
+        <thead><tr><th>Date</th><th>Minutes</th><th>Words</th><th>Note</th></tr></thead>
+        <tbody>${fiction
+          .map(
+            (f) =>
+              `<tr><td class="muted">${escapeHtml(f.entry_date)}</td>` +
+              `<td>${f.minutes > 0 ? f.minutes : '<span class="muted">—</span>'}</td>` +
+              `<td>${f.words > 0 ? f.words.toLocaleString() : '<span class="muted">—</span>'}</td>` +
+              `<td class="muted">${escapeHtml(f.note || '')}</td></tr>`,
+          )
+          .join('')}</tbody></table></div>`
+    : '';
+
   const plansTable = plans.length
     ? `<div class="sheet"><h2 class="sec-title">Reading plans</h2><table>
         <thead><tr><th>Plan</th><th>Span</th><th>Books</th></tr></thead>
@@ -188,7 +211,7 @@ export function buildDataReadableHtml(tables: DataBackupTables, meta: BackupMeta
 
   // Concatenate every non-empty section — NOT `a || b || c`, which would keep
   // only the first and silently drop the rest.
-  const anything = [booksTable, scriptureTable, stillnessTable, plansTable].filter(Boolean).join('\n');
+  const anything = [booksTable, scriptureTable, stillnessTable, fictionTable, plansTable].filter(Boolean).join('\n');
 
   return `<!doctype html>
 <html lang="en">

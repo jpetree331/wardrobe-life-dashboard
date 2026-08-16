@@ -30,7 +30,8 @@ export function DataBackupModal({
     tables.bookReads.length === 0 &&
     tables.dailyPages.length === 0 &&
     tables.plans.length === 0 &&
-    tables.stillnessEntries.length === 0;
+    tables.stillnessEntries.length === 0 &&
+    tables.fictionLog.length === 0;
 
   function meta(): BackupMeta {
     return { exportedAt: new Date().toISOString(), dateStr: localToday() };
@@ -60,6 +61,7 @@ export function DataBackupModal({
             <li><b>{tables.dailyPages.length}</b> daily-page logs</li>
             <li><b>{tables.plans.length}</b> reading plans <span className="muted">and their progress</span></li>
             <li><b>{tables.stillnessEntries.length}</b> stillness entries <span className="muted">(logged apart from the journal)</span></li>
+            <li><b>{tables.fictionLog.length}</b> fiction-work logs <span className="muted">(days the novel was touched)</span></li>
           </ul>
           <p className="sa-data-backup-fine">
             Scripture references you tagged in Sanctuary aren’t duplicated here — they travel with your Sanctuary backup.
