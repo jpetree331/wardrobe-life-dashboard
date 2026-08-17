@@ -2643,19 +2643,17 @@ function WritingView({
   if (entries.length === 0) {
     return (
       <div className="dt-panel wt-panel">
-        <FictionSection fictionLog={fictionLog} onChanged={onChanged} />
         <div className="empty">
           No Sanctuary entries yet. Write something in the <Link to="/sanctuary">Sanctuary</Link> and your
           word count will show up here.
         </div>
+        <FictionSection fictionLog={fictionLog} onChanged={onChanged} />
       </div>
     );
   }
 
   return (
     <div className="dt-panel wt-panel">
-      <FictionSection fictionLog={fictionLog} onChanged={onChanged} />
-
       {/* ── KPI strip ───────────────────────────────────────────── */}
       <section className="wt-kpis">
         <KPI label="Entries" value={summary.entryCount.toLocaleString()} sub="all-time" />
@@ -2804,6 +2802,8 @@ function WritingView({
           </div>
         )}
       </section>
+
+      <FictionSection fictionLog={fictionLog} onChanged={onChanged} />
     </div>
   );
 }
