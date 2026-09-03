@@ -96,6 +96,34 @@ export default function Sanctuary() {
   }, [aiVis]);
   const aiPaneRef = useRef<HTMLDivElement>(null);
   const aiHydrationKey = useRef<string | null>(null);
+  // Pane width — draggable from its left edge, persisted per device.
+  const [aiWidth, setAiWidth] = useState<number>(() => {
+    try {
+      const v = Number(window.localStorage.getItem('sa-ai-width'));
+      return Number.isFinite(v) && v >= 240 && v <= 900 ? v : 330;
+    } catch {
+      return 330;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('sa-ai-width', String(aiWidth));
+    } catch { /* best-effort */ }
+  }, [aiWidth]);
+  function startAiResize(e: React.MouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = aiWidth;
+    const onMove = (ev: MouseEvent) => {
+      setAiWidth(Math.min(900, Math.max(240, startW + (startX - ev.clientX))));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
   const [search, setSearch] = useState('');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   // The binder's tag-filter row collapses behind a ▸ toggle so a growing
@@ -1601,7 +1629,7 @@ export default function Sanctuary() {
                 onClick={() => pageRef.current && toggleClassMark(pageRef.current, 'sa-ai-text', handleEditorInput)}
                 title="Mark selection as AI text — attributed to AI, not your word count (click marked text again to unmark)"
               >
-                Ai
+                <span className="ai-mark-label">ai</span>
               </button>
               <button
                 className={`btn ai-pane-btn${aiPaneOpen ? ' on' : ''}`}
@@ -1610,7 +1638,7 @@ export default function Sanctuary() {
                 aria-pressed={aiPaneOpen}
                 title="AI dialogue pane — paste AI analysis beside the entry (AI by default; mark your own words as yours)"
               >
-                AI
+                AI ❐
               </button>
               <input
                 type="range"
@@ -1744,7 +1772,16 @@ export default function Sanctuary() {
                 unless marked as the user's own words. Veiled entries keep
                 their dialogue veiled too. */}
             {active && aiPaneOpen && !shouldShowVeil && (
-              <aside className="sa-ai-dialogue" aria-label="AI dialogue">
+              <aside className="sa-ai-dialogue" aria-label="AI dialogue" style={{ width: aiWidth, flexBasis: aiWidth }}>
+                <div
+                  className="sa-ai-resize"
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="Resize AI pane"
+                  onMouseDown={startAiResize}
+                  onDoubleClick={() => setAiWidth(330)}
+                  title="Drag to resize · double-click to reset"
+                />
                 <div className="sa-ai-dialogue-head">
                   <h3>AI dialogue</h3>
                   <button

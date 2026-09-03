@@ -1153,8 +1153,15 @@
   background: color-mix(in oklab, var(--accent) 20%, transparent);
 }
 
-/* Toolbar group: mark pen, pane toggle, visibility slider. */
-.sa-ai-group .btn.ai-mark { font-variant: small-caps; letter-spacing: 0.02em; }
+/* Toolbar group: mark pen, pane toggle, visibility slider. The mark
+   button demonstrates its own effect — lowercase with the same dotted
+   underline the mark leaves on text — so it can't be confused with the
+   AI-pane toggle. */
+.sa-ai-group .btn.ai-mark .ai-mark-label {
+  font-style: italic;
+  border-bottom: 1px dotted var(--ink-soft);
+  padding-bottom: 1px;
+}
 .sa-ai-group .btn.ai-pane-btn.on {
   color: var(--accent-strong); border-color: var(--accent-strong);
 }
@@ -1163,16 +1170,29 @@
   cursor: pointer;
 }
 
-/* The AI dialogue pane, beside the page inside the editor scroller. */
-.sa-editor-pane.with-ai { display: flex; gap: 20px; align-items: flex-start; }
+/* The AI dialogue pane, beside the page inside the editor scroller.
+   No extra margins: both cards start at the scroller's own padding, so
+   their top edges align; stretch matches their heights. */
+.sa-editor-pane.with-ai { display: flex; gap: 20px; align-items: stretch; }
 .sa-editor-pane.with-ai .sa-page { flex: 1 1 auto; min-width: 0; }
 .sa-ai-dialogue {
-  flex: 0 0 330px; width: 330px;
-  margin: 26px 18px 26px 0; padding: 18px 18px 22px;
+  flex: 0 0 330px;
+  position: relative;
+  display: flex; flex-direction: column;
+  min-height: calc(100% - 20px);
+  padding: 18px 18px 22px;
   background: var(--page, #faf4e4);
   border: 1px solid var(--line);
   border-radius: 3px;
   box-shadow: 0 1px 8px rgba(60, 48, 24, 0.08);
+}
+.sa-ai-resize {
+  position: absolute; left: -13px; top: 0; bottom: 0; width: 12px;
+  cursor: col-resize;
+}
+.sa-ai-resize:hover::after, .sa-ai-resize:active::after {
+  content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px;
+  background: var(--line-strong);
 }
 .sa-ai-dialogue-head {
   display: flex; align-items: center; gap: 8px;
@@ -1198,7 +1218,7 @@
   margin: 0 0 10px; font-size: 12px; font-style: italic; color: var(--ink-faint);
 }
 .sa-ai-editor {
-  outline: none; min-height: 30vh;
+  outline: none; flex: 1; min-height: 30vh;
   font-family: var(--sa-font-body, 'EB Garamond', serif);
   font-size: calc(var(--sa-font-size, 17px) * 0.88);
   line-height: 1.55; color: var(--ink);
