@@ -424,7 +424,7 @@ export default function Sanctuary() {
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     const onMove = (ev: MouseEvent) => {
-      const next = Math.max(240, Math.min(620, startW - (ev.clientX - startX)));
+      const next = Math.max(240, Math.min(900, startW - (ev.clientX - startX)));
       setRightWidth(next);
     };
     const onUp = () => {

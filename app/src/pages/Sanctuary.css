@@ -136,6 +136,19 @@
 .sa-binder-splitter:hover {
   background: var(--accent);
 }
+/* A visible grip at the splitter's waist, so the handle can be FOUND —
+   faint at rest, ink on hover. */
+.sa-binder-splitter::before {
+  content: '⋮';
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 15px; line-height: 1;
+  color: var(--ink-faint);
+  pointer-events: none;
+  z-index: 1;
+}
+.sa-binder-splitter:hover::before { color: var(--ink); }
 .sa-binder-splitter::after {
   /* invisible 8px hit area centred on the visible 4px line, so the user
      doesn't need pixel-perfect aim */
