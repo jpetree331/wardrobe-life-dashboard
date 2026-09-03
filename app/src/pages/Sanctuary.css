@@ -1143,14 +1143,16 @@
   border-bottom: 1px dotted color-mix(in oklab, var(--ink-faint) 65%, transparent);
 }
 .sa-grid.ai-vis-1 .sa-my-text {
-  border-bottom: 1px dotted color-mix(in oklab, var(--accent) 70%, transparent);
+  border-bottom: 1px dotted var(--accent-strong);
+  background: color-mix(in oklab, var(--accent) 11%, transparent);
 }
 .sa-grid.ai-vis-2 .sa-ai-text {
   background: color-mix(in oklab, var(--ink-faint) 16%, transparent);
   border-bottom: 1px dotted color-mix(in oklab, var(--ink-faint) 55%, transparent);
 }
 .sa-grid.ai-vis-2 .sa-my-text {
-  background: color-mix(in oklab, var(--accent) 20%, transparent);
+  background: color-mix(in oklab, var(--accent) 30%, transparent);
+  border-bottom: 1px dotted var(--accent-strong);
 }
 
 /* Toolbar group: mark pen, pane toggle, visibility slider. The mark
