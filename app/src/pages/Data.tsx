@@ -2693,6 +2693,13 @@ function WritingView({
         />
         <KPI label="Days written" value={summary.daysWritten.toLocaleString()} sub="all-time" />
         <KPI label={`${year} words`} value={summary.thisYearWords.toLocaleString()} sub={`${summary.thisYearEntries} entries`} />
+        {summary.totalAiWords > 0 && (
+          <KPI
+            label="AI words"
+            value={summary.totalAiWords.toLocaleString()}
+            sub={`attributed, not yours · ${year}: ${summary.thisYearAiWords.toLocaleString()}`}
+          />
+        )}
       </section>
 
       {/* ── Year heatmap ───────────────────────────────────────── */}
@@ -2909,6 +2916,7 @@ function StillnessView({
         tags: [],
         listening_prayer: s.listening_prayer,
         stillness_sessions: s.stillness_sessions,
+        ai_dialogue: '',
       })),
     ],
     [entries, standalone],

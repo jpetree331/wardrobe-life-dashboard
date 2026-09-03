@@ -76,6 +76,26 @@ export default function Sanctuary() {
   const [active, setActive] = useState<Entry | null>(null);
   const [mode, setMode] = useState<Mode>('single');
   const [paneTab, setPaneTab] = useState<PaneTab>('scripture');
+  // AI dialogue pane (migration 0017): opens beside the page. Text there
+  // is AI by default; sa-my-text spans mark the user's own words. The
+  // journal body has the opposite polarity (sa-ai-text marks AI pastes).
+  const [aiPaneOpen, setAiPaneOpen] = useState(false);
+  // Mark visibility slider: 0 = invisible, 1 = dotted underline, 2 = tint.
+  const [aiVis, setAiVis] = useState<number>(() => {
+    try {
+      const v = Number(window.localStorage.getItem('sa-ai-vis'));
+      return v === 0 || v === 2 ? v : 1;
+    } catch {
+      return 1;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('sa-ai-vis', String(aiVis));
+    } catch { /* best-effort */ }
+  }, [aiVis]);
+  const aiPaneRef = useRef<HTMLDivElement>(null);
+  const aiHydrationKey = useRef<string | null>(null);
   const [search, setSearch] = useState('');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   // The binder's tag-filter row collapses behind a ▸ toggle so a growing
@@ -396,7 +416,11 @@ export default function Sanctuary() {
       pageRef.current.innerHTML = active.body || '';
       bodyHydrationKey.current = active.id;
     }
-  }, [active]);
+    if (aiPaneRef.current && aiHydrationKey.current !== active.id) {
+      aiPaneRef.current.innerHTML = active.ai_dialogue || '';
+      aiHydrationKey.current = active.id;
+    }
+  }, [active, aiPaneOpen]);
 
   // Pull the day's timeline sentence
   useEffect(() => {
@@ -439,6 +463,7 @@ export default function Sanctuary() {
         setActiveId(created.id);
         titleHydrationKey.current = null;
         bodyHydrationKey.current = null;
+        aiHydrationKey.current = null;
       } catch (err) {
         console.error(err);
       }
@@ -466,7 +491,7 @@ export default function Sanctuary() {
       patch: Partial<
         Pick<Entry,
           | 'title' | 'body' | 'entry_type' | 'tags' | 'scripture_refs' | 'entry_date'
-          | 'listening_prayer' | 'stillness_sessions'
+          | 'listening_prayer' | 'stillness_sessions' | 'ai_dialogue'
         >
       >,
     ) => {
@@ -531,6 +556,7 @@ export default function Sanctuary() {
       setActiveId(created.id);
       titleHydrationKey.current = null;
       bodyHydrationKey.current = null;
+      aiHydrationKey.current = null;
     } catch (err) {
       console.error(err);
       setStatusMsg('Could not create entry.');
@@ -544,6 +570,7 @@ export default function Sanctuary() {
       await deleteEntry(active.id);
       titleHydrationKey.current = null;
       bodyHydrationKey.current = null;
+      aiHydrationKey.current = null;
       const data = await listSanctuary();
       setEntries(data);
       setActiveId(data[0]?.id || null);
@@ -743,6 +770,61 @@ export default function Sanctuary() {
       while (span.firstChild) parent.insertBefore(span.firstChild, span);
       parent.removeChild(span);
     }
+  }
+
+  // ── AI-attribution marks (sa-ai-text in the body, sa-my-text in the
+  // AI pane). Same toggle behavior as highlight: if the selection touches
+  // a marked span, unmark; otherwise wrap the selection. ─────────────────
+  function toggleClassMark(root: HTMLElement, cls: string, onInput: () => void) {
+    root.focus();
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    if (!root.contains(sel.anchorNode)) return;
+    const range = sel.getRangeAt(0);
+    // Touching an existing mark (even a collapsed caret inside one) → unmark.
+    const endpoints = [range.startContainer, range.endContainer].map((n) =>
+      n.nodeType === Node.ELEMENT_NODE ? (n as Element) : n.parentElement,
+    );
+    let touches = endpoints.some((el) => el?.closest(`span.${cls}`));
+    if (!touches && !sel.isCollapsed) {
+      for (const span of root.querySelectorAll<HTMLElement>(`span.${cls}`)) {
+        if (range.intersectsNode(span)) { touches = true; break; }
+      }
+    }
+    if (touches) {
+      const victims = new Set<HTMLElement>();
+      for (const endpoint of [range.startContainer, range.endContainer]) {
+        let n: Node | null = endpoint;
+        while (n && root.contains(n)) {
+          if (n instanceof HTMLElement && n.classList.contains(cls)) victims.add(n);
+          n = n.parentNode;
+        }
+      }
+      root.querySelectorAll<HTMLElement>(`span.${cls}`).forEach((span) => {
+        if (range.intersectsNode(span)) victims.add(span);
+      });
+      for (const span of victims) {
+        const parent = span.parentNode;
+        if (!parent) continue;
+        while (span.firstChild) parent.insertBefore(span.firstChild, span);
+        parent.removeChild(span);
+      }
+      sel.removeAllRanges();
+      onInput();
+      return;
+    }
+    if (sel.isCollapsed) return;
+    const span = document.createElement('span');
+    span.className = cls;
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+    sel.removeAllRanges();
+    onInput();
+  }
+
+  function handleAiPaneInput() {
+    if (!aiPaneRef.current) return;
+    scheduleSave({ ai_dialogue: aiPaneRef.current.innerHTML });
   }
 
   /**
@@ -1219,7 +1301,7 @@ export default function Sanctuary() {
       <div
         className={`sa-grid${mode === 'dual' ? ' dual' : ''}${
           binderCollapsed ? ' binder-collapsed' : ''
-        }${scriptureMax ? ' scripture-max' : ''}`}
+        }${scriptureMax ? ' scripture-max' : ''} ai-vis-${aiVis}`}
         style={{
           ['--sa-binder-width' as any]: `${binderWidth}px`,
           ['--sa-right-width' as any]: `${rightWidth}px`,
@@ -1512,6 +1594,37 @@ export default function Sanctuary() {
               </button>
             </div>
 
+            <div className="sa-toolbar-group sa-ai-group">
+              <button
+                className="btn ai-mark"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pageRef.current && toggleClassMark(pageRef.current, 'sa-ai-text', handleEditorInput)}
+                title="Mark selection as AI text — attributed to AI, not your word count (click marked text again to unmark)"
+              >
+                Ai
+              </button>
+              <button
+                className={`btn ai-pane-btn${aiPaneOpen ? ' on' : ''}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setAiPaneOpen((v) => !v)}
+                aria-pressed={aiPaneOpen}
+                title="AI dialogue pane — paste AI analysis beside the entry (AI by default; mark your own words as yours)"
+              >
+                AI
+              </button>
+              <input
+                type="range"
+                className="sa-ai-vis"
+                min={0}
+                max={2}
+                step={1}
+                value={aiVis}
+                onChange={(e) => setAiVis(Number(e.target.value))}
+                aria-label="AI mark visibility"
+                title="AI mark visibility — 0: invisible · 1: dotted line · 2: highlighted"
+              />
+            </div>
+
             <div className="sa-toolbar-group">
               <button className="btn" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('formatBlock', 'h2')} title="Heading">
                 H
@@ -1566,7 +1679,7 @@ export default function Sanctuary() {
           </div>
 
           <div
-            className="sa-editor-pane"
+            className={`sa-editor-pane${aiPaneOpen && active ? ' with-ai' : ''}`}
             style={{
               ['--sa-font-body' as any]: fontFamily,
               ['--sa-font-size' as any]: `${fontSize}px`,
@@ -1626,6 +1739,37 @@ export default function Sanctuary() {
                   <span style={{ fontStyle: 'italic' }}>Click + new in the binder to begin.</span>
                 </div>
               </article>
+            )}
+            {/* AI dialogue pane — inverted polarity: everything here is AI
+                unless marked as the user's own words. Veiled entries keep
+                their dialogue veiled too. */}
+            {active && aiPaneOpen && !shouldShowVeil && (
+              <aside className="sa-ai-dialogue" aria-label="AI dialogue">
+                <div className="sa-ai-dialogue-head">
+                  <h3>AI dialogue</h3>
+                  <button
+                    className="btn mine-mark"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => aiPaneRef.current && toggleClassMark(aiPaneRef.current, 'sa-my-text', handleAiPaneInput)}
+                    title="Mark selection as YOUR words — they join your writing count (click again to unmark)"
+                  >
+                    mine
+                  </button>
+                  <button className="sa-ai-close" onClick={() => setAiPaneOpen(false)} aria-label="Close AI pane">×</button>
+                </div>
+                <p className="sa-ai-dialogue-hint">
+                  Counted as AI unless you mark it as <em>mine</em>.
+                </p>
+                <div
+                  ref={aiPaneRef}
+                  className="sa-ai-editor"
+                  contentEditable
+                  suppressContentEditableWarning
+                  spellCheck
+                  onInput={handleAiPaneInput}
+                  data-placeholder="Paste AI analysis here — thread your own questions through it…"
+                />
+              </aside>
             )}
           </div>
         </section>

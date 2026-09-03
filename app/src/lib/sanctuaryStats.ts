@@ -6,11 +6,15 @@
 // over a `{ id, entry_date, title, body }` shape, so it's all unit
 // testable in isolation.
 
+import { AI_MARK_CLASS, MY_MARK_CLASS, splitByMarkedSpans } from './aiAttribution';
+
 export type EntryLike = {
   id: string;
   entry_date: string;     // YYYY-MM-DD
   title: string | null;
-  body: string;           // HTML
+  body: string;           // HTML; AI-marked spans (sa-ai-text) count as AI
+  /** AI-dialogue pane HTML; text there is AI unless marked sa-my-text. */
+  ai_dialogue?: string;
 };
 
 // ── HTML → text ──────────────────────────────────────────────────────
@@ -62,9 +66,34 @@ export function countWords(text: string): number {
   return m ? m.length : 0;
 }
 
-/** Convenience: strip HTML then count words. */
+/**
+ * The user's OWN words in an entry: the journal body minus AI-marked
+ * spans, plus any "my words" spans in the AI dialogue pane. An entry
+ * with no marks and no pane counts exactly as it always did.
+ */
 export function wordsInEntry(entry: EntryLike): number {
-  return countWords(stripHtmlToText(entry.body));
+  const body = splitByMarkedSpans(entry.body, AI_MARK_CLASS);
+  let words = countWords(stripHtmlToText(body.rest));
+  if (entry.ai_dialogue) {
+    const pane = splitByMarkedSpans(entry.ai_dialogue, MY_MARK_CLASS);
+    words += countWords(stripHtmlToText(pane.marked));
+  }
+  return words;
+}
+
+/**
+ * The AI's words in an entry: AI-marked spans in the body, plus the
+ * unmarked remainder of the AI dialogue pane. Attributed, not dropped —
+ * the excluded mass stays on the ledger.
+ */
+export function aiWordsInEntry(entry: EntryLike): number {
+  const body = splitByMarkedSpans(entry.body, AI_MARK_CLASS);
+  let words = countWords(stripHtmlToText(body.marked));
+  if (entry.ai_dialogue) {
+    const pane = splitByMarkedSpans(entry.ai_dialogue, MY_MARK_CLASS);
+    words += countWords(stripHtmlToText(pane.rest));
+  }
+  return words;
 }
 
 // ── Tokenizer + stopwords ────────────────────────────────────────────
@@ -164,7 +193,9 @@ export function topWords(
   const minLength = opts.minLength ?? 2;
   const counts = new Map<string, number>();
   for (const e of entries) {
-    const text = stripHtmlToText(e.body);
+    // AI-marked body text is excluded — the frequency chart reflects the
+    // user's own vocabulary, not a model's.
+    const text = stripHtmlToText(splitByMarkedSpans(e.body, AI_MARK_CLASS).rest);
     for (const tok of tokenize(text)) {
       if (tok.length < minLength) continue;
       if (excludeStopwords && STOPWORDS.has(tok)) continue;
@@ -253,6 +284,8 @@ export type WritingSummary = {
   daysWritten: number;        // distinct YYYY-MM-DD with at least one entry
   thisYearEntries: number;
   thisYearWords: number;
+  totalAiWords: number;       // attributed to AI (marked body + unmarked pane)
+  thisYearAiWords: number;
 };
 
 export function writingSummary(entries: EntryLike[], year: number): WritingSummary {
@@ -277,6 +310,14 @@ export function writingSummary(entries: EntryLike[], year: number): WritingSumma
       thisYearWords += r.words;
     }
   }
+  let totalAiWords = 0;
+  let thisYearAiWords = 0;
+  for (const e of entries) {
+    const ai = aiWordsInEntry(e);
+    if (ai === 0) continue;
+    totalAiWords += ai;
+    if (e.entry_date.startsWith(yearPrefix)) thisYearAiWords += ai;
+  }
   return {
     entryCount,
     totalWords,
@@ -285,5 +326,7 @@ export function writingSummary(entries: EntryLike[], year: number): WritingSumma
     daysWritten: days.size,
     thisYearEntries,
     thisYearWords,
+    totalAiWords,
+    thisYearAiWords,
   };
 }

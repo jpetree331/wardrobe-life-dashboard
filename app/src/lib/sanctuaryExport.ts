@@ -224,6 +224,16 @@ const EXPORT_CSS = `
     float: left; line-height: 0.85; padding: 6px 10px 0 0; color: var(--accent-strong);
   }
   .sa-empty-body { color: var(--ink-faint); font-style: italic; }
+  .sa-ai-block {
+    margin-top: 18px; padding: 10px 14px;
+    border-left: 2px solid var(--line); font-size: 0.9em; color: var(--ink-soft);
+  }
+  .sa-ai-block-label {
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 6px;
+  }
+  .sa-ai-text { border-bottom: 1px dotted var(--ink-faint); }
+  .sa-my-text { border-bottom: 1px dotted var(--accent, #b08c3f); }
   @media print {
     body { background: #fff; padding: 0; }
     .sa-page {
@@ -266,11 +276,17 @@ export function buildReadableHtml(entries: Entry[], meta: ExportMeta): string {
     const title = e.title && e.title.trim() ? escapeHtml(e.title) : 'Untitled';
     const bodyHtml = renderBodyHtml(e);
     const body = bodyHtml || '<p class="sa-empty-body">(no writing)</p>';
+    // AI dialogue travels with the entry, clearly set apart and labeled —
+    // it's part of the record, but never dressed as the user's writing.
+    const aiBlock = e.ai_dialogue
+      ? `<div class="sa-ai-block"><div class="sa-ai-block-label">AI dialogue</div>${e.ai_dialogue}</div>`
+      : '';
     sections.push(
       `<article class="sa-page">` +
         `<h1 class="title">${title}</h1>` +
         `<div class="meta-line">${metaLineHtml(e)}</div>` +
         `<div class="sa-body">${body}</div>` +
+        aiBlock +
         `</article>`,
     );
   }

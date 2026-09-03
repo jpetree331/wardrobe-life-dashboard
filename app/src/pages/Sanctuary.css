@@ -1133,3 +1133,77 @@
   background: var(--accent-strong); border-color: var(--accent-strong);
 }
 .sa-export-actions button:disabled { opacity: 0.4; cursor: default; }
+
+/* ── AI attribution (migration 0017) ─────────────────────────────────
+   Marks: sa-ai-text (body, AI paste) / sa-my-text (pane, user's words).
+   Visibility runs off the slider: ai-vis-0 invisible, ai-vis-1 dotted,
+   ai-vis-2 tinted. The marks always exist in the HTML; only their
+   rendering changes. */
+.sa-grid.ai-vis-1 .sa-ai-text {
+  border-bottom: 1px dotted color-mix(in oklab, var(--ink-faint) 65%, transparent);
+}
+.sa-grid.ai-vis-1 .sa-my-text {
+  border-bottom: 1px dotted color-mix(in oklab, var(--accent) 70%, transparent);
+}
+.sa-grid.ai-vis-2 .sa-ai-text {
+  background: color-mix(in oklab, var(--ink-faint) 16%, transparent);
+  border-bottom: 1px dotted color-mix(in oklab, var(--ink-faint) 55%, transparent);
+}
+.sa-grid.ai-vis-2 .sa-my-text {
+  background: color-mix(in oklab, var(--accent) 20%, transparent);
+}
+
+/* Toolbar group: mark pen, pane toggle, visibility slider. */
+.sa-ai-group .btn.ai-mark { font-variant: small-caps; letter-spacing: 0.02em; }
+.sa-ai-group .btn.ai-pane-btn.on {
+  color: var(--accent-strong); border-color: var(--accent-strong);
+}
+.sa-ai-vis {
+  width: 48px; accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* The AI dialogue pane, beside the page inside the editor scroller. */
+.sa-editor-pane.with-ai { display: flex; gap: 20px; align-items: flex-start; }
+.sa-editor-pane.with-ai .sa-page { flex: 1 1 auto; min-width: 0; }
+.sa-ai-dialogue {
+  flex: 0 0 330px; width: 330px;
+  margin: 26px 18px 26px 0; padding: 18px 18px 22px;
+  background: var(--page, #faf4e4);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  box-shadow: 0 1px 8px rgba(60, 48, 24, 0.08);
+}
+.sa-ai-dialogue-head {
+  display: flex; align-items: center; gap: 8px;
+  border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 6px;
+}
+.sa-ai-dialogue-head h3 {
+  flex: 1; margin: 0;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+.sa-ai-dialogue-head .btn.mine-mark {
+  font-size: 12px; font-style: italic; padding: 2px 10px;
+  background: transparent; border: 1px solid var(--line-strong);
+  border-radius: 3px; color: var(--ink-soft); cursor: pointer;
+}
+.sa-ai-dialogue-head .btn.mine-mark:hover { color: var(--ink); border-color: var(--ink-soft); }
+.sa-ai-close {
+  background: none; border: none; cursor: pointer;
+  color: var(--ink-faint); font-size: 16px; line-height: 1; padding: 0 4px;
+}
+.sa-ai-close:hover { color: var(--ink); }
+.sa-ai-dialogue-hint {
+  margin: 0 0 10px; font-size: 12px; font-style: italic; color: var(--ink-faint);
+}
+.sa-ai-editor {
+  outline: none; min-height: 30vh;
+  font-family: var(--sa-font-body, 'EB Garamond', serif);
+  font-size: calc(var(--sa-font-size, 17px) * 0.88);
+  line-height: 1.55; color: var(--ink);
+}
+.sa-ai-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint); font-style: italic;
+}

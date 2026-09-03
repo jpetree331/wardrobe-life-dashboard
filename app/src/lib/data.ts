@@ -538,6 +538,7 @@ export type SanctuaryEntryLite = {
   tags: string[];        // includes system tags like '_veil'
   listening_prayer: boolean;
   stillness_sessions: StillnessSession[];
+  ai_dialogue: string;   // AI pane HTML ('' when unused; migration 0017)
 };
 
 /**
@@ -549,7 +550,7 @@ export type SanctuaryEntryLite = {
 export async function listAllSanctuaryEntries(): Promise<SanctuaryEntryLite[]> {
   const { data, error } = await supabase
     .from('entries')
-    .select('id, entry_date, title, body, tags, listening_prayer, stillness_sessions')
+    .select('id, entry_date, title, body, tags, listening_prayer, stillness_sessions, ai_dialogue')
     .eq('room', 'sanctuary')
     .order('entry_date', { ascending: false });
   if (error) throw error;
@@ -561,6 +562,7 @@ export async function listAllSanctuaryEntries(): Promise<SanctuaryEntryLite[]> {
     tags: string[] | null;
     listening_prayer: boolean | null;
     stillness_sessions: StillnessSession[] | null;
+    ai_dialogue: string | null;
   }>).map((r) => ({
     id: r.id,
     entry_date: r.entry_date,
@@ -569,6 +571,7 @@ export async function listAllSanctuaryEntries(): Promise<SanctuaryEntryLite[]> {
     tags: r.tags ?? [],
     listening_prayer: !!r.listening_prayer,
     stillness_sessions: r.stillness_sessions ?? [],
+    ai_dialogue: r.ai_dialogue ?? '',
   }));
 }
 

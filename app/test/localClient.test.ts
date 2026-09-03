@@ -221,6 +221,26 @@ describe('query builder — the shapes the app actually uses', () => {
     expect(gone.length).toBe(0);
   });
 
+  it('ai_dialogue (0017) defaults empty and round-trips marked HTML', async () => {
+    const { data: created, error } = await from('entries')
+      .insert({
+        user_id: LOCAL_USER_ID, room: 'sanctuary', entry_date: '2026-08-27',
+        title: 'ai test', body: '<p>mine <span class="sa-ai-text">robot</span></p>',
+        body_type: 'rich', tags: [],
+      })
+      .select()
+      .single();
+    expect(error).toBeNull();
+    expect(created.ai_dialogue).toBe('');
+    const { data: updated } = await from('entries')
+      .update({ ai_dialogue: '<p><span class="sa-my-text">why</span> because…</p>' })
+      .eq('id', created.id)
+      .select()
+      .single();
+    expect(updated.ai_dialogue).toContain('sa-my-text');
+    await from('entries').delete().eq('id', created.id);
+  });
+
   it('fiction_log (0016) round-trips, enforces CHECKs, and deletes', async () => {
     const { data: created, error } = await from('fiction_log')
       .insert({ user_id: LOCAL_USER_ID, entry_date: '2026-08-16', minutes: 45, words: 300, note: 'ch 3' })
