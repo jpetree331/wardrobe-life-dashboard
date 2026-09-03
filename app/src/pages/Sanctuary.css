@@ -1186,14 +1186,16 @@
 
 /* The AI dialogue pane, beside the page inside the editor scroller.
    No extra margins: both cards start at the scroller's own padding, so
-   their top edges align; stretch matches their heights. */
-.sa-editor-pane.with-ai { display: flex; gap: 20px; align-items: stretch; }
+   their top edges align. The page grows with its content (never
+   clipped); the pane is STICKY — sized to the visible column and riding
+   along as a long entry scrolls, with its own internal scroll. */
+.sa-editor-pane.with-ai { display: flex; gap: 20px; align-items: flex-start; }
 .sa-editor-pane.with-ai .sa-page { flex: 1 1 auto; min-width: 0; }
 .sa-ai-dialogue {
   flex: 0 0 330px;
-  position: relative;
+  position: sticky; top: 0; /* rest position = level with the page top */
   display: flex; flex-direction: column;
-  min-height: calc(100% - 20px);
+  height: calc(100% - 20px);
   padding: 18px 18px 22px;
   background: var(--page, #faf4e4);
   border: 1px solid var(--line);
@@ -1232,7 +1234,7 @@
   margin: 0 0 10px; font-size: 12px; font-style: italic; color: var(--ink-faint);
 }
 .sa-ai-editor {
-  outline: none; flex: 1; min-height: 30vh;
+  outline: none; flex: 1; min-height: 0; overflow-y: auto;
   font-family: var(--sa-font-body, 'EB Garamond', serif);
   font-size: calc(var(--sa-font-size, 17px) * 0.88);
   line-height: 1.55; color: var(--ink);
