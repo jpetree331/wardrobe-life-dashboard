@@ -96,6 +96,24 @@ export default function Sanctuary() {
   }, [aiVis]);
   const aiPaneRef = useRef<HTMLDivElement>(null);
   const aiHydrationKey = useRef<string | null>(null);
+  // True state lights for the mark buttons: lit only while the caret or
+  // selection sits inside marked text (so "click to unmark" is visible),
+  // never as permanent decoration.
+  const [caretInAi, setCaretInAi] = useState(false);
+  const [caretInMine, setCaretInMine] = useState(false);
+  useEffect(() => {
+    const onSel = () => {
+      const sel = window.getSelection();
+      const node = sel && sel.rangeCount > 0 ? sel.anchorNode : null;
+      const el = node
+        ? node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement
+        : null;
+      setCaretInAi(Boolean(el && pageRef.current?.contains(el) && el.closest('span.sa-ai-text')));
+      setCaretInMine(Boolean(el && aiPaneRef.current?.contains(el) && el.closest('span.sa-my-text')));
+    };
+    document.addEventListener('selectionchange', onSel);
+    return () => document.removeEventListener('selectionchange', onSel);
+  }, []);
   // Pane width — draggable from its left edge, persisted per device.
   const [aiWidth, setAiWidth] = useState<number>(() => {
     try {
@@ -846,7 +864,12 @@ export default function Sanctuary() {
     span.className = cls;
     span.appendChild(range.extractContents());
     range.insertNode(span);
+    // Keep the freshly-marked text selected so a second click (a misfire,
+    // a change of mind) unmarks it immediately — no re-selecting needed.
+    const reselect = document.createRange();
+    reselect.selectNodeContents(span);
     sel.removeAllRanges();
+    sel.addRange(reselect);
     onInput();
   }
 
@@ -1624,10 +1647,12 @@ export default function Sanctuary() {
 
             <div className="sa-toolbar-group sa-ai-group">
               <button
-                className="btn ai-mark"
+                className={`btn ai-mark${caretInAi ? ' on' : ''}`}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pageRef.current && toggleClassMark(pageRef.current, 'sa-ai-text', handleEditorInput)}
-                title="Mark selection as AI text — attributed to AI, not your word count (click marked text again to unmark)"
+                title={caretInAi
+                  ? 'This text is marked as AI — click to unmark it'
+                  : 'Mark selection as AI text — attributed to AI, not your word count'}
               >
                 <span className="ai-mark-label">ai</span>
               </button>
@@ -1785,10 +1810,12 @@ export default function Sanctuary() {
                 <div className="sa-ai-dialogue-head">
                   <h3>AI dialogue</h3>
                   <button
-                    className="btn mine-mark"
+                    className={`btn mine-mark${caretInMine ? ' on' : ''}`}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => aiPaneRef.current && toggleClassMark(aiPaneRef.current, 'sa-my-text', handleAiPaneInput)}
-                    title="Mark selection as YOUR words — they join your writing count (click again to unmark)"
+                    title={caretInMine
+                      ? 'These are marked as YOUR words — click to unmark'
+                      : 'Mark selection as YOUR words — they join your writing count'}
                   >
                     mine
                   </button>

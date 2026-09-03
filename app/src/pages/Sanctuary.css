@@ -1154,13 +1154,27 @@
 }
 
 /* Toolbar group: mark pen, pane toggle, visibility slider. The mark
-   button demonstrates its own effect — lowercase with the same dotted
-   underline the mark leaves on text — so it can't be confused with the
-   AI-pane toggle. */
+   button's dotted underline (its self-demonstration) appears only on
+   hover or while the caret sits in marked text — never at rest, so it
+   can't read as a permanently-pressed state. */
 .sa-ai-group .btn.ai-mark .ai-mark-label {
   font-style: italic;
-  border-bottom: 1px dotted var(--ink-soft);
+  border-bottom: 1px dotted transparent;
   padding-bottom: 1px;
+}
+.sa-ai-group .btn.ai-mark:hover .ai-mark-label {
+  border-bottom-color: var(--ink-soft);
+}
+.sa-ai-group .btn.ai-mark.on {
+  color: var(--accent-strong); border-color: var(--accent-strong);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+.sa-ai-group .btn.ai-mark.on .ai-mark-label {
+  border-bottom-color: var(--accent-strong);
+}
+.sa-ai-dialogue-head .btn.mine-mark.on {
+  color: var(--accent-strong); border-color: var(--accent-strong);
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
 }
 .sa-ai-group .btn.ai-pane-btn.on {
   color: var(--accent-strong); border-color: var(--accent-strong);
