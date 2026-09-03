@@ -860,14 +860,41 @@ export default function Sanctuary() {
       return;
     }
     if (sel.isCollapsed) return;
-    const span = document.createElement('span');
-    span.className = cls;
-    span.appendChild(range.extractContents());
-    range.insertNode(span);
+    // Wrap every text run in the selection with its own mark span — a
+    // single span can't legally contain the <p>s of a multi-paragraph
+    // selection (the browser drops it), so per-text-node wrapping is the
+    // only shape that survives. Boundary nodes are split first so a
+    // partial selection marks exactly what was selected.
+    if (range.endContainer.nodeType === Node.TEXT_NODE && range.endOffset < (range.endContainer as Text).length) {
+      (range.endContainer as Text).splitText(range.endOffset);
+    }
+    if (range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset > 0) {
+      const tail = (range.startContainer as Text).splitText(range.startOffset);
+      range.setStart(tail, 0);
+    }
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const targets: Text[] = [];
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      const text = t as Text;
+      if (!text.data) continue;
+      if (!range.intersectsNode(text)) continue;
+      if ((text.parentElement as HTMLElement | null)?.closest(`span.${cls}`)) continue;
+      targets.push(text);
+    }
+    const made: HTMLElement[] = [];
+    for (const text of targets) {
+      const span = document.createElement('span');
+      span.className = cls;
+      text.parentNode?.insertBefore(span, text);
+      span.appendChild(text);
+      made.push(span);
+    }
+    if (made.length === 0) return;
     // Keep the freshly-marked text selected so a second click (a misfire,
     // a change of mind) unmarks it immediately — no re-selecting needed.
     const reselect = document.createRange();
-    reselect.selectNodeContents(span);
+    reselect.setStartBefore(made[0]);
+    reselect.setEndAfter(made[made.length - 1]);
     sel.removeAllRanges();
     sel.addRange(reselect);
     onInput();
