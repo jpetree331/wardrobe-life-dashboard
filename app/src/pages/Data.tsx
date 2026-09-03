@@ -2467,6 +2467,21 @@ function FictionSection({
   const [addOpen, setAddOpen] = useState(false);
   const [tip, setTip] = useState<{ x: number; y: number; text: string } | null>(null);
 
+  // Collapsed by default — the chain is visited on purpose, not staged at
+  // the door. The choice persists per device.
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('dt-fiction-open') === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('dt-fiction-open', open ? '1' : '0');
+    } catch { /* best-effort */ }
+  }, [open]);
+
   const byDay = useMemo(() => fictionByDate(fictionLog), [fictionLog]);
   const summary = useMemo(() => fictionSummary(fictionLog, year, todayDate), [fictionLog, year, todayDate]);
 
@@ -2497,22 +2512,33 @@ function FictionSection({
   return (
     <section className="wt-section fx-section">
       <header className="wt-section-head">
-        <h3>The novel · <em>{year}</em></h3>
-        <div className="st-head-controls">
-          <button
-            className="btn-quiet"
-            onClick={() => setAddOpen(true)}
-            title="Log a day you worked on your fiction — editing counts"
-          >
-            + log fiction
-          </button>
-          <div className="wt-year-rail">
-            {years.map((y) => (
-              <button key={y} className={y === year ? 'active' : ''} onClick={() => setYear(y)}>{y}</button>
-            ))}
+        <button
+          className="fx-disclose"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          title={open ? 'Hide the fiction log' : 'Show the fiction log'}
+        >
+          <span className="fx-arrow">{open ? '▾' : '▸'}</span>
+          <h3>The novel{open && <> · <em>{year}</em></>}</h3>
+        </button>
+        {open && (
+          <div className="st-head-controls">
+            <button
+              className="btn-quiet"
+              onClick={() => setAddOpen(true)}
+              title="Log a day you worked on your fiction — editing counts"
+            >
+              + log fiction
+            </button>
+            <div className="wt-year-rail">
+              {years.map((y) => (
+                <button key={y} className={y === year ? 'active' : ''} onClick={() => setYear(y)}>{y}</button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </header>
+      {open && (<>
       <section className="wt-kpis fx-kpis">
         <KPI label="Streak" value={summary.currentStreak.toLocaleString()} sub={summary.currentStreak === 1 ? 'day — keep the chain' : 'days — keep the chain'} />
         <KPI label="Longest streak" value={summary.longestStreak.toLocaleString()} sub="days, all-time" />
@@ -2550,6 +2576,7 @@ function FictionSection({
           <div className="dt-tooltip" style={{ left: tip.x + 14, top: tip.y + 14 }}>{tip.text}</div>
         )}
       </div>
+      </>)}
       {addOpen && (
         <AddFictionModal
           fictionLog={fictionLog}
