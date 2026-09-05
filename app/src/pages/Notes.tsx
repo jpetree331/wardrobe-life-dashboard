@@ -4384,7 +4384,16 @@ function DocumentTile({
       </button>
       {mode === 'icon' ? (
         <>
-          <div className="doc-glyph" />
+          {/* A proper line icon: sheet with a folded corner and text
+              rules — stroke-drawn, no frame, no drop shadow. */}
+          <svg className="doc-glyph" viewBox="0 0 40 50" aria-hidden="true">
+            <path d="M4 2 h22 l10 10 v36 h-32 z" fill="var(--page)" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+            <path d="M26 2 v10 h10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+            <line x1="10" y1="20" x2="30" y2="20" stroke="currentColor" strokeWidth="1.6" />
+            <line x1="10" y1="27" x2="30" y2="27" stroke="currentColor" strokeWidth="1.6" />
+            <line x1="10" y1="34" x2="30" y2="34" stroke="currentColor" strokeWidth="1.6" />
+            <line x1="10" y1="41" x2="22" y2="41" stroke="currentColor" strokeWidth="1.6" />
+          </svg>
           <div className="doc-title">{payload.title || 'Untitled document'}</div>
         </>
       ) : (
