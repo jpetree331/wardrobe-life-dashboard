@@ -3765,13 +3765,16 @@ function CardView({
   onOpenLink: () => void;
 }) {
   const chromeless = card.type === 'heading' || card.type === 'board';
+  const documentIcon = card.type === 'document' && ((card.payload as { mode?: string }).mode || 'icon') === 'icon';
   const baseStyle: CSSProperties = {
     left: card.x,
     top: card.y,
     width: card.w ?? undefined,
     // Heading/board auto-size; columns auto-height from their members.
     height: chromeless || card.type === 'column' ? undefined : card.h ?? undefined,
-    background: chromeless || card.type === 'column' ? undefined : `var(--c-${card.color})`,
+    background: chromeless || documentIcon || card.type === 'column' ? undefined : `var(--c-${card.color})`,
+    // In icon mode the chosen color belongs to the sheet, not its container.
+    ...(documentIcon ? { '--doc-paper': `var(--c-${card.color})` } : {}),
     zIndex: card.z || undefined,
   };
 
@@ -3783,7 +3786,7 @@ function CardView({
 
   return (
     <div
-      className={`nt-card type-${card.type}${selected ? ' selected' : ''}${dropActive ? ' col-drop-active' : ''}${resolved ? ' resolved' : ''}${dragging ? ' dragging' : ''}${boardCharge ? ' board-charge' : ''}`}
+      className={`nt-card type-${card.type}${documentIcon ? ' document-icon' : ''}${selected ? ' selected' : ''}${dropActive ? ' col-drop-active' : ''}${resolved ? ' resolved' : ''}${dragging ? ' dragging' : ''}${boardCharge ? ' board-charge' : ''}`}
       data-card-id={card.id}
       style={baseStyle}
       onMouseDown={onMouseDown}
@@ -4384,11 +4387,10 @@ function DocumentTile({
       </button>
       {mode === 'icon' ? (
         <>
-          {/* A proper line icon: sheet with a folded corner and text
-              rules — stroke-drawn, no frame, no drop shadow. */}
+          {/* The sheet itself is the icon; the canvas wrapper has no frame. */}
           <svg className="doc-glyph" viewBox="0 0 40 50" aria-hidden="true">
-            <path d="M4 2 h22 l10 10 v36 h-32 z" fill="var(--page)" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-            <path d="M26 2 v10 h10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+            <path d="M4 2 h22 l10 10 v36 h-32 z" fill="var(--doc-paper, var(--c-paper))" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            <path d="M26 2 v10 h10 z" fill="var(--bg-3)" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
             <line x1="10" y1="20" x2="30" y2="20" stroke="currentColor" strokeWidth="1.6" />
             <line x1="10" y1="27" x2="30" y2="27" stroke="currentColor" strokeWidth="1.6" />
             <line x1="10" y1="34" x2="30" y2="34" stroke="currentColor" strokeWidth="1.6" />
