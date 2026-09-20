@@ -7,6 +7,7 @@ import type {
   DailyPageRead,
   FictionLogEntry,
   PlanCompletion,
+  PlanDayCompletion,
   ReadingPlan,
   ScriptureRead,
   StillnessEntry,
@@ -33,6 +34,8 @@ export type DataBackupTables = {
   stillnessEntries: StillnessEntry[];
   /** Fiction-work log (migration 0016) — days the novel was touched. */
   fictionLog: FictionLogEntry[];
+  /** Scheduled-plan checkmarks (migration 0018), keyed by plan day. */
+  planDayCompletions: PlanDayCompletion[];
 };
 
 /** Only the manually-logged scripture reads are real rows in
@@ -67,7 +70,8 @@ export function buildDataBackupJson(tables: DataBackupTables, meta: BackupMeta):
       'sanctuary-tagged reads live with your Sanctuary backup), book_reads, ' +
       'daily_page_reads, reading_plans, plan_completions, stillness_entries ' +
       '(standalone practice logs — practice on journal entries lives with your ' +
-      'Sanctuary backup), and fiction_log (days the novel was worked on) — ' +
+      'Sanctuary backup), fiction_log (days the novel was worked on), and ' +
+      'plan_day_completions (scheduled-plan checkmarks, keyed by plan day) — ' +
       'exactly as stored.',
     {
       counts: {
@@ -78,6 +82,7 @@ export function buildDataBackupJson(tables: DataBackupTables, meta: BackupMeta):
         plan_completions: tables.planCompletions.length,
         stillness_entries: tables.stillnessEntries.length,
         fiction_log: tables.fictionLog.length,
+        plan_day_completions: tables.planDayCompletions.length,
       },
       scripture_reads: scripture,
       book_reads: tables.bookReads,
@@ -86,6 +91,7 @@ export function buildDataBackupJson(tables: DataBackupTables, meta: BackupMeta):
       plan_completions: tables.planCompletions,
       stillness_entries: tables.stillnessEntries,
       fiction_log: tables.fictionLog,
+      plan_day_completions: tables.planDayCompletions,
     },
     meta,
   );

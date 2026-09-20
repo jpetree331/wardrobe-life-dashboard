@@ -241,6 +241,50 @@ describe('query builder — the shapes the app actually uses', () => {
     await from('entries').delete().eq('id', created.id);
   });
 
+  it('scheduled plans (0018): preset_key column + per-DAY completions allow repeats', async () => {
+    const { data: plan, error } = await from('data_reading_plans')
+      .insert({
+        user_id: LOCAL_USER_ID, name: 'One-Year', books: ['Psalms'],
+        start_date: '2026-01-01', end_date: '2026-12-31',
+        days_of_week: [0, 1, 2, 3, 4, 5, 6], unit: 'chapters', per_session: 4,
+        preset_key: 'one-year-bible-4track',
+      })
+      .select()
+      .single();
+    expect(error).toBeNull();
+    expect(plan.preset_key).toBe('one-year-bible-4track');
+    // Psalm 2 on day 2 AND day 364 — both must be storable.
+    const ins = await from('data_plan_day_completions').insert([
+      { user_id: LOCAL_USER_ID, plan_id: plan.id, day_number: 2, book: 'Psalms', chapter: 2 },
+      { user_id: LOCAL_USER_ID, plan_id: plan.id, day_number: 364, book: 'Psalms', chapter: 2 },
+    ]);
+    expect(ins.error).toBeNull();
+    // …but the same reading on the same day is unique.
+    const dup = await from('data_plan_day_completions')
+      .insert({ user_id: LOCAL_USER_ID, plan_id: plan.id, day_number: 2, book: 'Psalms', chapter: 2 });
+    expect(dup.error).not.toBeNull();
+    // clearPlanDay shape: delete by plan + day.
+    await from('data_plan_day_completions').delete().eq('plan_id', plan.id).eq('day_number', 2);
+    const { data: left } = await from('data_plan_day_completions').select('day_number').eq('plan_id', plan.id);
+    expect(left.map((r: { day_number: number }) => r.day_number)).toEqual([364]);
+    // Deleting the plan cascades its checkmarks.
+    await from('data_reading_plans').delete().eq('id', plan.id);
+    const { data: gone } = await from('data_plan_day_completions').select('id').eq('plan_id', plan.id);
+    expect(gone.length).toBe(0);
+    // A classic plan (no preset_key named) still inserts.
+    const classic = await from('data_reading_plans')
+      .insert({
+        user_id: LOCAL_USER_ID, name: 'Classic', books: ['John'],
+        start_date: '2026-01-01', end_date: '2026-01-21',
+        days_of_week: [0, 1, 2, 3, 4, 5, 6], unit: 'chapters', per_session: 1,
+      })
+      .select()
+      .single();
+    expect(classic.error).toBeNull();
+    expect(classic.data.preset_key).toBeNull();
+    await from('data_reading_plans').delete().eq('id', classic.data.id);
+  });
+
   it('fiction_log (0016) round-trips, enforces CHECKs, and deletes', async () => {
     const { data: created, error } = await from('fiction_log')
       .insert({ user_id: LOCAL_USER_ID, entry_date: '2026-08-16', minutes: 45, words: 300, note: 'ch 3' })

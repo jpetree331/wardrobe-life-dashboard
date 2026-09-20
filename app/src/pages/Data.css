@@ -1360,6 +1360,85 @@
 .plan-chap.done:hover { background: var(--heat-4); }
 .plan-chap.busy { opacity: 0.5; cursor: wait; }
 
+/* ── Scheduled plans (fixed day-by-day schedules) ─────────────────── */
+.sp-today { border-left: 3px solid var(--accent); }
+.sp-today-date {
+  font-family: 'EB Garamond', serif; font-style: italic; font-weight: 400;
+  font-size: 14px; color: var(--ink-faint); margin-left: 8px; letter-spacing: 0;
+}
+.sp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sp-chip {
+  font-family: 'EB Garamond', serif; font-size: 14px;
+  padding: 4px 11px 4px 9px;
+  background: var(--bg-2); color: var(--ink-soft);
+  border: 1px solid var(--line); border-left-width: 3px;
+  border-radius: 2px; cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+.sp-chip:hover { background: color-mix(in oklab, var(--bg-2) 60%, var(--accent) 40%); color: var(--ink); }
+/* The plan's four columns, told apart by the chip's left edge. */
+.sp-chip.track-history  { border-left-color: #8a6d3b; }
+.sp-chip.track-prophets { border-left-color: #6b5b8a; }
+.sp-chip.track-nt       { border-left-color: #a05030; }
+.sp-chip.track-psalm    { border-left-color: #2f5d3a; }
+.sp-chip.done {
+  background: var(--heat-5); color: var(--bg);
+  border-color: var(--heat-5);
+}
+.sp-chip.done:hover { background: var(--heat-4); border-color: var(--heat-4); color: var(--bg); }
+.sp-today .sp-chip { font-size: 16px; padding: 7px 16px 7px 13px; }
+
+.sp-catchup { margin: 10px 0 0; }
+.sp-link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: inherit; color: var(--accent-strong, var(--ink));
+  text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.sp-link:hover { color: var(--ink); }
+.sp-link:disabled { opacity: 0.5; cursor: wait; }
+
+.sp-months { display: flex; flex-direction: column; gap: 2px; margin-top: 10px; }
+.sp-month-head {
+  width: 100%; display: flex; align-items: baseline; gap: 8px;
+  background: none; border: none; border-bottom: 1px solid var(--line);
+  padding: 8px 2px; cursor: pointer; text-align: left; color: inherit;
+}
+.sp-month-head:hover .sp-month-name { color: var(--ink); }
+.sp-arrow { font-size: 11px; color: var(--ink-faint); width: 12px; }
+.sp-month-name {
+  font-family: 'Cormorant Garamond', serif; font-size: 17px;
+  color: var(--ink-soft); letter-spacing: 0.03em; flex: 1;
+}
+.sp-month-count {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  color: var(--ink-faint); font-variant-numeric: tabular-nums;
+}
+.sp-days { display: flex; flex-direction: column; padding: 4px 0 10px; }
+.sp-day {
+  display: grid; grid-template-columns: 132px 1fr; gap: 12px;
+  align-items: center; padding: 5px 6px; border-radius: 2px;
+}
+.sp-day.today { background: color-mix(in oklab, var(--accent) 13%, transparent); }
+.sp-day.full .sp-day-label { opacity: 0.55; }
+.sp-day-label {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  background: none; border: none; padding: 0; cursor: pointer; text-align: left; color: inherit;
+}
+.sp-day-label:hover .sp-day-num { color: var(--ink); text-decoration: underline dotted; text-underline-offset: 3px; }
+.sp-day-num {
+  font-family: 'Cormorant Garamond', serif; font-size: 15px; color: var(--ink-soft);
+}
+.sp-day-date {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--ink-faint);
+}
+.preset-chip.active {
+  color: var(--ink); border-color: var(--ink);
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+}
+@media (max-width: 640px) {
+  .sp-day { grid-template-columns: 1fr; gap: 4px; }
+}
+
 /* ── Plan create modal extras ─────────────────────────────────────── */
 .preset-strip {
   display: flex; flex-wrap: wrap; gap: 6px;

@@ -60,8 +60,23 @@ export type ReadingPlan = {
   days_of_week: number[];
   unit: 'chapters' | 'verses';
   per_session: number;
+  /** Set for SCHEDULED plans (migration 0018): the key of a fixed
+   *  day-by-day schedule in lib/scheduledPlans.ts. Null/absent = classic. */
+  preset_key?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+/** One checked-off reading of a scheduled plan, keyed by DAY as well as
+ *  (book, chapter) because scheduled plans repeat chapters. */
+export type PlanDayCompletion = {
+  id: string;
+  user_id: string;
+  plan_id: string;
+  day_number: number;
+  book: string;
+  chapter: number;
+  completed_at: string;
 };
 
 export type PlanCompletion = {
@@ -405,20 +420,25 @@ export async function createReadingPlan(input: {
   days_of_week: number[];
   unit?: 'chapters' | 'verses';
   per_session?: number;
+  preset_key?: string | null;
 }): Promise<ReadingPlan> {
   const userId = await currentUserId();
+  const row: Record<string, unknown> = {
+    user_id: userId,
+    name: input.name,
+    books: input.books,
+    start_date: input.start_date,
+    end_date: input.end_date,
+    days_of_week: input.days_of_week,
+    unit: input.unit ?? 'chapters',
+    per_session: input.per_session ?? 1,
+  };
+  // Only name the column when it's used, so classic plans still save on a
+  // database that hasn't run migration 0018 yet.
+  if (input.preset_key) row.preset_key = input.preset_key;
   const { data, error } = await supabase
     .from('data_reading_plans')
-    .insert({
-      user_id: userId,
-      name: input.name,
-      books: input.books,
-      start_date: input.start_date,
-      end_date: input.end_date,
-      days_of_week: input.days_of_week,
-      unit: input.unit ?? 'chapters',
-      per_session: input.per_session ?? 1,
-    })
+    .insert(row)
     .select()
     .single();
   if (error) throw error;
@@ -521,6 +541,95 @@ export async function togglePlanCompletion(
     throw error;
   }
   return { created: true };
+}
+
+// ── Scheduled-plan day completions (migration 0018) ─────────────────
+
+export async function listAllPlanDayCompletions(): Promise<PlanDayCompletion[]> {
+  const { data, error } = await supabase
+    .from('data_plan_day_completions')
+    .select('*')
+    .order('day_number', { ascending: true });
+  if (error) throw error;
+  return (data || []) as PlanDayCompletion[];
+}
+
+/** Check or uncheck ONE reading on ONE day of a scheduled plan. */
+export async function togglePlanDayCompletion(
+  planId: string,
+  dayNumber: number,
+  book: string,
+  chapter: number,
+): Promise<{ created: boolean }> {
+  const userId = await currentUserId();
+  const { data: existing, error: selErr } = await supabase
+    .from('data_plan_day_completions')
+    .select('id')
+    .eq('plan_id', planId)
+    .eq('day_number', dayNumber)
+    .eq('book', book)
+    .eq('chapter', chapter)
+    .maybeSingle();
+  if (selErr) throw selErr;
+  if (existing) {
+    const { error } = await supabase
+      .from('data_plan_day_completions')
+      .delete()
+      .eq('id', existing.id);
+    if (error) throw error;
+    return { created: false };
+  }
+  const { error } = await supabase
+    .from('data_plan_day_completions')
+    .insert({ user_id: userId, plan_id: planId, day_number: dayNumber, book, chapter });
+  if (error) {
+    if ((error as { code?: string })?.code === '23505') return { created: true };
+    throw error;
+  }
+  return { created: true };
+}
+
+/**
+ * Mark many readings complete at once (a whole day, or "everything before
+ * today"). Rows that already exist are skipped client-side, because one
+ * duplicate would fail the whole batch on the unique constraint. Returns
+ * how many rows were actually inserted.
+ */
+export async function markPlanDayReadings(
+  planId: string,
+  readings: Array<{ day_number: number; book: string; chapter: number }>,
+): Promise<number> {
+  if (readings.length === 0) return 0;
+  const userId = await currentUserId();
+  const { data: existing, error: selErr } = await supabase
+    .from('data_plan_day_completions')
+    .select('day_number, book, chapter')
+    .eq('plan_id', planId);
+  if (selErr) throw selErr;
+  const have = new Set(
+    ((existing || []) as Array<{ day_number: number; book: string; chapter: number }>)
+      .map((r) => `${r.day_number}|${r.book}|${r.chapter}`),
+  );
+  const rows = readings
+    .filter((r) => !have.has(`${r.day_number}|${r.book}|${r.chapter}`))
+    .map((r) => ({ user_id: userId, plan_id: planId, ...r }));
+  for (let i = 0; i < rows.length; i += 400) {
+    const { error } = await supabase
+      .from('data_plan_day_completions')
+      .insert(rows.slice(i, i + 400));
+    if (error) throw error;
+  }
+  return rows.length;
+}
+
+/** Uncheck every reading on one day of a scheduled plan. */
+export async function clearPlanDay(planId: string, dayNumber: number): Promise<void> {
+  const { error } = await supabase
+    .from('data_plan_day_completions')
+    .delete()
+    .eq('plan_id', planId)
+    .eq('day_number', dayNumber);
+  if (error) throw error;
 }
 
 // ── Sanctuary entries (Writing-stats data source) ───────────────────

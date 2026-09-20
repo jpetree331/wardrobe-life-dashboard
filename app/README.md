@@ -26,7 +26,7 @@ You'll be redirected to `/login` — enter your email, click the link in the ema
 ## One-time Supabase setup
 
 1. Open the Supabase SQL Editor at https://supabase.com/dashboard/project/_/sql
-2. Run **every file in `supabase/migrations/` in numeric order** (`0001` → `0017`). They're all idempotent — safe to re-run. The app fails loudly (a red status bar in the Notes room) if it detects a missing migration, but save yourself the trip:
+2. Run **every file in `supabase/migrations/` in numeric order** (`0001` → `0018`). They're all idempotent — safe to re-run. The app fails loudly (a red status bar in the Notes room) if it detects a missing migration, but save yourself the trip:
 
    | Migration | Adds |
    |---|---|
@@ -47,6 +47,7 @@ You'll be redirected to `/login` — enter your email, click the link in the ema
    | `0015_stillness_entries.sql` | Standalone stillness entries (Data room, apart from the journal) |
    | `0016_fiction_log.sql` | Fiction-work log (Data room Writing tab — days the novel was touched) |
    | `0017_ai_dialogue.sql` | AI dialogue pane on Sanctuary entries (AI-attributed word counts) |
+   | `0018_scheduled_plans.sql` | Scheduled reading plans — fixed day-by-day schedules (One-Year Bible), per-day checkmarks |
 
 3. Confirm under Authentication → Providers that **Email** is enabled (it is, by default — magic links are on by default).
 

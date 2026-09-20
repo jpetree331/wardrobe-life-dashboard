@@ -14,6 +14,7 @@ import {
   listFictionLog,
   listStillnessEntries,
   listAllPlanCompletions,
+  listAllPlanDayCompletions,
   listAllScriptureReads,
   listAllSanctuaryEntries,
   listBookReads,
@@ -27,6 +28,7 @@ import {
   type BookRead,
   type DailyPageRead,
   type PlanCompletion,
+  type PlanDayCompletion,
   type ReadingPlan,
   type FictionLogEntry,
   type SanctuaryEntryLite,
@@ -34,6 +36,8 @@ import {
   type StillnessEntry,
 } from '../lib/data';
 import { fictionByDate, fictionSummary } from '../lib/fictionLog';
+import { SCHEDULED_PLANS, scheduledEndDate, scheduledPlanByKey } from '../lib/scheduledPlans';
+import { ScheduledPlanCard, ScheduledPlanDetail } from '../components/ScheduledPlanViews';
 import {
   monthlyWordTotals,
   perEntryStats,
@@ -131,6 +135,7 @@ export default function Data() {
   const [dailyPages, setDailyPages] = useState<DailyPageRead[]>([]);
   const [plans, setPlans] = useState<ReadingPlan[]>([]);
   const [planCompletions, setPlanCompletions] = useState<PlanCompletion[]>([]);
+  const [planDayCompletions, setPlanDayCompletions] = useState<PlanDayCompletion[]>([]);
   const [sanctuaryDates, setSanctuaryDates] = useState<Set<string>>(new Set());
   const [sanctuaryEntries, setSanctuaryEntries] = useState<SanctuaryEntryLite[]>([]);
   const [stillnessEntries, setStillnessEntries] = useState<StillnessEntry[]>([]);
@@ -163,7 +168,7 @@ export default function Data() {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, b, dp, p, pc, sd, td, se, st, fl] = await Promise.all([
+      const [s, b, dp, p, pc, sd, td, se, st, fl, pdc] = await Promise.all([
         listAllScriptureReads(),
         listBookReads(),
         listDailyPageReads(),
@@ -182,6 +187,10 @@ export default function Data() {
           console.error('fiction_log unavailable (run migration 0016?):', err);
           return [] as FictionLogEntry[];
         }),
+        listAllPlanDayCompletions().catch((err) => {
+          console.error('data_plan_day_completions unavailable (run migration 0018?):', err);
+          return [] as PlanDayCompletion[];
+        }),
       ]);
       setScriptureReads(s);
       setBookReads(b);
@@ -193,6 +202,7 @@ export default function Data() {
       setSanctuaryEntries(se);
       setStillnessEntries(st);
       setFictionLog(fl);
+      setPlanDayCompletions(pdc);
       setLoaded(true);
       const dpPagesTotal = dp.reduce((sum, r) => sum + r.pages, 0);
       setStatusMsg(
@@ -267,6 +277,7 @@ export default function Data() {
           <PlansView
             plans={plans}
             completions={planCompletions}
+            dayCompletions={planDayCompletions}
             onChanged={refresh}
           />
         ) : tab === 'writing' ? (
@@ -285,7 +296,7 @@ export default function Data() {
 
       {backupOpen && (
         <DataBackupModal
-          tables={{ scriptureReads, bookReads, dailyPages, plans, planCompletions, stillnessEntries, fictionLog }}
+          tables={{ scriptureReads, bookReads, dailyPages, plans, planCompletions, stillnessEntries, fictionLog, planDayCompletions }}
           onClose={() => setBackupOpen(false)}
         />
       )}
@@ -2172,15 +2183,29 @@ const PLAN_PRESETS: PlanPreset[] = [
 function PlansView({
   plans,
   completions,
+  dayCompletions,
   onChanged,
 }: {
   plans: ReadingPlan[];
   completions: PlanCompletion[];
+  dayCompletions: PlanDayCompletion[];
   onChanged: () => Promise<void> | void;
 }) {
   const today = useMemo(() => new Date(), []);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  // When set, the create modal opens straight into a scheduled plan.
+  const [createScheduledKey, setCreateScheduledKey] = useState<string | null>(null);
+
+  // Scheduled plans (fixed day-by-day schedules) track completion per day.
+  const dayCompletionsByPlan = useMemo(() => {
+    const out = new Map<string, PlanDayCompletion[]>();
+    for (const c of dayCompletions) {
+      if (!out.has(c.plan_id)) out.set(c.plan_id, []);
+      out.get(c.plan_id)!.push(c);
+    }
+    return out;
+  }, [dayCompletions]);
 
   // Group completions by plan_id for fast lookup.
   const completionsByPlan = useMemo(() => {
@@ -2193,6 +2218,20 @@ function PlansView({
   }, [completions]);
 
   const selectedPlan = selectedId ? plans.find((p) => p.id === selectedId) : null;
+
+  const selectedDef = selectedPlan ? scheduledPlanByKey(selectedPlan.preset_key) : null;
+  if (selectedPlan && selectedDef) {
+    return (
+      <ScheduledPlanDetail
+        plan={selectedPlan}
+        def={selectedDef}
+        completions={dayCompletionsByPlan.get(selectedPlan.id) || []}
+        today={today}
+        onBack={() => setSelectedId(null)}
+        onChanged={onChanged}
+      />
+    );
+  }
 
   if (selectedPlan) {
     return (
@@ -2222,6 +2261,17 @@ function PlansView({
 
       {plans.length === 0 ? (
         <div className="presets-grid">
+          {SCHEDULED_PLANS.map((sp) => (
+            <button
+              key={sp.key}
+              className="preset-card"
+              onClick={() => { setCreateScheduledKey(sp.key); setCreating(true); }}
+              title={`Start the ${sp.name} plan`}
+            >
+              <div className="preset-name">{sp.name}</div>
+              <div className="preset-desc">{sp.description}</div>
+            </button>
+          ))}
           {PLAN_PRESETS.map((preset) => (
             <button
               key={preset.key}
@@ -2236,24 +2286,38 @@ function PlansView({
         </div>
       ) : (
         <div className="plans-grid">
-          {plans.map((p) => (
-            <PlanCard
-              key={p.id}
-              plan={p}
-              completions={completionsByPlan.get(p.id) || []}
-              today={today}
-              onClick={() => setSelectedId(p.id)}
-            />
-          ))}
+          {plans.map((p) => {
+            const def = scheduledPlanByKey(p.preset_key);
+            return def ? (
+              <ScheduledPlanCard
+                key={p.id}
+                plan={p}
+                def={def}
+                completions={dayCompletionsByPlan.get(p.id) || []}
+                today={today}
+                onClick={() => setSelectedId(p.id)}
+              />
+            ) : (
+              <PlanCard
+                key={p.id}
+                plan={p}
+                completions={completionsByPlan.get(p.id) || []}
+                today={today}
+                onClick={() => setSelectedId(p.id)}
+              />
+            );
+          })}
         </div>
       )}
 
       {creating && (
         <PlanCreateModal
           today={today}
-          onClose={() => setCreating(false)}
+          initialScheduledKey={createScheduledKey}
+          onClose={() => { setCreating(false); setCreateScheduledKey(null); }}
           onSaved={async (newId) => {
             setCreating(false);
+            setCreateScheduledKey(null);
             await onChanged();
             setSelectedId(newId);
           }}
@@ -3375,13 +3439,59 @@ function AddStillnessModal({
 
 function PlanCreateModal({
   today,
+  initialScheduledKey = null,
   onClose,
   onSaved,
 }: {
   today: Date;
+  initialScheduledKey?: string | null;
   onClose: () => void;
   onSaved: (newId: string) => void;
 }) {
+  // Scheduled mode: a fixed day-by-day schedule (no book picker, no pace
+  // knobs — just a name and the day Day 1 falls on).
+  const [scheduledKey, setScheduledKey] = useState<string | null>(initialScheduledKey);
+  const scheduledDef = scheduledPlanByKey(scheduledKey);
+  const [schedName, setSchedName] = useState(scheduledDef?.name ?? '');
+  const [schedStart, setSchedStart] = useState(formatLocalDate(today));
+
+  function pickScheduled(key: string) {
+    const def = scheduledPlanByKey(key);
+    if (!def) return;
+    setScheduledKey(key);
+    setSchedName(def.name);
+    setErr(null);
+  }
+
+  async function onSubmitScheduled(e: FormEvent) {
+    e.preventDefault();
+    if (saving || !scheduledDef) return;
+    setErr(null);
+    if (!schedName.trim()) { setErr('Name required.'); return; }
+    if (!schedStart) { setErr('Pick a start date.'); return; }
+    setSaving(true);
+    try {
+      const inPlan = new Set<string>();
+      for (const day of scheduledDef.days) for (const r of day) inPlan.add(r.book);
+      const created = await createReadingPlan({
+        name: schedName.trim(),
+        books: BIBLE_BOOKS.filter((b) => inPlan.has(b)), // canonical order
+        start_date: schedStart,
+        end_date: scheduledEndDate(schedStart, scheduledDef.days.length),
+        days_of_week: [0, 1, 2, 3, 4, 5, 6],
+        unit: 'chapters',
+        per_session: 4,
+        preset_key: scheduledDef.key,
+      });
+      onSaved(created.id);
+    } catch (e: any) {
+      console.error(e);
+      const msg: string = e?.message || 'Could not save.';
+      setErr(/preset_key/.test(msg) ? 'Could not save — run migration 0018 in Supabase first.' : msg);
+      setSaving(false);
+    }
+  }
+
   // Default to the Bible-in-a-Year preset's shape.
   const initial = PLAN_PRESETS[0].build(today);
   const [name, setName] = useState(initial.name);
@@ -3403,6 +3513,7 @@ function PlanCreateModal({
   const [derived, setDerived] = useState<'per_session' | 'end_date'>('per_session');
 
   function applyPreset(p: PlanPreset) {
+    setScheduledKey(null); // back to the classic builder
     const built = p.build(today);
     setName(built.name);
     setBooks(new Set(built.books));
@@ -3494,22 +3605,83 @@ function PlanCreateModal({
     }
   }
 
+  const presetStrip = (
+    <div className="preset-strip">
+      {SCHEDULED_PLANS.map((sp) => (
+        <button
+          key={sp.key}
+          type="button"
+          className={`preset-chip${scheduledKey === sp.key ? ' active' : ''}`}
+          onClick={() => pickScheduled(sp.key)}
+          title={sp.description}
+        >
+          {sp.name}
+        </button>
+      ))}
+      {PLAN_PRESETS.map((p) => (
+        <button
+          key={p.key}
+          type="button"
+          className="preset-chip"
+          onClick={() => applyPreset(p)}
+          title={p.description}
+        >
+          {p.name}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (scheduledDef) {
+    const jan1 = `${today.getFullYear()}-01-01`;
+    return (
+      <Modal title="+ Reading plan" onClose={onClose}>
+        <form className="dt-form" onSubmit={onSubmitScheduled}>
+          {presetStrip}
+          <p className="dt-form-hint" style={{ marginTop: 0 }}>{scheduledDef.description}</p>
+          <label>
+            Name
+            <input type="text" value={schedName} onChange={(e) => setSchedName(e.target.value)} required />
+          </label>
+          <div className="row">
+            <label>
+              Day 1 falls on
+              <input type="date" value={schedStart} onChange={(e) => setSchedStart(e.target.value)} required />
+            </label>
+            <label>
+              Finishes
+              <input
+                type="date"
+                value={schedStart ? scheduledEndDate(schedStart, scheduledDef.days.length) : ''}
+                readOnly
+                tabIndex={-1}
+              />
+            </label>
+          </div>
+          <div className="preset-strip">
+            <button type="button" className="preset-chip" onClick={() => setSchedStart(formatLocalDate(today))}>
+              start today
+            </button>
+            <button type="button" className="preset-chip" onClick={() => setSchedStart(jan1)}>
+              follow the calendar year (Jan 1)
+            </button>
+          </div>
+          <p className="dt-form-hint">
+            {scheduledDef.days.length} days, four tracks a day. Following a class on the Jan 1
+            calendar? Pick that — the plan opens on today's reading, and one click marks the
+            earlier days as read.
+          </p>
+          {err && <div className="dt-form-err">{err}</div>}
+          <ModalActions onCancel={onClose} saving={saving} />
+        </form>
+      </Modal>
+    );
+  }
+
   return (
     <Modal title="+ Reading plan" onClose={onClose}>
       <form className="dt-form" onSubmit={onSubmit}>
-        <div className="preset-strip">
-          {PLAN_PRESETS.map((p) => (
-            <button
-              key={p.key}
-              type="button"
-              className="preset-chip"
-              onClick={() => applyPreset(p)}
-              title={p.description}
-            >
-              {p.name}
-            </button>
-          ))}
-        </div>
+        {presetStrip}
 
         <label>
           Name
