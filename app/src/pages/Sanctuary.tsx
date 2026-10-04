@@ -160,9 +160,9 @@ export default function Sanctuary() {
     window.localStorage.setItem('sa-tags-expanded', tagsExpanded ? '1' : '0');
   }, [tagsExpanded]);
   // The veil — a quiet way to fold a page over when the words on it
-  // feel too intimate to look back at. eyeOpen is session-only: refresh
-  // the page and it closes again, so veiled entries return to the
-  // placeholder by default each visit. The "veiled" status itself is
+  // feel too intimate to look back at. eyeOpen closes whenever the active
+  // entry changes (and on refresh), so a veiled entry returns to the
+  // placeholder each time it's opened. The "veiled" status itself is
   // stored as a sentinel tag (VEIL_TAG) on the entry; the UI hides
   // tags starting with "_" from every tag-display surface, so there's
   // no visible badge anywhere announcing which entries are folded.
@@ -1072,8 +1072,13 @@ export default function Sanctuary() {
   const hasScriptureThoughts = !!active?.scripture_thoughts?.replace(/<[^>]+>/g, '').trim();
   const hasJournalText = !!active?.body?.replace(/<[^>]+>/g, '').trim();
 
-  // Each entry opens on its Journal page (the default tab).
-  useEffect(() => { setPageTab('journal'); }, [activeId]);
+  // Each entry opens on its Journal page (the default tab), with the veil's
+  // eye closed — so a veiled entry is folded over again every time you come
+  // back to it, not just after a refresh.
+  useEffect(() => {
+    setPageTab('journal');
+    setEyeOpen(false);
+  }, [activeId]);
 
   // ── The veil ───────────────────────────────────────────────────────
   // `isActiveVeiled` is the persistent fact (does this entry carry the
