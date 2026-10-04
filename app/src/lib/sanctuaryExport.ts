@@ -228,6 +228,9 @@ const EXPORT_CSS = `
     margin-top: 18px; padding: 10px 14px;
     border-left: 2px solid var(--line); font-size: 0.9em; color: var(--ink-soft);
   }
+  .sa-scripture-block {
+    margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line);
+  }
   .sa-ai-block-label {
     font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
     color: var(--ink-faint); margin-bottom: 6px;
@@ -278,6 +281,9 @@ export function buildReadableHtml(entries: Entry[], meta: ExportMeta): string {
     const body = bodyHtml || '<p class="sa-empty-body">(no writing)</p>';
     // AI dialogue travels with the entry, clearly set apart and labeled —
     // it's part of the record, but never dressed as the user's writing.
+    const scriptureBlock = e.scripture_thoughts && e.scripture_thoughts.replace(/<[^>]+>/g, '').trim()
+      ? `<div class="sa-scripture-block"><div class="sa-ai-block-label">Scripture</div>${e.scripture_thoughts}</div>`
+      : '';
     const aiBlock = e.ai_dialogue
       ? `<div class="sa-ai-block"><div class="sa-ai-block-label">AI dialogue</div>${e.ai_dialogue}</div>`
       : '';
@@ -286,6 +292,7 @@ export function buildReadableHtml(entries: Entry[], meta: ExportMeta): string {
         `<h1 class="title">${title}</h1>` +
         `<div class="meta-line">${metaLineHtml(e)}</div>` +
         `<div class="sa-body">${body}</div>` +
+        scriptureBlock +
         aiBlock +
         `</article>`,
     );

@@ -486,6 +486,35 @@
   display: flex; gap: 12px; flex-wrap: wrap;
 }
 .sa-page .meta-line .pip { color: var(--accent); }
+
+/* Journal | Scripture page tabs, just under the meta line. Quiet tracked
+   small caps in the room's voice; the active page carries an accent
+   underline. A faint dot marks the other page when it holds writing. */
+.sa-page .sa-page-tabs {
+  display: flex; gap: 22px;
+  margin: -14px 0 22px;
+}
+.sa-page .sa-page-tabs button {
+  position: relative;
+  font-family: 'EB Garamond', serif;
+  font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase;
+  background: none; border: none; cursor: pointer;
+  padding: 4px 0 5px;
+  color: var(--ink-faint);
+  border-bottom: 1.5px solid transparent;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.sa-page .sa-page-tabs button:hover:not(:disabled) { color: var(--ink); }
+.sa-page .sa-page-tabs button.active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+.sa-page .sa-page-tabs button:disabled { opacity: 0.4; cursor: default; }
+.sa-page .sa-tab-dot {
+  position: absolute; top: 3px; right: -8px;
+  width: 4px; height: 4px; border-radius: 50%;
+  background: var(--accent);
+}
 .sa-page p { margin: 0 0 1em; }
 .sa-page mark { background: var(--hi); padding: 0 2px; color: inherit; }
 .sa-page .rubric { color: var(--red); font-variant: small-caps; letter-spacing: 0.08em; }

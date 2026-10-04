@@ -58,6 +58,12 @@ describe('attributed word counts', () => {
     expect(aiWordsInEntry(e)).toBe(4);
   });
 
+  it('Scripture page counts as mine; its AI marks move to AI', () => {
+    const e = { ...entry('<p>journal two</p>'), scripture_thoughts: `<p>three own words ${AI('four ai words here')}</p>` };
+    expect(wordsInEntry(e)).toBe(2 + 3);
+    expect(aiWordsInEntry(e)).toBe(4);
+  });
+
   it('unmarked entry with no pane counts exactly as before', () => {
     const e = entry('<p>five words in this body</p>');
     expect(wordsInEntry(e)).toBe(5);

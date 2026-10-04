@@ -21,6 +21,7 @@ import m0015 from '../../../supabase/migrations/0015_stillness_entries.sql?raw';
 import m0016 from '../../../supabase/migrations/0016_fiction_log.sql?raw';
 import m0017 from '../../../supabase/migrations/0017_ai_dialogue.sql?raw';
 import m0018 from '../../../supabase/migrations/0018_scheduled_plans.sql?raw';
+import m0019 from '../../../supabase/migrations/0019_scripture_thoughts.sql?raw';
 
 export const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '0001_init', sql: m0001 },
@@ -41,4 +42,5 @@ export const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: '0016_fiction_log', sql: m0016 },
   { name: '0017_ai_dialogue', sql: m0017 },
   { name: '0018_scheduled_plans', sql: m0018 },
+  { name: '0019_scripture_thoughts', sql: m0019 },
 ];

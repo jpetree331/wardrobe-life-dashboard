@@ -648,6 +648,7 @@ export type SanctuaryEntryLite = {
   listening_prayer: boolean;
   stillness_sessions: StillnessSession[];
   ai_dialogue: string;   // AI pane HTML ('' when unused; migration 0017)
+  scripture_thoughts: string; // Scripture tab HTML ('' when unused; migration 0019)
 };
 
 /**
@@ -657,11 +658,22 @@ export type SanctuaryEntryLite = {
  * RLS handles the user filter on the server.
  */
 export async function listAllSanctuaryEntries(): Promise<SanctuaryEntryLite[]> {
-  const { data, error } = await supabase
+  const cols = 'id, entry_date, title, body, tags, listening_prayer, stillness_sessions, ai_dialogue';
+  let res: { data: unknown[] | null; error: { message?: string } | null } = await supabase
     .from('entries')
-    .select('id, entry_date, title, body, tags, listening_prayer, stillness_sessions, ai_dialogue')
+    .select(`${cols}, scripture_thoughts`)
     .eq('room', 'sanctuary')
     .order('entry_date', { ascending: false });
+  // Before migration 0019 runs, the column doesn't exist and the whole
+  // select fails — retry without it so the Data room keeps working.
+  if (res.error && /scripture_thoughts/.test(res.error.message || '')) {
+    res = await supabase
+      .from('entries')
+      .select(cols)
+      .eq('room', 'sanctuary')
+      .order('entry_date', { ascending: false });
+  }
+  const { data, error } = res;
   if (error) throw error;
   return ((data || []) as Array<{
     id: string;
@@ -672,6 +684,7 @@ export async function listAllSanctuaryEntries(): Promise<SanctuaryEntryLite[]> {
     listening_prayer: boolean | null;
     stillness_sessions: StillnessSession[] | null;
     ai_dialogue: string | null;
+    scripture_thoughts?: string | null;
   }>).map((r) => ({
     id: r.id,
     entry_date: r.entry_date,
@@ -681,6 +694,7 @@ export async function listAllSanctuaryEntries(): Promise<SanctuaryEntryLite[]> {
     listening_prayer: !!r.listening_prayer,
     stillness_sessions: r.stillness_sessions ?? [],
     ai_dialogue: r.ai_dialogue ?? '',
+    scripture_thoughts: r.scripture_thoughts ?? '',
   }));
 }
 

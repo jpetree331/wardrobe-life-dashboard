@@ -80,6 +80,10 @@ export default function Sanctuary() {
   // is AI by default; sa-my-text spans mark the user's own words. The
   // journal body has the opposite polarity (sa-ai-text marks AI pastes).
   const [aiPaneOpen, setAiPaneOpen] = useState(false);
+  // Which writing page of the entry the editor shows: the Journal (`body`,
+  // the default) or the Scripture tab (`scripture_thoughts`, migration 0019).
+  // One editor element serves both; switching tabs swaps its content.
+  const [pageTab, setPageTab] = useState<'journal' | 'scripture'>('journal');
   // Mark visibility slider: 0 = invisible, 1 = dotted underline, 2 = tint.
   const [aiVis, setAiVis] = useState<number>(() => {
     try {
@@ -458,15 +462,17 @@ export default function Sanctuary() {
       titleRef.current.textContent = active.title || '';
       titleHydrationKey.current = active.id;
     }
-    if (pageRef.current && bodyHydrationKey.current !== active.id) {
-      pageRef.current.innerHTML = active.body || '';
-      bodyHydrationKey.current = active.id;
+    const bodyKey = `${active.id}|${pageTab}`;
+    if (pageRef.current && bodyHydrationKey.current !== bodyKey) {
+      pageRef.current.innerHTML =
+        (pageTab === 'journal' ? active.body : active.scripture_thoughts) || '';
+      bodyHydrationKey.current = bodyKey;
     }
     if (aiPaneRef.current && aiHydrationKey.current !== active.id) {
       aiPaneRef.current.innerHTML = active.ai_dialogue || '';
       aiHydrationKey.current = active.id;
     }
-  }, [active, aiPaneOpen]);
+  }, [active, aiPaneOpen, pageTab]);
 
   // Pull the day's timeline sentence
   useEffect(() => {
@@ -529,57 +535,86 @@ export default function Sanctuary() {
   // fired save is allowed to write its server response back into local
   // state. Without this, an older response arriving late would overwrite the
   // newer (already-displayed) state.
+  type SavePatch = Partial<
+    Pick<Entry,
+      | 'title' | 'body' | 'entry_type' | 'tags' | 'scripture_refs' | 'entry_date'
+      | 'listening_prayer' | 'stillness_sessions' | 'ai_dialogue' | 'scripture_thoughts'
+    >
+  >;
   const saveTimer = useRef<number | null>(null);
   const saveSeq = useRef(0);
   const lastAppliedSeq = useRef(0);
+  // Edits waiting out the debounce, MERGED per entry. Replacing instead of
+  // merging used to drop the earlier edit when two arrived inside 600ms
+  // (title then body, Journal then Scripture tab, or entry A then B).
+  const pendingSave = useRef<{ id: string; patch: SavePatch } | null>(null);
+
+  const runSave = useCallback(async (targetId: string, patch: SavePatch) => {
+    const mySeq = ++saveSeq.current;
+    try {
+      const updated = await updateSanctuaryEntry(targetId, patch);
+      if (mySeq < lastAppliedSeq.current) return; // a newer save has already won
+      lastAppliedSeq.current = mySeq;
+      setEntries((es) => es.map((e) => (e.id === updated.id ? updated : e)));
+      setSavedAt('saved');
+      if (patch.entry_date) {
+        // entry_date affects sort order — refetch to put the row in
+        // its new place in the binder.
+        const data = await listSanctuary();
+        if (mySeq < lastAppliedSeq.current) return;
+        setEntries(data);
+      }
+    } catch (err) {
+      console.error(err);
+      if (mySeq < lastAppliedSeq.current) return;
+      setSavedAt('save failed');
+      // Roll the optimistic update back so we don't silently keep a
+      // change the server rejected.
+      try {
+        const data = await listSanctuary();
+        if (mySeq < lastAppliedSeq.current) return;
+        setEntries(data);
+      } catch {
+        /* refetch failed too — leave the user's local state alone */
+      }
+    }
+  }, []);
+
+  /** Send whatever is waiting, right now (entry switch, leaving the page). */
+  const flushSave = useCallback(() => {
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    const p = pendingSave.current;
+    pendingSave.current = null;
+    if (p) void runSave(p.id, p.patch);
+  }, [runSave]);
+
+  // Leaving Sanctuary mid-debounce must not lose the last keystrokes.
+  useEffect(() => () => flushSave(), [flushSave]);
+
   const scheduleSave = useCallback(
-    (
-      patch: Partial<
-        Pick<Entry,
-          | 'title' | 'body' | 'entry_type' | 'tags' | 'scripture_refs' | 'entry_date'
-          | 'listening_prayer' | 'stillness_sessions' | 'ai_dialogue'
-        >
-      >,
-    ) => {
+    (patch: SavePatch) => {
       if (!active) return;
       const targetId = active.id;
       // Optimistic local update so controlled inputs never appear "stuck"
       // on the previous value while the debounce timer is still ticking.
       setEntries((es) => es.map((e) => (e.id === targetId ? { ...e, ...patch } : e)));
       setSavedAt('saving…');
+      // A different entry's edit is still waiting: send it now, don't drop it.
+      if (pendingSave.current && pendingSave.current.id !== targetId) flushSave();
+      pendingSave.current = {
+        id: targetId,
+        patch: { ...(pendingSave.current?.patch ?? {}), ...patch },
+      };
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
-      saveTimer.current = window.setTimeout(async () => {
-        const mySeq = ++saveSeq.current;
-        try {
-          const updated = await updateSanctuaryEntry(targetId, patch);
-          if (mySeq < lastAppliedSeq.current) return; // a newer save has already won
-          lastAppliedSeq.current = mySeq;
-          setEntries((es) => es.map((e) => (e.id === updated.id ? updated : e)));
-          setSavedAt('saved');
-          if (patch.entry_date) {
-            // entry_date affects sort order — refetch to put the row in
-            // its new place in the binder.
-            const data = await listSanctuary();
-            if (mySeq < lastAppliedSeq.current) return;
-            setEntries(data);
-          }
-        } catch (err) {
-          console.error(err);
-          if (mySeq < lastAppliedSeq.current) return;
-          setSavedAt('save failed');
-          // Roll the optimistic update back so we don't silently keep a
-          // change the server rejected.
-          try {
-            const data = await listSanctuary();
-            if (mySeq < lastAppliedSeq.current) return;
-            setEntries(data);
-          } catch {
-            /* refetch failed too — leave the user's local state alone */
-          }
-        }
+      saveTimer.current = window.setTimeout(() => {
+        saveTimer.current = null;
+        const p = pendingSave.current;
+        pendingSave.current = null;
+        if (p) void runSave(p.id, p.patch);
       }, 600);
     },
-    [active],
+    [active, flushSave, runSave],
   );
 
   // ── New / delete ───────────────────────────────────────────────────────
@@ -1026,8 +1061,19 @@ export default function Sanctuary() {
   }
   function handleEditorInput() {
     if (!pageRef.current || !active) return;
-    scheduleSave({ body: pageRef.current.innerHTML });
+    const html = pageRef.current.innerHTML;
+    scheduleSave(pageTab === 'journal' ? { body: html } : { scripture_thoughts: html });
   }
+
+  // The Scripture tab needs migration 0019; until it's run in the cloud the
+  // column is absent from the row (select * returns every real column), so
+  // the tab stays disabled instead of letting a save fail and roll back.
+  const scriptureTabReady = !!active && 'scripture_thoughts' in active;
+  const hasScriptureThoughts = !!active?.scripture_thoughts?.replace(/<[^>]+>/g, '').trim();
+  const hasJournalText = !!active?.body?.replace(/<[^>]+>/g, '').trim();
+
+  // Each entry opens on its Journal page (the default tab).
+  useEffect(() => { setPageTab('journal'); }, [activeId]);
 
   // ── The veil ───────────────────────────────────────────────────────
   // `isActiveVeiled` is the persistent fact (does this entry carry the
@@ -1250,6 +1296,7 @@ export default function Sanctuary() {
         (e) =>
           (e.title || '').toLowerCase().includes(q) ||
           (e.body || '').toLowerCase().includes(q) ||
+          (e.scripture_thoughts || '').toLowerCase().includes(q) ||
           (e.tags || []).some((t) => !t.startsWith('_') && t.toLowerCase().includes(q)) ||
           e.entry_date.includes(q),
       );
@@ -1280,10 +1327,11 @@ export default function Sanctuary() {
   );
 
   const wordCount = useMemo(() => {
-    if (!active?.body) return 0;
-    const text = active.body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const html = pageTab === 'journal' ? active?.body : active?.scripture_thoughts;
+    if (!html) return 0;
+    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     return text ? text.split(' ').length : 0;
-  }, [active?.body]);
+  }, [active?.body, active?.scripture_thoughts, pageTab]);
 
   // ── Tag / scripture-ref editing ────────────────────────────────────────
   // scheduleSave applies the patch optimistically and rolls back on failure,
@@ -1790,6 +1838,33 @@ export default function Sanctuary() {
                     </span>
                   ))}
                 </div>
+                {/* Journal | Scripture — two writing pages on one entry. A
+                    faint dot marks the hidden page when it has writing. Hidden
+                    under the veil, like the page itself. */}
+                {!shouldShowVeil && (
+                  <div className="sa-page-tabs" role="tablist" aria-label="Writing page">
+                    <button
+                      role="tab"
+                      aria-selected={pageTab === 'journal'}
+                      className={pageTab === 'journal' ? 'active' : ''}
+                      onClick={() => { flushSave(); setPageTab('journal'); }}
+                    >
+                      Journal
+                      {pageTab !== 'journal' && hasJournalText && <span className="sa-tab-dot" aria-hidden="true" />}
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={pageTab === 'scripture'}
+                      className={pageTab === 'scripture' ? 'active' : ''}
+                      onClick={() => { flushSave(); setPageTab('scripture'); }}
+                      disabled={!scriptureTabReady}
+                      title={scriptureTabReady ? undefined : 'Run migration 0019 in Supabase to turn on the Scripture page'}
+                    >
+                      Scripture
+                      {pageTab !== 'scripture' && hasScriptureThoughts && <span className="sa-tab-dot" aria-hidden="true" />}
+                    </button>
+                  </div>
+                )}
                 {/* The body editor — always mounted so hydration of
                     `active.body` lands correctly, but visually hidden
                     when the entry is veiled and the eye is closed.
@@ -1801,7 +1876,7 @@ export default function Sanctuary() {
                   spellCheck
                   onBeforeInput={handleSmartQuotes}
                   onInput={handleEditorInput}
-                  data-placeholder="Begin here…"
+                  data-placeholder={pageTab === 'journal' ? 'Begin here…' : 'Scripture thoughts…'}
                   style={{
                     outline: 'none',
                     minHeight: '40vh',

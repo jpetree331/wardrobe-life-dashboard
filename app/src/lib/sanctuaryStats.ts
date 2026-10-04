@@ -15,6 +15,8 @@ export type EntryLike = {
   body: string;           // HTML; AI-marked spans (sa-ai-text) count as AI
   /** AI-dialogue pane HTML; text there is AI unless marked sa-my-text. */
   ai_dialogue?: string;
+  /** The Scripture tab's HTML (0019); same polarity as `body`. */
+  scripture_thoughts?: string;
 };
 
 // ── HTML → text ──────────────────────────────────────────────────────
@@ -67,13 +69,17 @@ export function countWords(text: string): number {
 }
 
 /**
- * The user's OWN words in an entry: the journal body minus AI-marked
- * spans, plus any "my words" spans in the AI dialogue pane. An entry
+ * The user's OWN words in an entry: the journal body and Scripture page
+ * minus AI-marked spans, plus any "my words" spans in the AI pane. An entry
  * with no marks and no pane counts exactly as it always did.
  */
 export function wordsInEntry(entry: EntryLike): number {
   const body = splitByMarkedSpans(entry.body, AI_MARK_CLASS);
   let words = countWords(stripHtmlToText(body.rest));
+  if (entry.scripture_thoughts) {
+    const st = splitByMarkedSpans(entry.scripture_thoughts, AI_MARK_CLASS);
+    words += countWords(stripHtmlToText(st.rest));
+  }
   if (entry.ai_dialogue) {
     const pane = splitByMarkedSpans(entry.ai_dialogue, MY_MARK_CLASS);
     words += countWords(stripHtmlToText(pane.marked));
@@ -89,6 +95,10 @@ export function wordsInEntry(entry: EntryLike): number {
 export function aiWordsInEntry(entry: EntryLike): number {
   const body = splitByMarkedSpans(entry.body, AI_MARK_CLASS);
   let words = countWords(stripHtmlToText(body.marked));
+  if (entry.scripture_thoughts) {
+    const st = splitByMarkedSpans(entry.scripture_thoughts, AI_MARK_CLASS);
+    words += countWords(stripHtmlToText(st.marked));
+  }
   if (entry.ai_dialogue) {
     const pane = splitByMarkedSpans(entry.ai_dialogue, MY_MARK_CLASS);
     words += countWords(stripHtmlToText(pane.rest));
@@ -195,7 +205,8 @@ export function topWords(
   for (const e of entries) {
     // AI-marked body text is excluded — the frequency chart reflects the
     // user's own vocabulary, not a model's.
-    const text = stripHtmlToText(splitByMarkedSpans(e.body, AI_MARK_CLASS).rest);
+    const text = stripHtmlToText(splitByMarkedSpans(e.body, AI_MARK_CLASS).rest) + ' ' +
+      stripHtmlToText(splitByMarkedSpans(e.scripture_thoughts ?? '', AI_MARK_CLASS).rest);
     for (const tok of tokenize(text)) {
       if (tok.length < minLength) continue;
       if (excludeStopwords && STOPWORDS.has(tok)) continue;

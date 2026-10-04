@@ -285,6 +285,26 @@ describe('query builder — the shapes the app actually uses', () => {
     await from('data_reading_plans').delete().eq('id', classic.data.id);
   });
 
+  it('scripture_thoughts (0019) defaults empty and saves independently of body', async () => {
+    const { data: created, error } = await from('entries')
+      .insert({
+        user_id: LOCAL_USER_ID, room: 'sanctuary', entry_date: '2026-10-04',
+        title: 'tabs', body: '<p>journal</p>', body_type: 'rich', tags: [],
+      })
+      .select()
+      .single();
+    expect(error).toBeNull();
+    expect(created.scripture_thoughts).toBe('');
+    const { data: updated } = await from('entries')
+      .update({ scripture_thoughts: '<p>Romans 8 — no condemnation</p>' })
+      .eq('id', created.id)
+      .select()
+      .single();
+    expect(updated.scripture_thoughts).toContain('Romans 8');
+    expect(updated.body).toBe('<p>journal</p>'); // the Journal page is untouched
+    await from('entries').delete().eq('id', created.id);
+  });
+
   it('fiction_log (0016) round-trips, enforces CHECKs, and deletes', async () => {
     const { data: created, error } = await from('fiction_log')
       .insert({ user_id: LOCAL_USER_ID, entry_date: '2026-08-16', minutes: 45, words: 300, note: 'ch 3' })

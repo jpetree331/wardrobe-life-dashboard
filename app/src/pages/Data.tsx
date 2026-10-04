@@ -2981,6 +2981,7 @@ function StillnessView({
         listening_prayer: s.listening_prayer,
         stillness_sessions: s.stillness_sessions,
         ai_dialogue: '',
+        scripture_thoughts: '',
       })),
     ],
     [entries, standalone],
