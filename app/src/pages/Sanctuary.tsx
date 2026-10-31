@@ -2656,13 +2656,22 @@ function ImportPreviewDialog({
  * can't inject markup.
  */
 export function renderVersesHtml(
-  verses: Array<{ verse: number; text: string }>,
+  verses: Array<{ book?: string; chapter?: number; verse: number; text: string }>,
 ): string {
+  // Verse numbers restart at each chapter, so a passage across chapters
+  // needs a heading for each one to stay readable.
+  const chapterOf = (v: { book?: string; chapter?: number }) => `${v.book} ${v.chapter}`;
+  const spansChapters = new Set(verses.map(chapterOf)).size > 1;
+  let current = '';
   return verses
-    .map(
-      (v) =>
-        `<span><span class="sa-vnum">${v.verse}</span>${escapeHtmlForVerses(v.text || '')} </span>`,
-    )
+    .map((v) => {
+      const chapter = chapterOf(v);
+      const heading = spansChapters && chapter !== current
+        ? `<span class="sa-sc-chapter">${escapeHtmlForVerses(chapter)}</span>`
+        : '';
+      current = chapter;
+      return `${heading}<span><span class="sa-vnum">${v.verse}</span>${escapeHtmlForVerses(v.text || '')} </span>`;
+    })
     .join('');
 }
 

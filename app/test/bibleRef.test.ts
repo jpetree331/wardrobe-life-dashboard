@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  parseBibleRef,
-  parseBibleRefList,
-  resolveBookName,
-  versesIn,
-} from '../src/lib/bibleRef';
+import { parseBibleRef, parseBibleRefList, resolveBookName, versesIn, splitForLookup } from '../src/lib/bibleRef';
 import {
   BIBLE_BOOKS,
   totalVersesInBook,
@@ -236,5 +231,60 @@ describe('versesIn', () => {
       { book: 'Genesis', chapter: 1, verseFrom: 1, verseTo: 1 },
       verseCount,
     )).toBe(1);
+  });
+});
+
+describe('splitForLookup', () => {
+  it('turns a chapter range into one lookup per chapter', () => {
+    expect(splitForLookup('Genesis 1-3')).toEqual(['Genesis 1', 'Genesis 2', 'Genesis 3']);
+    expect(splitForLookup('Matthew 5–7')).toEqual(['Matthew 5', 'Matthew 6', 'Matthew 7']);
+  });
+
+  it('leaves one chapter or one verse range as a single lookup', () => {
+    expect(splitForLookup('Psalm 23')).toEqual(['Psalms 23']);
+    expect(splitForLookup('Luke 24:13')).toEqual(['Luke 24:13']);
+    expect(splitForLookup('Romans 8:28-39')).toEqual(['Romans 8:28-39']);
+  });
+
+  it('straightens en and em dashes and non-breaking spaces', () => {
+    expect(splitForLookup('Romans 8:28–39')).toEqual(['Romans 8:28-39']);
+    expect(splitForLookup('Romans 8:28—39')).toEqual(['Romans 8:28-39']);
+    expect(splitForLookup('Psalm 23 ')).toEqual(['Psalms 23']);
+  });
+
+  it('splits lists of passages on commas and semicolons', () => {
+    expect(splitForLookup('Psalm 23, John 3')).toEqual(['Psalms 23', 'John 3']);
+    expect(splitForLookup('Psalm 23:1; John 3:16')).toEqual(['Psalms 23:1', 'John 3:16']);
+    expect(splitForLookup('Genesis 1-2; Matthew 1')).toEqual(['Genesis 1', 'Genesis 2', 'Matthew 1']);
+  });
+
+  it('keeps a comma between verses of one chapter together', () => {
+    expect(splitForLookup('John 3:16,18')).toEqual(['John 3:16,18']);
+    expect(splitForLookup('John 3:16, 18')).toEqual(['John 3:16, 18']);
+  });
+
+  it('splits a verse range that crosses chapters', () => {
+    expect(splitForLookup('Genesis 1:1-3:24')).toEqual([
+      'Genesis 1:1-31',
+      'Genesis 2',
+      'Genesis 3:1-24',
+    ]);
+    expect(splitForLookup('Romans 1:18–2:5')).toEqual(['Romans 1:18-32', 'Romans 2:1-5']);
+  });
+
+  it('asks for a one-chapter book by its verses, since "Jude 1" returns verse 1', () => {
+    expect(splitForLookup('Jude')).toEqual(['Jude 1:1-25']);
+    expect(splitForLookup('Jude 1')).toEqual(['Jude 1:1-25']);
+    expect(splitForLookup('3 John')).toEqual(['3 John 1:1-14']);
+    expect(splitForLookup('Jude 5')).toEqual(['Jude 5']);
+  });
+
+  it('expands a book named alone', () => {
+    expect(splitForLookup('Ruth')).toEqual(['Ruth 1', 'Ruth 2', 'Ruth 3', 'Ruth 4']);
+  });
+
+  it('passes through what it cannot read, for the API to judge', () => {
+    expect(splitForLookup('Bogus 99:99')).toEqual(['Bogus 99:99']);
+    expect(splitForLookup('X 1:1')).toEqual(['X 1:1']);
   });
 });

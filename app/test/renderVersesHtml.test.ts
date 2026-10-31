@@ -45,3 +45,24 @@ describe('renderVersesHtml', () => {
     expect(out).toContain('<span class="sa-vnum">1</span>');
   });
 });
+
+describe('renderVersesHtml across chapters', () => {
+  const verse = (book: string, chapter: number, n: number) => ({ book, chapter, verse: n, text: 'T' });
+
+  it('adds no heading to a single chapter', () => {
+    const out = renderVersesHtml([verse('Genesis', 1, 1), verse('Genesis', 1, 2)]);
+    expect(out).not.toContain('sa-sc-chapter');
+  });
+
+  it('heads each chapter once when a passage spans several', () => {
+    const out = renderVersesHtml([
+      verse('Genesis', 1, 1),
+      verse('Genesis', 1, 2),
+      verse('Genesis', 2, 1),
+      verse('John', 3, 16),
+    ]);
+    expect(out.match(/sa-sc-chapter/g)).toHaveLength(3);
+    expect(out.indexOf('Genesis 1')).toBeLessThan(out.indexOf('Genesis 2'));
+    expect(out.indexOf('Genesis 2')).toBeLessThan(out.indexOf('John 3'));
+  });
+});

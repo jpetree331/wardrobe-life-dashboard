@@ -2,6 +2,8 @@
 // bible-api.com. Licensed translations (ESV) route through our Vercel
 // edge function so the API token stays server-side.
 
+import { splitForLookup } from './bibleRef';
+
 export type Translation =
   | 'kjv' | 'web' | 'asv' | 'bbe' | 'darby' | 'ylt'
   | 'esv';
@@ -38,23 +40,50 @@ export async function fetchScripture(
   return fetchPublic(reference, translation);
 }
 
+// bible-api.com allows 15 requests per 30 seconds, and each chapter is one
+// request, so a long passage has to stop short of that.
+const MAX_PUBLIC_LOOKUPS = 12;
+
 async function fetchPublic(reference: string, translation: Translation): Promise<ScriptureResult> {
-  const url = `https://bible-api.com/${encodeURIComponent(reference)}?translation=${translation}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`bible-api.com lookup failed (${res.status})`);
-  const data = await res.json();
+  const lookups = splitForLookup(reference);
+  if (lookups.length > MAX_PUBLIC_LOOKUPS) {
+    throw new Error(
+      `"${reference}" is ${lookups.length} chapters. The public-domain Bible service can open ${MAX_PUBLIC_LOOKUPS} at a time.`,
+    );
+  }
+  const parts = await Promise.all(
+    (lookups.length > 0 ? lookups : [reference]).map((lookup) => fetchOneLookup(lookup, translation)),
+  );
+  const [first] = parts;
   return {
-    reference: data.reference || reference,
+    reference: parts.length === 1 ? first.reference || reference : reference,
     translation,
-    translationName: data.translation_name || translation.toUpperCase(),
-    verses: (data.verses || []).map((v: any) => ({
-      book: v.book_name,
-      chapter: v.chapter,
-      verse: v.verse,
-      text: String(v.text || '').trim(),
-    })),
+    translationName: first.translation_name || translation.toUpperCase(),
+    verses: parts.flatMap((part) =>
+      (part.verses || []).map((v: any) => ({
+        book: v.book_name,
+        chapter: v.chapter,
+        verse: v.verse,
+        text: String(v.text || '').trim(),
+      })),
+    ),
     source: 'bible-api.com · unmodified public-domain text',
   };
+}
+
+async function fetchOneLookup(lookup: string, translation: Translation) {
+  const url = `https://bible-api.com/${encodeURIComponent(lookup)}?translation=${translation}`;
+  const res = await fetch(url);
+  if (res.status === 404) {
+    throw new Error(
+      `bible-api.com lookup failed: "${lookup}" isn't in ${translation.toUpperCase()}. Check the reference or try another translation.`,
+    );
+  }
+  if (res.status === 429) {
+    throw new Error('bible-api.com lookup failed: too many requests. Wait 30 seconds and try again.');
+  }
+  if (!res.ok) throw new Error(`bible-api.com lookup failed (${res.status})`);
+  return res.json();
 }
 
 async function fetchEsv(reference: string): Promise<ScriptureResult> {

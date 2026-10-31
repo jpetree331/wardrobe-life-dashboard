@@ -7,7 +7,7 @@
 // to canonical names. Returns null on unparseable input rather than
 // throwing — Sanctuary refs are user-typed and may have typos.
 
-import { BIBLE_BOOKS } from './bibleVerseCounts';
+import { BIBLE_BOOKS, chapterCount, verseCount } from './bibleVerseCounts';
 
 export type ParsedBibleRef = {
   book: string;          // canonical book name
@@ -221,4 +221,59 @@ export function versesIn(ref: ParsedBibleRef, lookupVerseCount: (book: string, c
     return total;
   }
   return lookupVerseCount(ref.book, ref.chapter);
+}
+
+/**
+ * Split a free-text reference into lookups bible-api.com will accept. It
+ * answers one chapter at a time: "Genesis 1-2" is a 400 ("too many
+ * chapters"), a list of passages or an en dash is a 404, and "Jude 1" comes
+ * back as verse 1 rather than the whole book. The caller joins the results.
+ *
+ * Commas split only ahead of a new book, so "John 3:16,18" stays whole.
+ * Anything unreadable passes through for the API to judge.
+ */
+export function splitForLookup(input: string): string[] {
+  return input
+    .replace(/ /g, ' ')
+    .replace(/[–—]/g, '-')
+    .split(/\s*[,;]\s*(?=\d?\s*[A-Za-z])/)
+    .flatMap(lookupsForPiece);
+}
+
+function lookupsForPiece(raw: string): string[] {
+  const piece = raw.trim();
+  if (!piece) return [];
+
+  const namedBook = resolveBookName(piece);
+  if (namedBook) return chapterLookups(namedBook, 1, chapterCount(namedBook));
+
+  const crossing = piece.match(/^(.+?)\s+(\d+)\s*[:.]\s*(\d+)\s*-\s*(\d+)\s*[:.]\s*(\d+)$/);
+  if (crossing) {
+    const book = resolveBookName(crossing[1]);
+    const [fromCh, fromV, toCh, toV] = crossing.slice(2).map(Number);
+    if (book && toCh > fromCh) {
+      return [
+        `${book} ${fromCh}:${fromV}-${verseCount(book, fromCh)}`,
+        ...chapterLookups(book, fromCh + 1, toCh - 1),
+        `${book} ${toCh}:1-${toV}`,
+      ];
+    }
+  }
+
+  const ref = parseBibleRef(piece);
+  if (!ref) return [piece];
+  if (ref.verseFrom !== undefined) {
+    const to = ref.verseTo !== ref.verseFrom ? `-${ref.verseTo}` : '';
+    return [`${ref.book} ${ref.chapter}:${ref.verseFrom}${to}`];
+  }
+  return chapterLookups(ref.book, ref.chapter, ref.chapterTo ?? ref.chapter);
+}
+
+function chapterLookups(book: string, from: number, to: number): string[] {
+  const lookups: string[] = [];
+  for (let chapter = from; chapter <= to; chapter++) {
+    const oneChapterBook = chapterCount(book) === 1 && chapter === 1;
+    lookups.push(oneChapterBook ? `${book} 1:1-${verseCount(book, 1)}` : `${book} ${chapter}`);
+  }
+  return lookups;
 }

@@ -652,6 +652,14 @@
   border-bottom: 1px solid var(--line);
   color: var(--ink);
 }
+.sa-sc-chapter {
+  display: block;
+  margin: 1.1em 0 0.35em;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.1em; font-weight: 500;
+  color: var(--ink-soft);
+}
+.sa-sc-chapter:first-child { margin-top: 0; }
 .sa-vnum {
   font-family: 'Sorts Mill Goudy', serif;
   color: var(--accent);

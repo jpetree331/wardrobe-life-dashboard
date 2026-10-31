@@ -69,6 +69,45 @@ describe('fetchScripture: public-domain translations', () => {
     await expect(fetchScripture('Bogus 99:99', 'kjv')).rejects.toThrow(/lookup failed/i);
   });
 
+  it('fetches a multi-chapter passage one chapter at a time, in order', async () => {
+    (globalThis.fetch as any).mockImplementation(async (url: string) => {
+      const chapter = Number(decodeURIComponent(url).match(/Genesis (\d+)/)![1]);
+      return {
+        ok: true,
+        json: async () => ({
+          reference: `Genesis ${chapter}`,
+          translation_name: 'King James Version',
+          verses: [{ book_name: 'Genesis', chapter, verse: 1, text: `chapter ${chapter}` }],
+        }),
+      };
+    });
+    const out = await fetchScripture('Genesis 1-3', 'kjv');
+    const urls = (globalThis.fetch as any).mock.calls.map((c: string[]) => c[0]);
+    expect(urls).toEqual([
+      'https://bible-api.com/Genesis%201?translation=kjv',
+      'https://bible-api.com/Genesis%202?translation=kjv',
+      'https://bible-api.com/Genesis%203?translation=kjv',
+    ]);
+    expect(out.reference).toBe('Genesis 1-3');
+    expect(out.translationName).toBe('King James Version');
+    expect(out.verses.map((v) => v.chapter)).toEqual([1, 2, 3]);
+  });
+
+  it('refuses a passage too long for the rate limit before calling the API', async () => {
+    await expect(fetchScripture('Genesis 1-20', 'kjv')).rejects.toThrow(/20 chapters/);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('names the passage and translation when it is not found', async () => {
+    (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 404 });
+    await expect(fetchScripture('Psalm 23', 'ylt')).rejects.toThrow(/Psalms 23.*YLT/);
+  });
+
+  it('says to wait when rate limited', async () => {
+    (globalThis.fetch as any).mockResolvedValueOnce({ ok: false, status: 429 });
+    await expect(fetchScripture('Psalm 23', 'kjv')).rejects.toThrow(/wait/i);
+  });
+
   it('trims whitespace from verse text', async () => {
     (globalThis.fetch as any).mockResolvedValueOnce({
       ok: true,
