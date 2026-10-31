@@ -30,6 +30,7 @@ import {
 } from '../lib/sanctuaryImport';
 import { TreasuryVerseModal } from '../components/TreasuryVerseModal';
 import { SanctuaryExportModal } from '../components/SanctuaryExportModal';
+import { SanctuaryOptions } from '../components/SanctuaryOptions';
 import {
   buildBinderTree,
   expansionKeysForEntry,
@@ -98,6 +99,26 @@ export default function Sanctuary() {
       window.localStorage.setItem('sa-ai-vis', String(aiVis));
     } catch { /* best-effort */ }
   }, [aiVis]);
+  // The AI controls in the toolbar are opt-in from the options panel,
+  // remembered per device. Hiding them only hides the controls: saved
+  // dialogue and marks stay exactly as they are.
+  const [showAiTools, setShowAiTools] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('sa-show-ai-tools') === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('sa-show-ai-tools', showAiTools ? '1' : '0');
+    } catch { /* best-effort */ }
+  }, [showAiTools]);
+  function changeShowAiTools(show: boolean) {
+    setShowAiTools(show);
+    // The pane's button is going away, so the pane can't stay open behind it.
+    if (!show) setAiPaneOpen(false);
+  }
   const aiPaneRef = useRef<HTMLDivElement>(null);
   const aiHydrationKey = useRef<string | null>(null);
   // True state lights for the mark buttons: lit only while the caret or
@@ -457,6 +478,11 @@ export default function Sanctuary() {
 
   // Hydrate contentEditable DOM when active entry changes
   useEffect(() => {
+    // The AI pane unmounts while hidden or veiled and comes back as a new,
+    // empty editor, so its key can't outlive the element it described.
+    // Otherwise the reopened pane stays blank, and typing there would save
+    // over the real dialogue.
+    if (!aiPaneRef.current) aiHydrationKey.current = null;
     if (!active) return;
     if (titleRef.current && titleHydrationKey.current !== active.id) {
       titleRef.current.textContent = active.title || '';
@@ -472,7 +498,7 @@ export default function Sanctuary() {
       aiPaneRef.current.innerHTML = active.ai_dialogue || '';
       aiHydrationKey.current = active.id;
     }
-  }, [active, aiPaneOpen, pageTab]);
+  }, [active, aiPaneOpen, eyeOpen, pageTab]);
 
   // Pull the day's timeline sentence
   useEffect(() => {
@@ -1725,38 +1751,40 @@ export default function Sanctuary() {
               </button>
             </div>
 
-            <div className="sa-toolbar-group sa-ai-group">
-              <button
-                className={`btn ai-mark${caretInAi ? ' on' : ''}`}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => pageRef.current && toggleClassMark(pageRef.current, 'sa-ai-text', handleEditorInput)}
-                title={caretInAi
-                  ? 'This text is marked as AI — click to unmark it'
-                  : 'Mark selection as AI text — attributed to AI, not your word count'}
-              >
-                <span className="ai-mark-label">ai</span>
-              </button>
-              <button
-                className={`btn ai-pane-btn${aiPaneOpen ? ' on' : ''}`}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setAiPaneOpen((v) => !v)}
-                aria-pressed={aiPaneOpen}
-                title="AI dialogue pane — paste AI analysis beside the entry (AI by default; mark your own words as yours)"
-              >
-                AI ❐
-              </button>
-              <input
-                type="range"
-                className="sa-ai-vis"
-                min={0}
-                max={2}
-                step={1}
-                value={aiVis}
-                onChange={(e) => setAiVis(Number(e.target.value))}
-                aria-label="AI mark visibility"
-                title="AI mark visibility — 0: invisible · 1: dotted line · 2: highlighted"
-              />
-            </div>
+            {showAiTools && (
+              <div className="sa-toolbar-group sa-ai-group">
+                <button
+                  className={`btn ai-mark${caretInAi ? ' on' : ''}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => pageRef.current && toggleClassMark(pageRef.current, 'sa-ai-text', handleEditorInput)}
+                  title={caretInAi
+                    ? 'This text is marked as AI — click to unmark it'
+                    : 'Mark selection as AI text — attributed to AI, not your word count'}
+                >
+                  <span className="ai-mark-label">ai</span>
+                </button>
+                <button
+                  className={`btn ai-pane-btn${aiPaneOpen ? ' on' : ''}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setAiPaneOpen((v) => !v)}
+                  aria-pressed={aiPaneOpen}
+                  title="AI dialogue pane — paste AI analysis beside the entry (AI by default; mark your own words as yours)"
+                >
+                  AI ❐
+                </button>
+                <input
+                  type="range"
+                  className="sa-ai-vis"
+                  min={0}
+                  max={2}
+                  step={1}
+                  value={aiVis}
+                  onChange={(e) => setAiVis(Number(e.target.value))}
+                  aria-label="AI mark visibility"
+                  title="AI mark visibility — 0: invisible · 1: dotted line · 2: highlighted"
+                />
+              </div>
+            )}
 
             <div className="sa-toolbar-group">
               <button className="btn" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('formatBlock', 'h2')} title="Heading">
@@ -1809,6 +1837,7 @@ export default function Sanctuary() {
                 )}
               </>
             )}
+            <SanctuaryOptions showAiTools={showAiTools} onShowAiToolsChange={changeShowAiTools} />
           </div>
 
           <div

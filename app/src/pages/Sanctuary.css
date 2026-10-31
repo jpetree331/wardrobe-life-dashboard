@@ -1287,3 +1287,48 @@
   content: attr(data-placeholder);
   color: var(--ink-faint); font-style: italic;
 }
+
+/* Options gear — the last thing in the toolbar — and the panel it opens. */
+.sa-options { position: relative; display: inline-flex; }
+.sa-options-gear {
+  display: inline-flex; align-items: center;
+  background: transparent; border: 0;
+  padding: 4px; border-radius: 2px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.sa-options-gear:hover { color: var(--ink-soft); background: var(--bg); }
+.sa-options-gear[aria-expanded="true"] { color: var(--ink); background: var(--bg-3); }
+.sa-options-gear:focus-visible {
+  outline: 1px solid var(--accent); outline-offset: 1px;
+}
+.sa-options-panel {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 40;
+  width: 264px; max-width: calc(100vw - 32px);
+  padding: 14px 16px 16px;
+  background: var(--page);
+  border: 1px solid var(--line); border-radius: 2px;
+  box-shadow: 0 10px 28px rgba(43, 36, 25, 0.16);
+}
+.sa-options-panel h3 {
+  margin: 0 0 10px;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 18px; font-weight: 500;
+  color: var(--ink);
+}
+.sa-options-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-family: 'EB Garamond', serif;
+  cursor: pointer;
+}
+.sa-options-row input {
+  margin: 4px 0 0; flex-shrink: 0;
+  accent-color: var(--accent); cursor: pointer;
+}
+.sa-options-name { display: block; font-size: 15px; color: var(--ink); }
+.sa-options-note {
+  display: block; margin-top: 2px;
+  font-size: 13px; font-style: italic; line-height: 1.35;
+  color: var(--ink-faint);
+}
