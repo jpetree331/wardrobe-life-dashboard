@@ -66,6 +66,11 @@ const ENTRY_TYPES: Array<{ value: EntryType; label: string }> = [
   { value: 'journal',   label: 'Journal' },
 ];
 
+// The veil's eye. Kept outside the component so it stays open while moving
+// between rooms, and only in memory so closing the tab or browser always folds
+// the veiled entries again (sessionStorage would come back with a restored tab).
+let veilEyeOpen = false;
+
 export default function Sanctuary() {
   useFavicon('/icons/jcross2.png', 'Sanctuary · Wardrobe');
   const [searchParams] = useSearchParams();
@@ -181,13 +186,14 @@ export default function Sanctuary() {
     window.localStorage.setItem('sa-tags-expanded', tagsExpanded ? '1' : '0');
   }, [tagsExpanded]);
   // The veil — a quiet way to fold a page over when the words on it
-  // feel too intimate to look back at. eyeOpen closes whenever the active
-  // entry changes (and on refresh), so a veiled entry returns to the
-  // placeholder each time it's opened. The "veiled" status itself is
+  // feel too intimate to look back at. Opening the eye unfolds every
+  // veiled entry until it's closed again, or until the page refreshes or
+  // the tab or browser closes. The "veiled" status itself is
   // stored as a sentinel tag (VEIL_TAG) on the entry; the UI hides
   // tags starting with "_" from every tag-display surface, so there's
   // no visible badge anywhere announcing which entries are folded.
-  const [eyeOpen, setEyeOpen] = useState(false);
+  const [eyeOpen, setEyeOpen] = useState(veilEyeOpen);
+  useEffect(() => { veilEyeOpen = eyeOpen; }, [eyeOpen]);
   const [savedAt, setSavedAt] = useState<string>('saved');
   const [statusMsg, setStatusMsg] = useState('Loading…');
   const [loaded, setLoaded] = useState(false);
@@ -1098,13 +1104,8 @@ export default function Sanctuary() {
   const hasScriptureThoughts = !!active?.scripture_thoughts?.replace(/<[^>]+>/g, '').trim();
   const hasJournalText = !!active?.body?.replace(/<[^>]+>/g, '').trim();
 
-  // Each entry opens on its Journal page (the default tab), with the veil's
-  // eye closed — so a veiled entry is folded over again every time you come
-  // back to it, not just after a refresh.
-  useEffect(() => {
-    setPageTab('journal');
-    setEyeOpen(false);
-  }, [activeId]);
+  // Each entry opens on its Journal page (the default tab).
+  useEffect(() => { setPageTab('journal'); }, [activeId]);
 
   // ── The veil ───────────────────────────────────────────────────────
   // `isActiveVeiled` is the persistent fact (does this entry carry the
